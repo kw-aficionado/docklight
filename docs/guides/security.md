@@ -8,7 +8,7 @@ Login attempts are rate limited by client IP and username. A TOTP code is requir
 
 ## Roles, grants, and API tokens
 
-Administrators can create users and grant permissions globally, per rune, or per server. The API checks grants on list, control, file, console, query, RCON, and server creation paths; hiding a button in the UI does not grant access.
+Administrators can create users and grant permissions globally, per template, or per server. The API checks grants on list, control, file, backup, console, query, RCON, and server creation paths; hiding a button in the UI does not grant access.
 
 An account can create opaque API tokens with explicit permission scopes. A token is shown only in the create response. The database stores a SHA-256 hash; the API never lists the token value. Token permissions are intersected with the account's current grants. Admin API tokens need the separate `admin` scope to use administrator endpoints. Revoke a token from the account menu or `DELETE /api/tokens/{id}`.
 
@@ -16,7 +16,7 @@ Use API tokens in the `Authorization: Bearer ygg_…` header. Tokens in URL quer
 
 ## Stored secrets and audit
 
-Rune credentials are encrypted with AES-256-GCM using a key derived from `auth.secret_key`. The same config key also signs sessions. Server responses mask secret environment variables, and install/container log streams redact the stored plaintext values known to the rune. TOTP setup reveals a provisioning secret once so it can be added to an authenticator. API token creation similarly returns the new credential once.
+Template credentials are encrypted with AES-256-GCM using a key derived from `auth.secret_key`. The same config key also signs sessions. Server responses mask secret environment variables, and install/container log streams redact the stored plaintext values declared by the template. TOTP setup reveals a provisioning secret once so it can be added to an authenticator. API token creation similarly returns the new credential once.
 
 The audit page records the user and server actions implemented in this release, including user/grant changes, token creation/revocation, server lifecycle, settings changes, and file changes. Audit records are not a substitute for host/systemd or Docker logs.
 
@@ -24,7 +24,7 @@ The audit page records the user and server actions implemented in this release, 
 
 The `yggdrasil` service account must access Docker's Unix socket, usually through the `docker` group. Anyone who can use that socket can effectively control the host. Keep it local; do not expose it over TCP. Restrict panel port 8080 to trusted networks and use TLS when access crosses an untrusted network.
 
-The service uses an HttpOnly, SameSite=Strict session cookie, same-origin checks for browser mutations, security headers, and a Content Security Policy. The API does not enable cross-origin browser access. Yggdrasil sends no telemetry or beacon in this release.
+The service uses an HttpOnly, SameSite=Strict session cookie, same-origin checks for browser mutations, security headers, and a Content Security Policy. The API does not enable cross-origin browser access. Docklight sends no telemetry or beacon in this release.
 
 ## Recovery
 

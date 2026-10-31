@@ -1,6 +1,6 @@
-# Rune schema
+# Template schema
 
-A rune (stored and exposed as a `gameskill`) describes a container image, settings, ports, lifecycle and optional protocols. It is a YAML document with one top-level `gameskill:` mapping. Imports are limited to 512 KiB.
+A server template describes a container image, settings, ports, lifecycle and optional protocols. For API compatibility, it is stored under the `gameskill` resource name and uses one top-level `gameskill:` YAML mapping. Imports are limited to 512 KiB.
 
 ## Supported shape
 
@@ -46,7 +46,7 @@ gameskill:
 
 | Field | Behavior |
 | --- | --- |
-| `id`, `name`, `category`, `version`, `description` | Rune metadata. IDs use lowercase letters, digits, hyphens, and underscores. |
+| `id`, `name`, `category`, `version`, `description` | Template metadata. IDs use lowercase letters, digits, hyphens, and underscores. |
 | `docker.image` | Image to pull for server startup. |
 | `docker.data_path` | Container path backed by the server data directory; defaults to `/data`. |
 | `docker.user` | Optional container UID:GID or username. Without `keep_entrypoint`, the panel sets a UID and mounts a minimal passwd shim. |
@@ -75,4 +75,4 @@ The reader supports nested mappings, sequences, scalar values, inline lists, and
 
 Container capabilities, devices, mounts, and sysctls are allowlisted to limit host access. `steam` installation metadata and `config_files` shortcuts are rejected because their behavior is not implemented; use the Files tab for editing data. Sidecars, backup hooks, importers, and registry credentials are not supported in this release.
 
-Five built-in runes are embedded in the binary: Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, and Cloudflare Tunnel. Built-in IDs cannot be overwritten or deleted. Community runes can be imported from the Runes page, subject to the same validation.
+Five built-in templates are embedded in the binary: Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, and Cloudflare Tunnel. Built-in IDs cannot be overwritten or deleted. Community templates can be imported from the Templates page, subject to the same validation.

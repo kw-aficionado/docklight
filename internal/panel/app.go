@@ -32,7 +32,9 @@ type App struct {
 	db         *sql.DB
 	engine     *docker.Engine
 	dataRoot   string
+	backupRoot string
 	booted     time.Time
+	dataMu     sync.Mutex
 	rateMu     sync.Mutex
 	loginIPs   map[string][]time.Time
 	loginUsers map[string][]time.Time
@@ -57,7 +59,19 @@ type principalKey struct{}
 func New(c config.Config, configPath string, d *sql.DB) *App {
 	root := filepath.Dir(c.Database.Path)
 	_ = os.MkdirAll(filepath.Join(root, "servers"), 0700)
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}}
+	backupRoot := c.Backups.Path
+	if backupRoot == "" {
+		backupRoot = filepath.Join(root, "backups")
+	} else if !filepath.IsAbs(backupRoot) {
+		backupRoot = filepath.Join(root, backupRoot)
+	}
+	if absolute, err := filepath.Abs(backupRoot); err == nil {
+		backupRoot = absolute
+	}
+	if resolved, err := resolvedPath(backupRoot); err == nil {
+		backupRoot = resolved
+	}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}}
 }
 
 func EnsureAdmin(d *sql.DB, username, password string) (string, error) {
@@ -121,14 +135,15 @@ func (a *App) Router() http.Handler {
 	r.Get("/ui-utils.mjs", a.static("web/ui-utils.mjs", "text/javascript; charset=utf-8"))
 	r.Get("/style.css", a.static("web/style.css", "text/css; charset=utf-8"))
 	r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"name": "Yggdrasil", "short_name": "Yggdrasil", "start_url": "/", "display": "standalone", "background_color": "#0a1013", "theme_color": "#0a1013"})
+		writeJSON(w, 200, map[string]any{"name": "Docklight", "short_name": "Docklight", "start_url": "/", "display": "standalone", "background_color": "#0d1417", "theme_color": "#0d1417", "icons": []map[string]string{{"src": "/brand.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}}})
 	})
+	r.Get("/brand.svg", a.static("web/brand.svg", "image/svg+xml"))
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]string{"status": "ok", "version": "dev"})
 		})
 		api.Get("/version", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, 200, map[string]any{"version": "dev", "panel_name": "Yggdrasil"})
+			writeJSON(w, 200, map[string]any{"version": "dev", "panel_name": "Docklight"})
 		})
 		api.Post("/login", a.login)
 		api.Post("/auth/login", a.login)
@@ -156,6 +171,12 @@ func (a *App) Router() http.Handler {
 			priv.Get("/servers/{id}", a.getServerHandler)
 			priv.Put("/servers/{id}", a.updateServer)
 			priv.Delete("/servers/{id}", a.deleteServer)
+			priv.Get("/servers/{id}/backups", a.listBackups)
+			priv.Post("/servers/{id}/backups", a.createBackup)
+			priv.Post("/servers/{id}/backups/prune", a.pruneBackups)
+			priv.Post("/servers/{id}/backups/{backupID}/verify", a.verifyBackup)
+			priv.Post("/servers/{id}/backups/{backupID}/restore", a.restoreBackup)
+			priv.Delete("/servers/{id}/backups/{backupID}", a.deleteBackup)
 			priv.Post("/servers/{id}/install", a.installServer)
 			priv.Get("/servers/{id}/install/status", a.installStatus)
 			priv.Post("/servers/{id}/start", a.startServer)
@@ -441,7 +462,7 @@ func (a *App) totpSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = a.db.Exec(`UPDATE users SET totp_secret=? WHERE id=?`, encrypted, u.ID)
-	writeJSON(w, 200, map[string]string{"secret": secret, "otpauth_url": security.TOTPURI("Yggdrasil", u.Username, secret)})
+	writeJSON(w, 200, map[string]string{"secret": secret, "otpauth_url": security.TOTPURI("Docklight", u.Username, secret)})
 }
 func (a *App) totpEnable(w http.ResponseWriter, r *http.Request) {
 	if principal(r).IsAPIToken {
@@ -509,7 +530,7 @@ func (a *App) totpDisable(w http.ResponseWriter, r *http.Request) {
 func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.Query(`SELECT id,name,category,version,yaml_blob,builtin FROM gameskills ORDER BY category,name`)
 	if err != nil {
-		writeError(w, 500, "could not list runes")
+		writeError(w, 500, "could not list templates")
 		return
 	}
 	type row struct {
@@ -540,7 +561,7 @@ func (a *App) getRune(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var raw string
 	if e := a.db.QueryRow(`SELECT yaml_blob FROM gameskills WHERE id=?`, id).Scan(&raw); e != nil {
-		writeError(w, 404, "rune not found")
+		writeError(w, 404, "template not found")
 		return
 	}
 	u := principal(r)
@@ -550,7 +571,7 @@ func (a *App) getRune(w http.ResponseWriter, r *http.Request) {
 	}
 	gs, e := rune.Parse(raw)
 	if e != nil {
-		writeError(w, 500, "stored rune is invalid; review or re-import this rune")
+		writeError(w, 500, "stored template is invalid; review or re-import it")
 		return
 	}
 	writeJSON(w, 200, publicRune(gs))
@@ -561,7 +582,7 @@ func (a *App) uploadRune(w http.ResponseWriter, r *http.Request) {
 	}
 	b, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 512*1024))
 	if e != nil {
-		writeError(w, 400, "rune exceeds the 512 KiB upload limit")
+		writeError(w, 400, "template exceeds the 512 KiB upload limit")
 		return
 	}
 	gs, e := rune.Parse(string(b))
@@ -572,15 +593,15 @@ func (a *App) uploadRune(w http.ResponseWriter, r *http.Request) {
 	var builtin int
 	_ = a.db.QueryRow(`SELECT builtin FROM gameskills WHERE id=?`, gs.ID).Scan(&builtin)
 	if builtin != 0 {
-		writeError(w, 409, "built-in runes cannot be overwritten")
+		writeError(w, 409, "built-in templates cannot be overwritten")
 		return
 	}
 	_, e = a.db.Exec(`INSERT INTO gameskills(id,name,category,version,yaml_blob,builtin) VALUES(?,?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,version=excluded.version,yaml_blob=excluded.yaml_blob`, gs.ID, gs.Name, gs.Category, gs.Version, string(b))
 	if e != nil {
-		writeError(w, 500, "could not save rune")
+		writeError(w, 500, "could not save template")
 		return
 	}
-	a.audit(principal(r), "rune.save", "gameskill", gs.ID, "")
+	a.audit(principal(r), "template.save", "gameskill", gs.ID, "")
 	writeJSON(w, 201, map[string]any{"id": gs.ID, "name": gs.Name})
 }
 func (a *App) deleteRune(w http.ResponseWriter, r *http.Request) {
@@ -590,23 +611,23 @@ func (a *App) deleteRune(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var used, builtin int
 	if e := a.db.QueryRow(`SELECT count(*) FROM servers WHERE gameskill_id=?`, id).Scan(&used); e != nil {
-		writeError(w, 500, "could not check rune usage")
+		writeError(w, 500, "could not check template usage")
 		return
 	}
 	if used > 0 {
-		writeError(w, 409, "this rune is used by one or more servers; delete those servers first")
+		writeError(w, 409, "this template is used by one or more servers; delete those servers first")
 		return
 	}
 	_ = a.db.QueryRow(`SELECT builtin FROM gameskills WHERE id=?`, id).Scan(&builtin)
 	if builtin != 0 {
-		writeError(w, 409, "built-in runes cannot be deleted in this release")
+		writeError(w, 409, "built-in templates cannot be deleted in this release")
 		return
 	}
 	if _, e := a.db.Exec(`DELETE FROM gameskills WHERE id=?`, id); e != nil {
-		writeError(w, 500, "could not delete rune")
+		writeError(w, 500, "could not delete template")
 		return
 	}
-	a.audit(principal(r), "rune.delete", "gameskill", id, "")
+	a.audit(principal(r), "template.delete", "gameskill", id, "")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -646,7 +667,7 @@ func (a *App) auditList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-var permissionCatalog = []string{"server.view", "server.control", "server.console", "server.files", "server.create", "server.delete"}
+var permissionCatalog = []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.create", "server.delete"}
 
 func (a *App) visibleServerCount(u User) int {
 	if u.Role == "admin" && (!u.IsAPIToken || u.APIScopes["server.view"]) {

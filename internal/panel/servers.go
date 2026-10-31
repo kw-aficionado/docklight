@@ -110,12 +110,12 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 	}
 	u := principal(r)
 	if !a.allowedRune(u, "server.create", in.GameskillID) {
-		writeError(w, 403, "server.create permission is required for this rune")
+		writeError(w, 403, "server.create permission is required for this template")
 		return
 	}
 	gs, err := a.loadRune(in.GameskillID)
 	if err != nil {
-		writeError(w, 404, "rune not found")
+		writeError(w, 404, "template not found")
 		return
 	}
 	env := gs.DefaultEnv()
@@ -178,7 +178,7 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "could not save the server; choose another name or check panel storage")
 		return
 	}
-	a.audit(u, "server.create", "server", id, "rune="+gs.ID)
+	a.audit(u, "server.create", "server", id, "template="+gs.ID)
 	s, _ := a.getServer(id)
 	writeJSON(w, 201, a.decorateServer(u, maskServer(s, a.db)))
 }
@@ -194,6 +194,13 @@ func (a *App) updateServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(id)
+	if e != nil {
+		writeError(w, 404, "server not found")
+		return
+	}
 	var in struct {
 		Name          *string           `json:"name"`
 		Env           map[string]string `json:"env"`
@@ -205,7 +212,7 @@ func (a *App) updateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	gs, e := a.loadRune(s.GameskillID)
 	if e != nil {
-		writeError(w, 500, "server rune is invalid")
+		writeError(w, 500, "server template is invalid")
 		return
 	}
 	env, err := a.runtimeEnv(s, gs)
@@ -284,6 +291,13 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "server.delete permission is required")
 		return
 	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
+		return
+	}
 	if s.ContainerID != "" {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
@@ -300,6 +314,10 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 503, err.Error())
 			return
 		}
+	}
+	if err := a.removeServerBackups(s.ID); err != nil {
+		writeError(w, 500, err.Error())
+		return
 	}
 	if err := os.RemoveAll(s.DataDir); err != nil {
 		writeError(w, 500, "Docker removed the container but panel data cleanup failed; fix storage permissions and retry cleanup")
@@ -323,6 +341,13 @@ func (a *App) installServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
+		return
+	}
 	if s.Status == "installing" {
 		writeError(w, 409, "server installation is already running")
 		return
@@ -333,7 +358,7 @@ func (a *App) installServer(w http.ResponseWriter, r *http.Request) {
 	}
 	gs, e := a.loadRune(s.GameskillID)
 	if e != nil {
-		writeError(w, 500, "server rune is invalid")
+		writeError(w, 500, "server template is invalid")
 		return
 	}
 	if gs.Install == nil {
@@ -447,13 +472,14 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		return
 	}
 	if code != 0 {
-		finish(fmt.Errorf("installer exited with status %d; review the installation log and correct the rune settings", code))
+		finish(fmt.Errorf("installer exited with status %d; review the installation log and correct the template settings", code))
 		return
 	}
 	if err = a.fixOwnership(ctx, s.DataDir); err != nil {
 		finish(err)
 		return
 	}
+	a.dataMu.Lock()
 	finish(nil)
 	s.Installed = true
 	if e := a.start(s); e != nil {
@@ -463,6 +489,7 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		j.mu.Unlock()
 		_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=? WHERE id=?`, j.err, s.ID)
 	}
+	a.dataMu.Unlock()
 }
 
 type logLineWriter struct {
@@ -531,6 +558,13 @@ func (a *App) startServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
+		return
+	}
 	if !s.Installed {
 		writeError(w, 409, "install this server before starting it")
 		return
@@ -553,6 +587,13 @@ func (a *App) stopServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
+		return
+	}
 	if e = a.stop(s); e != nil {
 		writeError(w, 502, e.Error())
 		return
@@ -569,6 +610,13 @@ func (a *App) restartServer(w http.ResponseWriter, r *http.Request) {
 	u := principal(r)
 	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
 		writeError(w, 403, "server.control permission is required")
+		return
+	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
 		return
 	}
 	if !s.Installed {
@@ -588,7 +636,7 @@ func (a *App) start(s Server) error {
 	}
 	gs, err := a.loadRune(s.GameskillID)
 	if err != nil {
-		return fmt.Errorf("load rune %q: %w", s.GameskillID, err)
+		return fmt.Errorf("load server template %q: %w", s.GameskillID, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
@@ -736,7 +784,7 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 			return
 		}
 		if time.Since(start) > 10*time.Minute {
-			message := "startup did not reach readiness after 10 minutes; check the console, rune ready pattern, and published web port"
+			message := "startup did not reach readiness after 10 minutes; check the console, template readiness pattern, and published web port"
 			_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=? WHERE id=?`, message, s.ID)
 			a.audit(User{Username: "system"}, "server.readiness_timeout", "server", s.ID, message)
 			return
@@ -1066,7 +1114,7 @@ func maskServer(s Server, d *sql.DB) Server {
 
 func (a *App) decorateServer(u User, s Server) Server {
 	s.Permissions = []string{}
-	for _, permission := range []string{"server.view", "server.control", "server.console", "server.files", "server.delete"} {
+	for _, permission := range []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.delete"} {
 		if a.allowedServer(u, permission, s.ID, s.GameskillID) {
 			s.Permissions = append(s.Permissions, permission)
 		}
@@ -1147,7 +1195,7 @@ func (a *App) passwdShim(user string) (string, error) {
 			}
 		}
 	}
-	content := fmt.Sprintf("root:x:0:0:root:/root:/bin/sh\nygg:x:%d:%d:Yggdrasil:/data:/bin/sh\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n", uid, gid)
+	content := fmt.Sprintf("root:x:0:0:root:/root:/bin/sh\nygg:x:%d:%d:Docklight:/data:/bin/sh\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n", uid, gid)
 	file := filepath.Join(a.dataRoot, ".ygg-passwd")
 	if err := os.WriteFile(file, []byte(content), 0444); err != nil {
 		return "", fmt.Errorf("create the runtime passwd shim: %w", err)

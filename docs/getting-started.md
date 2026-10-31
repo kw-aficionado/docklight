@@ -1,6 +1,6 @@
 # Getting started
 
-This guide assumes a single Debian 12 or Ubuntu 24.04+ host. Yggdrasil manages containers through the Docker Engine socket and stores the panel database and server files under the directory containing the configured SQLite database.
+This guide assumes a single Debian 12 or Ubuntu 24.04+ host. Docklight manages containers through the Docker Engine socket and stores the panel database and server files under the directory containing the configured SQLite database.
 
 ## Install
 
@@ -22,14 +22,14 @@ On first install, the script prints `http://<host>:8080` and a generated one-tim
 
 ## Deploy an app
 
-1. Choose **Runes** in the panel.
-2. Pick a built-in rune and select **Create server**.
+1. Choose **Templates** in the panel.
+2. Pick a built-in template and select **Create server**.
 3. Fill out the settings and choose CPU and memory limits. Secret fields are encrypted in SQLite and shown as masked values after save.
 4. Select **Install**. Install output streams to the Console tab and install status.
-5. Wait for the rune readiness pattern. The server remains in **Starting** until that pattern matches. Runes with a `web` port must also accept a local TCP connection on that port.
-6. Use the server tabs to view metrics, query player counts, issue console commands, edit files, and change settings.
+5. Wait for the server readiness check. It remains in **Starting** until its startup pattern matches. Templates with a `web` port must also accept a local TCP connection on that port.
+6. Use the server tabs to view metrics, query player counts, issue console commands, edit files, manage backups, and change settings.
 
-The built-in Minecraft Java and Bedrock runes require accepting the Minecraft EULA. Minecraft Java also has a generated RCON password; the host RCON mapping is loopback-only. Vaultwarden and Uptime Kuma publish a web port. Cloudflare Tunnel runs `cloudflared` with a required encrypted tunnel token; route and DNS reconciliation is not included in this release.
+The built-in Minecraft Java and Bedrock templates require accepting the Minecraft EULA. Minecraft Java also has a generated RCON password; the host RCON mapping is loopback-only. Vaultwarden and Uptime Kuma publish a web port. Cloudflare Tunnel runs `cloudflared` with a required encrypted tunnel token; route and DNS reconciliation is not included in this release.
 
 ## Reverse proxy
 
@@ -46,6 +46,6 @@ sudo /usr/local/bin/yggdrasil reset-password admin --config /etc/yggdrasil/confi
 sudo /usr/local/bin/yggdrasil reset-2fa admin --config /etc/yggdrasil/config.yaml
 ```
 
-Both reset commands require root and invalidate existing web sessions. The generated reset password is printed to the terminal. For server-specific failures, open the server Console tab and read its status message before changing rune settings.
+Both reset commands require root and invalidate existing web sessions. The generated reset password is printed to the terminal. For server-specific failures, open the server Console tab and read its status message before changing template settings.
 
-See [configuration](configuration.md), [HTTP API](api.md), [server operations](guides/servers.md), [access and security](guides/security.md), and [runes](runes.md).
+See [configuration](configuration.md), [HTTP API](api.md), [server operations](guides/servers.md), [access and security](guides/security.md), and [templates](templates.md).

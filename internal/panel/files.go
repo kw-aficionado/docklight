@@ -48,7 +48,7 @@ func (a *App) fileList(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, e := os.ReadDir(base)
 	if e != nil {
-		writeError(w, 403, "panel cannot read this directory; run the server ownership repair or adjust the rune data path")
+		writeError(w, 403, "panel cannot read this directory; run the server ownership repair or adjust the template data path")
 		return
 	}
 	type item struct {
@@ -102,7 +102,7 @@ func (a *App) fileRead(w http.ResponseWriter, r *http.Request) {
 	}
 	b, e := os.ReadFile(f)
 	if e != nil {
-		writeError(w, 403, "panel cannot read this file; run the server ownership repair or adjust the rune data path")
+		writeError(w, 403, "panel cannot read this file; run the server ownership repair or adjust the template data path")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"path": filepath.ToSlash(rel), "content": string(b), "size": len(b), "modified": info.ModTime().Format(time.RFC3339)})
@@ -126,6 +126,13 @@ func (a *App) fileWrite(w http.ResponseWriter, r *http.Request) {
 	target, e := safePath(s.DataDir, in.Path, false)
 	if e != nil {
 		writeError(w, 400, e.Error())
+		return
+	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
@@ -174,6 +181,13 @@ func (a *App) fileDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, e.Error())
 		return
 	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
+		return
+	}
 	if e = os.Remove(target); e != nil {
 		if errors.Is(e, os.ErrNotExist) {
 			writeError(w, 404, "file not found")
@@ -199,6 +213,13 @@ func (a *App) fileMkdir(w http.ResponseWriter, r *http.Request) {
 	target, e := safePath(s.DataDir, in.Path, false)
 	if e != nil {
 		writeError(w, 400, e.Error())
+		return
+	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
 		return
 	}
 	if e = os.Mkdir(target, 0750); e != nil {
@@ -233,6 +254,13 @@ func (a *App) fileUpload(w http.ResponseWriter, r *http.Request) {
 	target, e := safePath(s.DataDir, rel, false)
 	if e != nil {
 		writeError(w, 400, e.Error())
+		return
+	}
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, e = a.getServer(s.ID)
+	if e != nil {
+		writeError(w, 404, "server not found")
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {

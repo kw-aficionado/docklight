@@ -30,7 +30,7 @@ func (a *App) serverQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	gs, e := a.loadRune(s.GameskillID)
 	if e != nil || gs.Query == nil {
-		writeError(w, 404, "this rune does not define a player query protocol")
+		writeError(w, 404, "this template does not define a player query protocol")
 		return
 	}
 	port := s.Ports["game"]
@@ -52,7 +52,7 @@ func (a *App) serverQuery(w http.ResponseWriter, r *http.Request) {
 	case "a2s", "source":
 		result, e = gameproto.A2S(ctx, "127.0.0.1", port)
 	default:
-		writeError(w, 400, "the rune uses an unsupported query protocol")
+		writeError(w, 400, "the template uses an unsupported query protocol")
 		return
 	}
 	if e != nil {
@@ -85,7 +85,7 @@ func (a *App) serverRCON(w http.ResponseWriter, r *http.Request) {
 	}
 	gs, e := a.loadRune(s.GameskillID)
 	if e != nil || gs.RCON == nil || !gs.RCON.Enabled {
-		writeError(w, 409, "RCON is not enabled by this rune")
+		writeError(w, 409, "RCON is not enabled by this template")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
@@ -113,7 +113,7 @@ func (a *App) runRCON(ctx context.Context, s Server, gs gameskill.Rune, command 
 	}
 	password := env[gs.RCON.PasswordVar]
 	if password == "" {
-		return "", errors.New("the rune's RCON password is empty; set it in server settings and restart")
+		return "", errors.New("the template's RCON password is empty; set it in server settings and restart")
 	}
 	return gameproto.SourceRCON(ctx, "127.0.0.1", port, password, command)
 }

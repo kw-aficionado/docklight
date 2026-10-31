@@ -23,6 +23,9 @@ func TestGenerateCreatesSecretAndRefusesOverwrite(t *testing.T) {
 	if loaded.Admin.Password != c.Admin.Password || loaded.Auth.SecretKey != c.Auth.SecretKey {
 		t.Fatal("generated configuration did not round-trip")
 	}
+	if loaded.Backups.Retention != 10 {
+		t.Fatalf("default backup retention = %d, want 10", loaded.Backups.Retention)
+	}
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +39,27 @@ func TestGenerateCreatesSecretAndRefusesOverwrite(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatal("existing config changed after refused overwrite")
+	}
+}
+
+func TestLoadBackupPathAndRetention(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "server:\n  host: 127.0.0.1\n  port: 8080\ndatabase:\n  path: /tmp/panel.db\nbackups:\n  path: /srv/ygg/backups\n  retention: 4\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Backups.Path != "/srv/ygg/backups" || c.Backups.Retention != 4 {
+		t.Fatalf("backup config = %#v, want path and retention from file", c.Backups)
+	}
+	if err = os.WriteFile(path, []byte(strings.Replace(content, "retention: 4", "retention: 101", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Load(path); err == nil {
+		t.Fatal("backup retention above 100 was accepted")
 	}
 }
 

@@ -29,6 +29,10 @@ type Config struct {
 		Socket     string
 		APIVersion string
 	}
+	Backups struct {
+		Path      string
+		Retention int
+	}
 	Ports struct {
 		RangeMin int
 		RangeMax int
@@ -42,6 +46,7 @@ func Defaults() Config {
 	c.Auth.SessionTTLHours = 168
 	c.Admin.Username = "admin"
 	c.Docker.Socket, c.Docker.APIVersion = "unix:///var/run/docker.sock", "v1.45"
+	c.Backups.Retention = 10
 	c.Ports.RangeMin, c.Ports.RangeMax = 25000, 30000
 	return c
 }
@@ -112,6 +117,10 @@ func Load(path string) (Config, error) {
 			setString(&c.Docker.Socket)
 		case "docker.api_version":
 			setString(&c.Docker.APIVersion)
+		case "backups.path":
+			setString(&c.Backups.Path)
+		case "backups.retention":
+			setErr = setInt(&c.Backups.Retention)
 		case "ports.range_min":
 			setErr = setInt(&c.Ports.RangeMin)
 		case "ports.range_max":
@@ -134,6 +143,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.Auth.SessionTTLHours < 1 {
 		return c, errors.New("auth.session_ttl_hours must be at least 1")
+	}
+	if c.Backups.Retention < 1 || c.Backups.Retention > 100 {
+		return c, errors.New("backups.retention must be from 1 to 100")
 	}
 	return c, nil
 }
@@ -188,7 +200,7 @@ func Save(path string, c Config) error {
 	if c.Admin.Password != "" {
 		s += fmt.Sprintf("  password: %s\n", c.Admin.Password)
 	}
-	s += fmt.Sprintf("docker:\n  socket: %s\n  api_version: %s\nports:\n  range_min: %d\n  range_max: %d\n", c.Docker.Socket, c.Docker.APIVersion, c.Ports.RangeMin, c.Ports.RangeMax)
+	s += fmt.Sprintf("docker:\n  socket: %s\n  api_version: %s\nbackups:\n  path: %s\n  retention: %d\nports:\n  range_min: %d\n  range_max: %d\n", c.Docker.Socket, c.Docker.APIVersion, c.Backups.Path, c.Backups.Retention, c.Ports.RangeMin, c.Ports.RangeMax)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(s), 0600); err != nil {
 		return err

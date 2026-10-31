@@ -15,6 +15,8 @@ The config reader supports scalar block-style YAML for these keys. Unknown keys 
 | `admin.password` | generated on first config | One-time bootstrap password. It is removed from the config after the administrator is created. |
 | `docker.socket` | `unix:///var/run/docker.sock` | Docker Engine Unix socket. The daemon account must have permission to use it. |
 | `docker.api_version` | `v1.45` | Versioned Docker Engine HTTP API prefix. |
+| `backups.path` | `<database directory>/backups` | Local encrypted backup directory. Relative paths resolve against the database directory. Keep it outside `servers/`. |
+| `backups.retention` | `10` | Number of recent local backups retained per server; from 1 through 100. |
 | `ports.range_min` | `25000` | First host port eligible for allocation; minimum is 1024. |
 | `ports.range_max` | `30000` | Exclusive upper bound for allocated host ports; maximum is 65535. |
 
@@ -36,9 +38,14 @@ admin:
 docker:
   socket: unix:///var/run/docker.sock
   api_version: v1.45
+backups:
+  path: /var/lib/yggdrasil/backups
+  retention: 10
 ports:
   range_min: 25000
   range_max: 30000
 ```
 
 Do not change `auth.secret_key` after servers or TOTP have been configured: encrypted secrets will no longer decrypt and existing sessions will stop validating. To rotate it safely, a future migration/rotation command is required; it is not available in this release.
+
+Local backup files use the same key. Keep `auth.secret_key` with the SQLite database and backup directory so a restored installation can decrypt them.

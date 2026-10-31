@@ -256,6 +256,202 @@ func TestAPITokensAreShownOnceAndIntersectUserPermissions(t *testing.T) {
 	}
 }
 
+func TestLocalBackupsRequirePermissionAndRestoreVerifiedData(t *testing.T) {
+	a, d, _ := testApp(t)
+	if _, err := d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('backup-user','backup-user','unused-hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(a.dataRoot, "backup-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const original = "world snapshot that must stay private"
+	if err := os.WriteFile(filepath.Join(dataDir, "world.dat"), []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('backup-server','Backup test','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	otherDir := filepath.Join(a.dataRoot, "backup-other")
+	if err := os.MkdirAll(otherDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('backup-other','Other server','minecraft-java','stopped',1,'{}','{}',?)`, otherDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO permissions(user_id,scope_type,scope_id,perms) VALUES('backup-user','server','backup-server','server.view')`); err != nil {
+		t.Fatal(err)
+	}
+	session, err := a.issue(User{ID: "backup-user", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	denied := testRequest(h, http.MethodGet, "/api/servers/backup-server/backups", "", session)
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("server.view alone reached backup list: %d %s", denied.Code, denied.Body.String())
+	}
+	createdToken := testRequest(h, http.MethodPost, "/api/tokens", `{"name":"backup token","scopes":["server.backup"]}`, session)
+	if createdToken.Code != http.StatusCreated {
+		t.Fatalf("create scoped token: %d %s", createdToken.Code, createdToken.Body.String())
+	}
+	var token struct {
+		Value string `json:"token"`
+	}
+	if err = json.Unmarshal(createdToken.Body.Bytes(), &token); err != nil || token.Value == "" {
+		t.Fatalf("decode scoped token: %v %s", err, createdToken.Body.String())
+	}
+	tokenDenied := testRequest(h, http.MethodGet, "/api/servers/backup-server/backups", "", token.Value)
+	if tokenDenied.Code != http.StatusForbidden {
+		t.Fatalf("API token scope bypassed the account grant: %d %s", tokenDenied.Code, tokenDenied.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE permissions SET perms='server.view,server.backup' WHERE user_id='backup-user' AND scope_type='server' AND scope_id='backup-server'`); err != nil {
+		t.Fatal(err)
+	}
+	otherDenied := testRequest(h, http.MethodPost, "/api/servers/backup-other/backups", `{}`, session)
+	if otherDenied.Code != http.StatusForbidden {
+		t.Fatalf("user backed up a server outside its grant: %d %s", otherDenied.Code, otherDenied.Body.String())
+	}
+
+	create := func() backupRecord {
+		t.Helper()
+		response := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups", `{}`, session)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("create local backup: %d %s", response.Code, response.Body.String())
+		}
+		var result struct {
+			Backup backupRecord `json:"backup"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Backup.ID == "" {
+			t.Fatalf("decode backup response: %v %s", err, response.Body.String())
+		}
+		return result.Backup
+	}
+	first := create()
+	backupPath := filepath.Join(a.backupRoot, "backup-server", first.ID+backupExtension)
+	archive, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(archive, []byte(original)) {
+		t.Fatal("encrypted local backup contains the original plaintext")
+	}
+	listed := testRequest(h, http.MethodGet, "/api/servers/backup-server/backups", "", session)
+	var backups []backupRecord
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &backups) != nil || len(backups) != 1 || backups[0].ID != first.ID {
+		t.Fatalf("backup list did not return the stored record: %d %s", listed.Code, listed.Body.String())
+	}
+	verified := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups/"+first.ID+"/verify", `{}`, session)
+	if verified.Code != http.StatusOK || !strings.Contains(verified.Body.String(), `"valid":true`) || !strings.Contains(verified.Body.String(), `"files":1`) {
+		t.Fatalf("verify did not report the expected archived file: %d %s", verified.Code, verified.Body.String())
+	}
+	if err = os.WriteFile(filepath.Join(dataDir, "world.dat"), []byte("newer live data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups/"+first.ID+"/restore", `{}`, session)
+	if restored.Code != http.StatusOK {
+		t.Fatalf("restore backup: %d %s", restored.Code, restored.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, "world.dat"))
+	if err != nil || string(data) != original {
+		t.Fatalf("restored file=%q err=%v; want original contents", data, err)
+	}
+	if !strings.Contains(restored.Body.String(), `"restored":true`) {
+		t.Fatalf("restore response missing success status: %s", restored.Body.String())
+	}
+
+	a.cfg.Backups.Retention = 2
+	second := create()
+	third := create()
+	if !(first.CreatedAt < second.CreatedAt && second.CreatedAt < third.CreatedAt) {
+		t.Fatalf("backup timestamps do not sort chronologically: %q, %q, %q", first.CreatedAt, second.CreatedAt, third.CreatedAt)
+	}
+	listed = testRequest(h, http.MethodGet, "/api/servers/backup-server/backups", "", session)
+	backups = nil
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &backups) != nil || len(backups) != 2 {
+		t.Fatalf("automatic retention did not keep two backups: %d %s", listed.Code, listed.Body.String())
+	}
+	if _, err = os.Stat(backupPath); !os.IsNotExist(err) {
+		t.Fatalf("automatic retention left the oldest backup file behind: %v", err)
+	}
+	pruned := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups/prune", `{"keep":1}`, session)
+	if pruned.Code != http.StatusOK || !strings.Contains(pruned.Body.String(), `"removed":1`) || !strings.Contains(pruned.Body.String(), `"remaining":1`) {
+		t.Fatalf("prune did not remove the older backup: %d %s", pruned.Code, pruned.Body.String())
+	}
+	listed = testRequest(h, http.MethodGet, "/api/servers/backup-server/backups", "", session)
+	backups = nil
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &backups) != nil || len(backups) != 1 || backups[0].ID != third.ID || second.ID == third.ID {
+		t.Fatalf("retention kept the wrong backup: %d %s", listed.Code, listed.Body.String())
+	}
+
+	file, err := os.OpenFile(filepath.Join(a.backupRoot, "backup-server", third.ID+backupExtension), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last [1]byte
+	if _, err = file.ReadAt(last[:], third.SizeBytes-1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	last[0] ^= 0xff
+	if _, err = file.WriteAt(last[:], third.SizeBytes-1); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups/"+third.ID+"/verify", `{}`, session)
+	if corrupt.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("verification accepted a modified archive: %d %s", corrupt.Code, corrupt.Body.String())
+	}
+	beforeCorruptRestore, err := os.ReadFile(filepath.Join(dataDir, "world.dat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptRestore := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups/"+third.ID+"/restore", `{}`, session)
+	if corruptRestore.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("restore accepted a modified archive: %d %s", corruptRestore.Code, corruptRestore.Body.String())
+	}
+	afterCorruptRestore, err := os.ReadFile(filepath.Join(dataDir, "world.dat"))
+	if err != nil || !bytes.Equal(afterCorruptRestore, beforeCorruptRestore) {
+		t.Fatalf("corrupt restore changed current data: before=%q after=%q err=%v", beforeCorruptRestore, afterCorruptRestore, err)
+	}
+	deleted := testRequest(h, http.MethodDelete, "/api/servers/backup-server/backups/"+third.ID, `{}`, session)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete backup: %d %s", deleted.Code, deleted.Body.String())
+	}
+	if _, err = os.Stat(filepath.Join(a.backupRoot, "backup-server", third.ID+backupExtension)); !os.IsNotExist(err) {
+		t.Fatalf("delete left the backup file behind: %v", err)
+	}
+	listed = testRequest(h, http.MethodGet, "/api/servers/backup-server/backups", "", session)
+	backups = nil
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &backups) != nil || len(backups) != 0 {
+		t.Fatalf("delete left the backup record behind: %d %s", listed.Code, listed.Body.String())
+	}
+}
+
+func TestServerBackupCleanupRejectsSymlinkedServerDirectory(t *testing.T) {
+	a, _, _ := testApp(t)
+	if err := os.MkdirAll(a.backupRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	sentinel := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(a.backupRoot, "backup-server")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := a.removeServerBackups("backup-server"); err == nil {
+		t.Fatal("server cleanup accepted a symlinked backup directory")
+	}
+	if content, err := os.ReadFile(sentinel); err != nil || string(content) != "preserve" {
+		t.Fatalf("symlink target was changed: content=%q err=%v", content, err)
+	}
+}
+
 func TestNameLikeSecretIsEncryptedAndMaskedWithoutRuneFlag(t *testing.T) {
 	a, d, _ := testApp(t)
 	adminHash, err := security.HashPassword("test admin password 2026")

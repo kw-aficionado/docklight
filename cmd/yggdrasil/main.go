@@ -67,7 +67,7 @@ func run(args []string) error {
 	}
 }
 func usage() {
-	fmt.Print(`Yggdrasil game and app server panel
+	fmt.Print(`Docklight game and app server panel
 
 Usage:
   yggdrasil [--config PATH] [serve]
@@ -124,7 +124,7 @@ func serve(args []string) error {
 		}
 	}
 	if err = panel.UpsertBuiltins(d); err != nil {
-		return fmt.Errorf("seed built-in runes: %w", err)
+		return fmt.Errorf("seed built-in templates: %w", err)
 	}
 	engine := docker.New(c.Docker.Socket, c.Docker.APIVersion)
 	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -137,7 +137,7 @@ func serve(args []string) error {
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	errs := make(chan error, 1)
-	go func() { log.Printf("Yggdrasil listening on http://%s", addr); errs <- srv.ListenAndServe() }()
+	go func() { log.Printf("Docklight listening on http://%s", addr); errs <- srv.ListenAndServe() }()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	select {
