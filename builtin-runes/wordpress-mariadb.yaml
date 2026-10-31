@@ -1,0 +1,62 @@
+gameskill:
+  id: wordpress-mariadb
+  name: WordPress + MariaDB
+  category: Apps
+  version: 1
+  description: A private WordPress and MariaDB app stack on an isolated server network.
+  docker:
+    image: wordpress:6-apache
+    data_path: /var/www/html
+    user: "0:0"
+    keep_entrypoint: true
+    env:
+      WORDPRESS_DB_HOST: database:3306
+      WORDPRESS_DB_NAME: "{{DB_NAME}}"
+      WORDPRESS_DB_USER: "{{DB_USER}}"
+      WORDPRESS_DB_PASSWORD: "{{DB_PASSWORD}}"
+  variables:
+    - key: DB_NAME
+      name: Database name
+      type: string
+      default: wordpress
+      required: true
+      pattern: "^[A-Za-z0-9_]{1,64}$"
+    - key: DB_USER
+      name: Database user
+      type: string
+      default: wordpress
+      required: true
+      pattern: "^[A-Za-z0-9_]{1,64}$"
+    - key: DB_PASSWORD
+      name: Database password
+      type: string
+      required: true
+      secret: true
+      pattern: "^[^\\r\\n]{20,256}$"
+      hint: Use a unique password of 20 to 256 characters.
+    - key: DB_ROOT_PASSWORD
+      name: MariaDB root password
+      type: string
+      required: true
+      secret: true
+      pattern: "^[^\\r\\n]{20,256}$"
+      hint: Use a different, unique password of 20 to 256 characters.
+  startup:
+    done_regex: "resuming normal operations"
+    stop_timeout: 30
+  ports:
+    - name: web
+      default: 80
+      protocol: tcp
+  stack:
+    services:
+      - name: database
+        image: mariadb:11
+        data_path: /var/lib/mysql
+        user: "0:0"
+        resource_weight: 1
+        env:
+          MARIADB_DATABASE: "{{DB_NAME}}"
+          MARIADB_USER: "{{DB_USER}}"
+          MARIADB_PASSWORD: "{{DB_PASSWORD}}"
+          MARIADB_ROOT_PASSWORD: "{{DB_ROOT_PASSWORD}}"

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,16 @@ func New(socket, api string) *Engine {
 	}, DisableKeepAlives: false}
 	return &Engine{socket: socket, api: api, client: &http.Client{Transport: tr}}
 }
+
+// NewWithHTTPClient builds an Engine around a caller-provided client. It is
+// primarily useful for deterministic Docker Engine API tests.
+func NewWithHTTPClient(socket, api string, client *http.Client) *Engine {
+	e := New(socket, api)
+	if client != nil {
+		e.client = client
+	}
+	return e
+}
 func (e *Engine) endpoint(p string) string {
 	return "http://docker/" + e.api + "/" + strings.TrimLeft(p, "/")
 }
@@ -43,6 +54,23 @@ func (e *Engine) endpoint(p string) string {
 type apiError struct {
 	Message string `json:"message"`
 	Cause   string `json:"cause"`
+}
+
+type APIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *APIError) Error() string { return "Docker Engine: " + actionable(e.Message) }
+
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
+}
+
+func IsNotModified(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotModified
 }
 
 func (e *Engine) do(ctx context.Context, method, p string, body any) (*http.Response, error) {
@@ -73,7 +101,7 @@ func (e *Engine) do(ctx context.Context, method, p string, body any) (*http.Resp
 		if msg == "" {
 			msg = http.StatusText(resp.StatusCode)
 		}
-		return nil, fmt.Errorf("Docker Engine: %s", actionable(msg))
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: msg}
 	}
 	return resp, nil
 }
@@ -152,22 +180,109 @@ type DeviceMapping struct {
 	CgroupPermissions string `json:"CgroupPermissions"`
 }
 type CreateConfig struct {
-	Image        string              `json:"Image"`
-	Cmd          []string            `json:"Cmd,omitempty"`
-	Env          []string            `json:"Env,omitempty"`
-	WorkingDir   string              `json:"WorkingDir,omitempty"`
-	User         string              `json:"User,omitempty"`
-	Tty          bool                `json:"Tty"`
-	OpenStdin    bool                `json:"OpenStdin,omitempty"`
-	AttachStdin  bool                `json:"AttachStdin,omitempty"`
-	AttachStdout bool                `json:"AttachStdout,omitempty"`
-	AttachStderr bool                `json:"AttachStderr,omitempty"`
-	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
-	Labels       map[string]string   `json:"Labels,omitempty"`
-	HostConfig   HostConfig          `json:"HostConfig"`
+	Image            string              `json:"Image"`
+	Cmd              []string            `json:"Cmd,omitempty"`
+	Env              []string            `json:"Env,omitempty"`
+	WorkingDir       string              `json:"WorkingDir,omitempty"`
+	User             string              `json:"User,omitempty"`
+	Tty              bool                `json:"Tty"`
+	OpenStdin        bool                `json:"OpenStdin,omitempty"`
+	AttachStdin      bool                `json:"AttachStdin,omitempty"`
+	AttachStdout     bool                `json:"AttachStdout,omitempty"`
+	AttachStderr     bool                `json:"AttachStderr,omitempty"`
+	ExposedPorts     map[string]struct{} `json:"ExposedPorts,omitempty"`
+	Labels           map[string]string   `json:"Labels,omitempty"`
+	HostConfig       HostConfig          `json:"HostConfig"`
+	NetworkingConfig *NetworkingConfig   `json:"NetworkingConfig,omitempty"`
+}
+type NetworkingConfig struct {
+	EndpointsConfig map[string]EndpointSettings `json:"EndpointsConfig"`
+}
+type EndpointSettings struct {
+	Aliases []string `json:"Aliases,omitempty"`
 }
 type Created struct {
 	ID string `json:"Id"`
+}
+
+type NetworkCreateConfig struct {
+	Driver     string            `json:"Driver,omitempty"`
+	Internal   bool              `json:"Internal,omitempty"`
+	Attachable bool              `json:"Attachable,omitempty"`
+	Labels     map[string]string `json:"Labels,omitempty"`
+}
+type NetworkInfo struct {
+	ID     string            `json:"Id"`
+	Name   string            `json:"Name"`
+	Labels map[string]string `json:"Labels"`
+}
+type ContainerSummary struct {
+	ID     string            `json:"Id"`
+	State  string            `json:"State"`
+	Labels map[string]string `json:"Labels"`
+}
+
+func (e *Engine) CreateNetwork(ctx context.Context, name string, cfg NetworkCreateConfig) (string, error) {
+	q := url.Values{"name": {name}}
+	r, err := e.do(ctx, http.MethodPost, "/networks/create?"+q.Encode(), cfg)
+	if err != nil {
+		return "", err
+	}
+	defer r.Body.Close()
+	var out struct {
+		ID string `json:"Id"`
+	}
+	if err = json.NewDecoder(r.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", errors.New("Docker returned an empty network ID")
+	}
+	return out.ID, nil
+}
+
+func (e *Engine) InspectNetwork(ctx context.Context, idOrName string) (NetworkInfo, error) {
+	var out NetworkInfo
+	r, err := e.do(ctx, http.MethodGet, "/networks/"+url.PathEscape(idOrName), nil)
+	if err != nil {
+		return out, err
+	}
+	defer r.Body.Close()
+	err = json.NewDecoder(r.Body).Decode(&out)
+	return out, err
+}
+
+func (e *Engine) RemoveNetwork(ctx context.Context, idOrName string) error {
+	r, err := e.do(ctx, http.MethodDelete, "/networks/"+url.PathEscape(idOrName), nil)
+	if err == nil {
+		r.Body.Close()
+	}
+	return err
+}
+
+func (e *Engine) ListContainers(ctx context.Context, all bool, labels map[string]string) ([]ContainerSummary, error) {
+	filters := map[string][]string{}
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		filters["label"] = append(filters["label"], key+"="+labels[key])
+	}
+	encoded, err := json.Marshal(filters)
+	if err != nil {
+		return nil, err
+	}
+	q := url.Values{"all": {strconv.FormatBool(all)}, "filters": {string(encoded)}}
+	r, err := e.do(ctx, http.MethodGet, "/containers/json?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Body.Close()
+	var out []ContainerSummary
+	err = json.NewDecoder(r.Body).Decode(&out)
+	return out, err
 }
 
 func (e *Engine) Create(ctx context.Context, name string, c CreateConfig) (string, error) {

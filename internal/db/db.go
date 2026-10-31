@@ -433,6 +433,53 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 15 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_sidecars (
+			server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+			service_name TEXT NOT NULL,
+			container_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'stopped',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY(server_id, service_name)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_server_sidecars_server ON server_sidecars(server_id)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(15)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 16 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "server_sidecars", "last_error") {
+			if _, err = tx.Exec(`ALTER TABLE server_sidecars ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(16)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

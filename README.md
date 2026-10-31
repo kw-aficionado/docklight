@@ -2,7 +2,7 @@
 
 ![Docklight logo](web/brand.svg)
 
-Docklight is a self-hosted control panel for Docker game servers and apps. It runs as one Go binary, stores panel state in SQLite, and embeds its browser interface and five built-in server templates.
+Docklight is a self-hosted control panel for Docker game servers and apps. It runs as one Go binary, stores panel state in SQLite, and embeds its browser interface and six built-in server templates.
 
 The browser and product identity use **Docklight**. The current binary, CLI, service, and default filesystem paths still use `yggdrasil` while the implementation transitions from its original internal name.
 
@@ -36,7 +36,7 @@ A release repository is not configured in this source checkout. Until binaries a
 4. The status changes to **Running** only after the server is ready; web apps must also answer on their published web port.
 5. Use **Console**, **Files**, **Backups**, **Schedules**, and **Settings** on the server page. Stop a server before creating, restoring, or scheduling a backup.
 
-The built-in templates are Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, and Cloudflare Tunnel. Minecraft Java RCON is bound to loopback on the host. The panel allocates ports from `ports.range_min` through `ports.range_max`.
+The built-in templates are Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. WordPress and its database run as one server on a private network; only the WordPress web port is published. See the [app-stack guide](docs/guides/stacks.md). Minecraft Java RCON is bound to loopback on the host. The panel allocates ports from `ports.range_min` through `ports.range_max`.
 
 ## Service and CLI
 
@@ -52,7 +52,7 @@ The CLI also provides:
 - `reset-password USER [--config PATH]` — root-only break-glass password reset; generates a password unless one is supplied.
 - `reset-2fa USER [--config PATH]` — root-only break-glass authenticator reset.
 
-See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [monitoring](docs/guides/monitoring.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
+See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [monitoring](docs/guides/monitoring.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
 
 ## Network and security
 

@@ -13,8 +13,8 @@ func TestBuiltinRunesParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 5 {
-		t.Fatalf("expected 5 shipped runes, got %d", len(entries))
+	if len(entries) != 6 {
+		t.Fatalf("expected 6 shipped runes, got %d", len(entries))
 	}
 	seen := map[string]bool{}
 	for _, entry := range entries {
@@ -28,10 +28,102 @@ func TestBuiltinRunesParse(t *testing.T) {
 		}
 		seen[gs.ID] = true
 	}
-	for _, id := range []string{"minecraft-java", "minecraft-bedrock", "uptime-kuma", "vaultwarden", "cloudflared"} {
+	for _, id := range []string{"minecraft-java", "minecraft-bedrock", "uptime-kuma", "vaultwarden", "cloudflared", "wordpress-mariadb"} {
 		if !seen[id] {
 			t.Errorf("built-in rune %q was not parsed", id)
 		}
+	}
+}
+
+func TestAppStackTemplateValidationAndSecrets(t *testing.T) {
+	path := filepath.Join("..", "..", "builtin-runes", "wordpress-mariadb.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs, err := Parse(string(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gs.Stack == nil || len(gs.Stack.Services) != 1 || gs.Stack.Services[0].Name != "database" {
+		t.Fatalf("unexpected app stack metadata: %#v", gs.Stack)
+	}
+	if gs.Stack.Services[0].DataPath != "/var/lib/mysql" || gs.Stack.Services[0].Environment["MARIADB_PASSWORD"] != "{{DB_PASSWORD}}" {
+		t.Fatalf("sidecar persistence or secret interpolation was not parsed: %#v", gs.Stack.Services[0])
+	}
+	values := gs.DefaultEnv()
+	values["DB_PASSWORD"] = "unique-database-password-123"
+	values["DB_ROOT_PASSWORD"] = "unique-root-password-456789"
+	if err := gs.ValidateEnv(values); err != nil {
+		t.Fatalf("valid stack secrets were rejected: %v", err)
+	}
+	values["DB_PASSWORD"] = "too-short"
+	if err := gs.ValidateEnv(values); err == nil {
+		t.Fatal("short database password was accepted")
+	}
+}
+
+func TestStackRejectsUnsafeNamesPathsAndUndeclaredVariables(t *testing.T) {
+	base := Rune{
+		ID: "stack", Name: "Stack", Docker: Docker{Image: "example/app:1", KeepEntrypoint: true},
+		Startup: Startup{}, Stack: &Stack{Services: []Service{{Name: "database", Image: "mariadb:11", DataPath: "/var/lib/mysql"}}},
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid stack was rejected: %v", err)
+	}
+	base.Stack.Services[0].DataPath = ""
+	if err := base.Validate(); err != nil {
+		t.Fatalf("stateless sidecar without a data path was rejected: %v", err)
+	}
+	base.Stack.Services[0].DataPath = "/var/lib/mysql"
+	base.Stack.Services[0].Name = "bad_name"
+	if err := base.Validate(); err == nil {
+		t.Fatal("service name with underscore was accepted as a DNS alias")
+	}
+	base.Stack.Services[0].Name = "database"
+	base.Stack.Services[0].DataPath = "/etc"
+	if err := base.Validate(); err == nil {
+		t.Fatal("sidecar data path shadowing system files was accepted")
+	}
+	base.Stack.Services[0].DataPath = "/var/lib/mysql"
+	base.Stack.Services[0].Environment = map[string]string{"PASSWORD": "{{UNDECLARED}}"}
+	if err := base.Validate(); err == nil {
+		t.Fatal("undeclared sidecar template variable was accepted")
+	}
+	base.Stack.Services[0].Environment = nil
+	base.Variables = []Variable{{Key: "DB_PASSWORD", Type: "string", Secret: true}}
+	base.Stack.Services[0].Image = "mariadb:{{DB_PASSWORD}}"
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "must not embed secret") {
+		t.Fatalf("secret embedded in sidecar image was not rejected: %v", err)
+	}
+	base.Stack.Services[0].Image = "mariadb:11"
+	base.Stack.Services[0].Command = []string{"--password={{DB_PASSWORD}}"}
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "must not embed secret") {
+		t.Fatalf("secret embedded in sidecar command was not rejected: %v", err)
+	}
+}
+
+func TestServiceEnabledValues(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		expression string
+		env        map[string]string
+		want       bool
+		wantErr    bool
+	}{
+		{name: "empty is enabled", want: true},
+		{name: "static truthy", expression: "yes", want: true},
+		{name: "templated truthy", expression: "{{FEATURE}}", env: map[string]string{"FEATURE": "on"}, want: true},
+		{name: "static false", expression: "0", want: false},
+		{name: "unset upgrade placeholder", expression: "{{NEW_FEATURE}}", want: false},
+		{name: "invalid value", expression: "sometimes", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ServiceEnabled(test.expression, test.env)
+			if (err != nil) != test.wantErr || got != test.want {
+				t.Fatalf("ServiceEnabled(%q) = (%t,%v), want (%t,error=%t)", test.expression, got, err, test.want, test.wantErr)
+			}
+		})
 	}
 }
 

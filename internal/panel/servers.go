@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,22 +26,30 @@ import (
 )
 
 type Server struct {
-	ID                  string            `json:"id"`
-	Name                string            `json:"name"`
-	GameskillID         string            `json:"gameskill_id"`
-	Status              string            `json:"status"`
-	Installed           bool              `json:"installed"`
-	Env                 map[string]string `json:"env"`
-	Ports               map[string]int    `json:"ports"`
-	DataDir             string            `json:"-"`
-	ContainerID         string            `json:"-"`
-	CPULimit            float64           `json:"cpu_limit"`
-	MemoryLimitMB       int               `json:"memory_limit_mb"`
-	WatchdogEnabled     bool              `json:"watchdog_enabled"`
-	WatchdogQuarantined bool              `json:"watchdog_quarantined"`
-	ErrorMessage        string            `json:"error_message,omitempty"`
-	Permissions         []string          `json:"permissions,omitempty"`
-	CreatedAt           string            `json:"created_at"`
+	ID                  string               `json:"id"`
+	Name                string               `json:"name"`
+	GameskillID         string               `json:"gameskill_id"`
+	Status              string               `json:"status"`
+	Installed           bool                 `json:"installed"`
+	Env                 map[string]string    `json:"env"`
+	Ports               map[string]int       `json:"ports"`
+	DataDir             string               `json:"-"`
+	FilesRoot           string               `json:"-"`
+	ContainerID         string               `json:"-"`
+	CPULimit            float64              `json:"cpu_limit"`
+	MemoryLimitMB       int                  `json:"memory_limit_mb"`
+	WatchdogEnabled     bool                 `json:"watchdog_enabled"`
+	WatchdogQuarantined bool                 `json:"watchdog_quarantined"`
+	ErrorMessage        string               `json:"error_message,omitempty"`
+	Permissions         []string             `json:"permissions,omitempty"`
+	StackServices       []StackServiceStatus `json:"stack_services,omitempty"`
+	CreatedAt           string               `json:"created_at"`
+}
+
+type StackServiceStatus struct {
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 type createServerInput struct {
 	Name          string            `json:"name"`
@@ -320,6 +329,16 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	stackCtx, stackCancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer stackCancel()
+	var serverRune *rune.Rune
+	if loadedRune, loadErr := a.loadRune(s.GameskillID); loadErr == nil {
+		serverRune = &loadedRune
+	}
+	if err := a.removeStackResources(stackCtx, s, serverRune); err != nil {
+		writeError(w, 503, "app stack cleanup failed: "+err.Error())
+		return
+	}
 	if err := a.removeServerBackups(s.ID); err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -452,7 +471,12 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		finish(err)
 		return
 	}
-	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: []string{s.DataDir + ":/data"}}}
+	appDataDir := serverAppDataDir(s, gs)
+	if err = os.MkdirAll(appDataDir, 0770); err != nil {
+		finish(fmt.Errorf("create app data directory: %w", err))
+		return
+	}
+	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: []string{appDataDir + ":/data"}}}
 	cid, err := a.engine.Create(ctx, "ygg-install-"+shortID(s.ID), cfg)
 	if err != nil {
 		finish(err)
@@ -490,7 +514,7 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		finish(fmt.Errorf("installer exited with status %d; review the installation log and correct the template settings", code))
 		return
 	}
-	if err = a.fixOwnership(ctx, s.DataDir); err != nil {
+	if err = a.fixOwnership(ctx, appDataDir); err != nil {
 		finish(err)
 		return
 	}
@@ -670,32 +694,63 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 	if err = a.engine.Pull(ctx, image); err != nil {
 		return err
 	}
+	cleanupStartedStack := func(cause error) error {
+		if gs.Stack == nil {
+			return cause
+		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if cleanupErr := a.cleanupStackSidecars(cleanupCtx, s, &gs, true); cleanupErr != nil {
+			return errors.Join(cause, fmt.Errorf("app stack rollback failed: %w", cleanupErr))
+		}
+		return cause
+	}
 	if s.ContainerID != "" {
 		ins, e := a.engine.Inspect(ctx, s.ContainerID)
 		if e == nil {
 			if ins.State.Running {
 				return errors.New("server is already running")
 			}
-			_ = a.engine.Remove(ctx, s.ContainerID)
-		} else if !strings.Contains(strings.ToLower(e.Error()), "no longer has this server container") {
+			if removeErr := a.engine.Remove(ctx, s.ContainerID); removeErr != nil && !docker.IsNotFound(removeErr) {
+				return fmt.Errorf("remove previous server container: %w", removeErr)
+			}
+		} else if !docker.IsNotFound(e) && !strings.Contains(strings.ToLower(e.Error()), "no longer has this server container") {
 			return e
 		}
 	}
-	cfg, err := a.containerConfig(s, gs, env)
+	stackNetwork := ""
+	if gs.Stack != nil {
+		stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
+		if err != nil {
+			return fmt.Errorf("prepare private app stack network: %w", err)
+		}
+		if err = a.createStackSidecars(ctx, s, gs, env, stackNetwork, stackResourceLimits(s, gs)); err != nil {
+			return cleanupStartedStack(err)
+		}
+	}
+	limits := stackResourceLimits(s, gs)
+	cfg, err := a.containerConfigWithStack(s, gs, env, stackNetwork, limits[0])
 	if err != nil {
-		return err
+		return cleanupStartedStack(err)
 	}
 	cid, err := a.engine.Create(ctx, docker.SafeContainerName(s.ID), cfg)
 	if err != nil {
-		return err
+		return cleanupStartedStack(err)
 	}
 	if err = a.engine.Start(ctx, cid); err != nil {
-		_ = a.engine.Remove(context.Background(), cid)
-		return err
+		removeErr := a.engine.Remove(context.Background(), cid)
+		if removeErr != nil && !docker.IsNotFound(removeErr) {
+			err = errors.Join(err, fmt.Errorf("remove failed server container: %w", removeErr))
+		}
+		return cleanupStartedStack(err)
 	}
 	_, err = a.db.Exec(`UPDATE servers SET container_id=?,status='starting',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, cid, s.ID)
 	if err != nil {
-		return fmt.Errorf("server started but panel could not record its ID: %w", err)
+		removeErr := a.engine.Remove(context.Background(), cid)
+		if removeErr != nil && !docker.IsNotFound(removeErr) {
+			err = errors.Join(err, fmt.Errorf("remove unrecorded server container: %w", removeErr))
+		}
+		return cleanupStartedStack(fmt.Errorf("server started but panel could not record its ID: %w", err))
 	}
 	a.clearRuntimePending(s.ID)
 	s.ContainerID = cid
@@ -704,48 +759,60 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 	return nil
 }
 func (a *App) recreateAndStart(ctx context.Context, s Server) error {
-	if s.ContainerID != "" {
-		if err := a.stop(s); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no longer has this server container") {
-			return err
-		}
-		c, cancel := context.WithTimeout(ctx, 20*time.Second)
-		_ = a.engine.Remove(c, s.ContainerID)
-		cancel()
+	if err := a.stop(s); err != nil && !docker.IsNotFound(err) && !strings.Contains(strings.ToLower(err.Error()), "no longer has this server container") {
+		return err
 	}
-	_, _ = a.db.Exec(`UPDATE servers SET container_id='',status='stopped' WHERE id=?`, s.ID)
+	if s.ContainerID != "" {
+		c, cancel := context.WithTimeout(ctx, 20*time.Second)
+		removeErr := a.engine.Remove(c, s.ContainerID)
+		cancel()
+		if removeErr != nil && !docker.IsNotFound(removeErr) {
+			return fmt.Errorf("remove previous server container: %w", removeErr)
+		}
+	}
+	if _, err := a.db.Exec(`UPDATE servers SET container_id='',status='stopped' WHERE id=?`, s.ID); err != nil {
+		return fmt.Errorf("record stopped server before restart: %w", err)
+	}
 	a.clearRuntimePending(s.ID)
 	s.ContainerID = ""
 	return a.startWithContext(s, ctx)
 }
 func (a *App) stop(s Server) error {
-	if s.ContainerID == "" {
-		_, _ = a.db.Exec(`UPDATE servers SET status='stopped',error_message='' WHERE id=?`, s.ID)
-		a.clearRuntimePending(s.ID)
-		return nil
+	gs, loadErr := a.loadRune(s.GameskillID)
+	if loadErr != nil && s.ContainerID != "" {
+		return loadErr
 	}
-	gs, err := a.loadRune(s.GameskillID)
-	if err != nil {
-		return err
-	}
-	timeout := gs.Startup.StopTimeout
-	if timeout == 0 {
-		timeout = 30
+	timeout := 30
+	if loadErr == nil && gs.Startup.StopTimeout != 0 {
+		timeout = gs.Startup.StopTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout+15)*time.Second)
 	defer cancel()
-	if gs.Startup.SaveCommand != "" {
-		_ = a.engine.SendInput(ctx, s.ContainerID, gs.Startup.SaveCommand)
-		time.Sleep(2 * time.Second)
+	if s.ContainerID != "" {
+		if loadErr == nil && gs.Startup.SaveCommand != "" {
+			_ = a.engine.SendInput(ctx, s.ContainerID, gs.Startup.SaveCommand)
+			time.Sleep(2 * time.Second)
+		}
+		if loadErr == nil && gs.Startup.Stop != "" {
+			_ = a.engine.SendInput(ctx, s.ContainerID, gs.Startup.Stop)
+			time.Sleep(2 * time.Second)
+		}
+		err := a.engine.Stop(ctx, s.ContainerID, timeout)
+		if err != nil && !docker.IsNotFound(err) && !docker.IsNotModified(err) && !strings.Contains(strings.ToLower(err.Error()), "no longer has this server container") {
+			return err
+		}
 	}
-	if gs.Startup.Stop != "" {
-		_ = a.engine.SendInput(ctx, s.ContainerID, gs.Startup.Stop)
-		time.Sleep(2 * time.Second)
+	var stack *rune.Rune
+	if loadErr == nil {
+		stack = &gs
 	}
-	err = a.engine.Stop(ctx, s.ContainerID, timeout)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not modified") && !strings.Contains(strings.ToLower(err.Error()), "no longer has this server container") {
+	if err := a.cleanupStackSidecars(ctx, s, stack, false); err != nil {
+		_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, err.Error(), s.ID)
 		return err
 	}
-	_, _ = a.db.Exec(`UPDATE servers SET status='stopped',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, s.ID)
+	if _, err := a.db.Exec(`UPDATE servers SET status='stopped',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, s.ID); err != nil {
+		return fmt.Errorf("record stopped stack state: %w", err)
+	}
 	a.clearRuntimePending(s.ID)
 	return nil
 }
@@ -930,14 +997,23 @@ func (a *App) publicHost() string {
 }
 
 func (a *App) containerConfig(s Server, gs rune.Rune, env map[string]string) (docker.CreateConfig, error) {
+	limits := stackResourceLimits(s, gs)
+	return a.containerConfigWithStack(s, gs, env, "", limits[0])
+}
+
+func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]string, network string, limits stackResourceLimit) (docker.CreateConfig, error) {
 	image := rune.ApplyTemplate(gs.Docker.Image, env)
 	containerPath := gs.Docker.DataPath
 	if containerPath == "" {
 		containerPath = "/data"
 	}
-	binds := []string{s.DataDir + ":" + containerPath}
+	appDataDir := serverAppDataDir(s, gs)
+	if err := os.MkdirAll(appDataDir, 0770); err != nil {
+		return docker.CreateConfig{}, fmt.Errorf("create app data directory: %w", err)
+	}
+	binds := []string{appDataDir + ":" + containerPath}
 	for _, v := range gs.Docker.ExtraVolumes {
-		target := filepath.Join(s.DataDir, "_"+strings.ReplaceAll(strings.Trim(v, "/"), "/", "_"))
+		target := filepath.Join(appDataDir, "_"+strings.ReplaceAll(strings.Trim(v, "/"), "/", "_"))
 		if err := os.MkdirAll(target, 0770); err != nil {
 			return docker.CreateConfig{}, fmt.Errorf("create data volume for %s: %w", v, err)
 		}
@@ -965,12 +1041,8 @@ func (a *App) containerConfig(s Server, gs rune.Rune, env map[string]string) (do
 			hostCfg.Sysctls[key] = rune.ApplyTemplate(value, env)
 		}
 	}
-	if s.CPULimit > 0 {
-		hostCfg.NanoCPUs = int64(s.CPULimit * 1e9)
-	}
-	if s.MemoryLimitMB > 0 {
-		hostCfg.Memory = int64(s.MemoryLimitMB) * 1024 * 1024
-	}
+	hostCfg.NanoCPUs = limits.cpuNano
+	hostCfg.Memory = limits.memoryBytes
 	exposed := map[string]struct{}{}
 	for _, p := range gs.Ports {
 		host := s.Ports[p.Name]
@@ -996,7 +1068,9 @@ func (a *App) containerConfig(s Server, gs rune.Rune, env map[string]string) (do
 		containerEnv[k] = rune.ApplyTemplate(v, env)
 	}
 	for k, v := range env {
-		containerEnv[k] = v
+		if gs.Stack == nil || isPanelRuntimeVariable(k) {
+			containerEnv[k] = v
+		}
 	}
 	for name, port := range s.Ports {
 		containerEnv["PORT_"+name] = strconv.Itoa(port)
@@ -1005,6 +1079,7 @@ func (a *App) containerConfig(s Server, gs rune.Rune, env map[string]string) (do
 	for k, v := range containerEnv {
 		envList = append(envList, k+"="+v)
 	}
+	sort.Strings(envList)
 	cmd := []string{}
 	for _, c := range gs.Startup.Exec {
 		cmd = append(cmd, rune.ApplyTemplate(c, env))
@@ -1028,8 +1103,22 @@ func (a *App) containerConfig(s Server, gs rune.Rune, env map[string]string) (do
 	if gs.Docker.DataPath == "" {
 		working = "/data"
 	}
-	labels := map[string]string{"yggdrasil.server_id": s.ID, "yggdrasil.role": "server"}
-	return docker.CreateConfig{Image: image, Cmd: cmd, Env: envList, WorkingDir: working, User: user, Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, ExposedPorts: exposed, Labels: labels, HostConfig: hostCfg}, nil
+	labels := map[string]string{docklightServerLabel: s.ID, docklightRoleLabel: "server"}
+	config := docker.CreateConfig{Image: image, Cmd: cmd, Env: envList, WorkingDir: working, User: user, Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, ExposedPorts: exposed, Labels: labels, HostConfig: hostCfg}
+	if network != "" {
+		config.NetworkingConfig = &docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{network: {}}}
+	}
+	return config, nil
+}
+
+func isPanelRuntimeVariable(name string) bool {
+	key := strings.ToUpper(name)
+	switch key {
+	case "SERVER_NAME", "PUBLIC_URL", "HOME", "PUID", "PGID", "UID", "GID":
+		return true
+	default:
+		return strings.HasPrefix(key, "PORT_") || strings.HasSuffix(key, "_PORT")
+	}
 }
 
 func (a *App) allocatePorts(serverID string, definitions []rune.Port) (map[string]int, error) {
@@ -1146,6 +1235,28 @@ func (a *App) decorateServer(u User, s Server) Server {
 	for _, permission := range []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.schedule", "server.delete"} {
 		if a.allowedServer(u, permission, s.ID, s.GameskillID) {
 			s.Permissions = append(s.Permissions, permission)
+		}
+	}
+	if gs, err := a.loadRune(s.GameskillID); err == nil && gs.Stack != nil {
+		type serviceState struct{ status, message string }
+		states := map[string]serviceState{}
+		rows, queryErr := a.db.Query(`SELECT service_name,status,last_error FROM server_sidecars WHERE server_id=?`, s.ID)
+		if queryErr == nil {
+			for rows.Next() {
+				var name, status, message string
+				if rows.Scan(&name, &status, &message) == nil {
+					states[name] = serviceState{status: status, message: message}
+				}
+			}
+			_ = rows.Close()
+		}
+		s.StackServices = make([]StackServiceStatus, 0, len(gs.Stack.Services))
+		for _, service := range gs.Stack.Services {
+			state := states[service.Name]
+			if state.status == "" {
+				state.status = "stopped"
+			}
+			s.StackServices = append(s.StackServices, StackServiceStatus{Name: service.Name, Status: state.status, ErrorMessage: state.message})
 		}
 	}
 	return s

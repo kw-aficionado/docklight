@@ -144,7 +144,7 @@ func (a *App) monitorServerRuntime(ctx context.Context, id string, now time.Time
 	}
 	if state.State.Running {
 		a.clearRuntimePending(id)
-		return nil
+		return a.monitorStackSidecars(ctx, s)
 	}
 	if !a.confirmRuntimeIncident(id, "container_exited", state.State.ExitCode, now) {
 		return nil

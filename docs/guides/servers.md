@@ -10,7 +10,7 @@ An install-enabled template runs its shell script in a temporary Docker containe
 
 The panel sets status to **Starting** after Docker starts the container. It scans recent logs for `startup.done_regex`; when a template declares a TCP `web` port, that port must also accept a local connection. After ten minutes without readiness the status changes to **Needs attention** with guidance to review the console and template settings. It does not claim a timed-out process is ready.
 
-Stopping sends `startup.save_command` and `startup.stop` to container input when set, then asks Docker to stop gracefully using `startup.stop_timeout` (30 seconds when unset). The Minecraft Java template sends `save-all flush` followed by `stop` before Docker's stop request.
+Stopping sends `startup.save_command` and `startup.stop` to container input when set, then asks Docker to stop the main app gracefully using `startup.stop_timeout` (30 seconds when unset). App-stack sidecars stop afterward in reverse template order. The Minecraft Java template sends `save-all flush` followed by `stop` before Docker's stop request.
 
 Changing server settings or CPU/RAM limits while running recreates and starts its container with the existing data directory. Deleting a server removes its container, data directory, recorded local and S3 backups, port reservations, and server-scoped grants after Docker confirms the container is absent or removed.
 
@@ -30,4 +30,4 @@ CPU limits are configured in cores, memory limits in MiB; zero means unlimited. 
 
 ## Current boundaries
 
-There is no automatic update/reinstall path, SFTP/SMB backup target, realm or global scheduler, sidecar network, external reachability probe, or history of resource metrics in this release. Query-based automatic recovery is an opt-in setting documented in [runtime monitoring](monitoring.md). The container can still be inspected with Docker on the host, and server files remain under the configured database directory.
+There is no automatic update/reinstall path, SFTP/SMB backup target, realm or global scheduler, external reachability probe, or history of resource metrics in this release. App-stack networking and lifecycle are documented in [app stacks](stacks.md); sidecar-specific console and log streaming are not exposed yet. Query-based automatic recovery is an opt-in setting documented in [runtime monitoring](monitoring.md). The containers can still be inspected with Docker on the host, and server files remain under the configured database directory.

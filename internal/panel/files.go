@@ -24,6 +24,12 @@ func (a *App) authorizeFiles(w http.ResponseWriter, r *http.Request) (Server, bo
 	if !a.requirePerm(w, u, s, "server.files") {
 		return s, false
 	}
+	root, err := a.serverFilesRoot(s)
+	if err != nil {
+		writeError(w, 500, "server template is unavailable for file access")
+		return s, false
+	}
+	s.FilesRoot = root
 	return s, true
 }
 func (a *App) fileList(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +38,7 @@ func (a *App) fileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.URL.Query().Get("path")
-	base, e := safePath(s.DataDir, rel, true)
+	base, e := safePath(s.FilesRoot, rel, true)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return
@@ -82,7 +88,7 @@ func (a *App) fileRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.URL.Query().Get("path")
-	f, e := safePath(s.DataDir, rel, true)
+	f, e := safePath(s.FilesRoot, rel, true)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return
@@ -123,7 +129,7 @@ func (a *App) fileWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 413, "file path is required and editor content is limited to 5 MiB")
 		return
 	}
-	target, e := safePath(s.DataDir, in.Path, false)
+	target, e := safePath(s.FilesRoot, in.Path, false)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return
@@ -176,7 +182,7 @@ func (a *App) fileDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "file path is required")
 		return
 	}
-	target, e := safePath(s.DataDir, rel, true)
+	target, e := safePath(s.FilesRoot, rel, true)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return
@@ -210,7 +216,7 @@ func (a *App) fileMkdir(w http.ResponseWriter, r *http.Request) {
 	if decodeJSON(w, r, &in, 4096) != nil {
 		return
 	}
-	target, e := safePath(s.DataDir, in.Path, false)
+	target, e := safePath(s.FilesRoot, in.Path, false)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return
@@ -251,7 +257,7 @@ func (a *App) fileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := filepath.ToSlash(filepath.Join(r.FormValue("path"), name))
-	target, e := safePath(s.DataDir, rel, false)
+	target, e := safePath(s.FilesRoot, rel, false)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return
@@ -288,7 +294,7 @@ func (a *App) fileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.URL.Query().Get("path")
-	target, e := safePath(s.DataDir, rel, true)
+	target, e := safePath(s.FilesRoot, rel, true)
 	if e != nil {
 		writeError(w, 400, e.Error())
 		return

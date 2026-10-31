@@ -25,6 +25,7 @@ type Rune struct {
 	Query       *Query     `json:"query,omitempty"`
 	RCON        *RCON      `json:"rcon,omitempty"`
 	Restart     *Restart   `json:"restart,omitempty"`
+	Stack       *Stack     `json:"stack,omitempty"`
 	Steam       *Steam     `json:"steam,omitempty"`
 	ConfigFiles []string   `json:"config_files,omitempty"`
 }
@@ -84,13 +85,29 @@ type RestartWarning struct {
 	At  string `json:"at"`
 	Msg string `json:"msg"`
 }
+type Stack struct {
+	Services []Service `json:"services"`
+}
+type Service struct {
+	Name           string            `json:"name"`
+	Image          string            `json:"image"`
+	DataPath       string            `json:"data_path,omitempty"`
+	Enabled        string            `json:"enabled,omitempty"`
+	User           string            `json:"user,omitempty"`
+	Command        []string          `json:"command,omitempty"`
+	Environment    map[string]string `json:"env,omitempty"`
+	ResourceWeight int               `json:"resource_weight,omitempty"`
+}
 type Steam struct {
 	AppID     int  `json:"app_id"`
 	Anonymous bool `json:"anonymous"`
 }
 
 var runeID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+var stackServiceName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 var restartPlaceholder = regexp.MustCompile(`{{([^{}]*)}}`)
+var unresolvedBooleanPlaceholder = regexp.MustCompile(`^{{[A-Za-z0-9_]+}}$`)
+var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func Parse(src string) (Rune, error) {
 	var env struct {
@@ -153,6 +170,7 @@ func (g Rune) Validate() error {
 		}
 	}
 	declared := map[string]bool{}
+	secretDeclared := map[string]bool{}
 	for _, v := range g.Variables {
 		if v.Key == "" {
 			return errors.New("variable.key is required")
@@ -161,6 +179,7 @@ func (g Rune) Validate() error {
 			return fmt.Errorf("variable %q is declared more than once", v.Key)
 		}
 		declared[v.Key] = true
+		secretDeclared[v.Key] = v.Secret || sensitiveVariableName(v.Key)
 		switch v.Type {
 		case "string", "int", "bool":
 		case "select":
@@ -177,6 +196,76 @@ func (g Rune) Validate() error {
 		}
 		if reservedVariable(v.Key) {
 			return fmt.Errorf("variable %q conflicts with a name injected by the panel", v.Key)
+		}
+	}
+	if g.Stack != nil {
+		if len(g.Stack.Services) == 0 || len(g.Stack.Services) > 8 {
+			return errors.New("stack.services must contain from 1 to 8 sidecar services")
+		}
+		serviceNames := map[string]bool{}
+		for i, service := range g.Stack.Services {
+			field := fmt.Sprintf("stack.services[%d]", i)
+			if !stackServiceName.MatchString(service.Name) {
+				return fmt.Errorf("%s.name must be a lowercase DNS name using letters, digits or hyphens", field)
+			}
+			if serviceNames[service.Name] {
+				return fmt.Errorf("stack.services contains duplicate service %q", service.Name)
+			}
+			serviceNames[service.Name] = true
+			if strings.TrimSpace(service.Image) == "" || len(service.Image) > 512 || strings.IndexFunc(service.Image, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+				return fmt.Errorf("%s.image must contain 1 to 512 printable characters", field)
+			}
+			if err := validateRuneTemplate(field+".image", service.Image, declared); err != nil {
+				return err
+			}
+			if err := rejectSecretRuneTemplate(field+".image", service.Image, secretDeclared); err != nil {
+				return err
+			}
+			if service.DataPath != "" {
+				if err := validateContainerPath(service.DataPath); err != nil {
+					return fmt.Errorf("%s.data_path: %w", field, err)
+				}
+			}
+			if len(service.Enabled) > 1024 || strings.ContainsAny(service.Enabled, "\r\n\x00") {
+				return fmt.Errorf("%s.enabled must be 1024 characters or fewer and cannot contain line breaks", field)
+			}
+			if err := validateRuneTemplate(field+".enabled", service.Enabled, declared); err != nil {
+				return err
+			}
+			if err := rejectSecretRuneTemplate(field+".enabled", service.Enabled, secretDeclared); err != nil {
+				return err
+			}
+			if service.ResourceWeight < 0 || service.ResourceWeight > 100 {
+				return fmt.Errorf("%s.resource_weight must be from 1 to 100 when set", field)
+			}
+			if strings.ContainsAny(service.User, "\r\n\x00") || len(service.User) > 128 {
+				return fmt.Errorf("%s.user must be 128 characters or fewer and cannot contain line breaks", field)
+			}
+			if len(service.Command) > 64 {
+				return fmt.Errorf("%s.command can contain at most 64 arguments", field)
+			}
+			for j, arg := range service.Command {
+				if arg == "" || len(arg) > 4096 || strings.ContainsAny(arg, "\r\n\x00") {
+					return fmt.Errorf("%s.command[%d] must contain 1 to 4096 characters without line breaks", field, j)
+				}
+				if err := validateRuneTemplate(fmt.Sprintf("%s.command[%d]", field, j), arg, declared); err != nil {
+					return err
+				}
+				if err := rejectSecretRuneTemplate(fmt.Sprintf("%s.command[%d]", field, j), arg, secretDeclared); err != nil {
+					return err
+				}
+			}
+			for key, value := range service.Environment {
+				if !environmentName.MatchString(key) || reservedVariable(key) || key == "PGID" {
+					return fmt.Errorf("%s.env contains invalid or panel-reserved name %q", field, key)
+				}
+				if len(value) > 8192 || strings.ContainsAny(value, "\r\n\x00") {
+					return fmt.Errorf("%s.env[%s] must be 8192 characters or fewer and cannot contain line breaks", field, key)
+				}
+				if err := validateRuneTemplate(field+".env["+key+"]", value, declared); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	portNames := map[string]bool{}
@@ -271,6 +360,39 @@ func (g Rune) Validate() error {
 	}
 	return nil
 }
+
+func validateRuneTemplate(field, value string, declared map[string]bool) error {
+	for _, match := range restartPlaceholder.FindAllStringSubmatch(value, -1) {
+		if match[1] == "" || !declared[match[1]] {
+			return fmt.Errorf("%s references undeclared variable %q", field, match[0])
+		}
+	}
+	withoutPlaceholders := restartPlaceholder.ReplaceAllString(value, "")
+	if strings.Contains(withoutPlaceholders, "{{") || strings.Contains(withoutPlaceholders, "}}") {
+		return fmt.Errorf("%s contains an incomplete variable placeholder", field)
+	}
+	return nil
+}
+
+func rejectSecretRuneTemplate(field, value string, secrets map[string]bool) error {
+	for _, match := range restartPlaceholder.FindAllStringSubmatch(value, -1) {
+		if secrets[match[1]] {
+			return fmt.Errorf("%s must not embed secret variable %q; map secrets through env", field, match[1])
+		}
+	}
+	return nil
+}
+
+func sensitiveVariableName(key string) bool {
+	name := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(key))
+	for _, suffix := range []string{"password", "passwd", "pass", "secret", "token", "credential", "apikey", "privatekey", "accesskey"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return strings.Contains(name, "clientsecret") || strings.Contains(name, "signingkey")
+}
+
 func reservedVariable(k string) bool {
 	u := strings.ToUpper(k)
 	if u == "SERVER_NAME" || u == "PUBLIC_URL" || u == "HOME" || u == "PUID" || u == "PGID" || u == "UID" || u == "GID" || strings.HasPrefix(u, "PORT_") {
@@ -287,7 +409,8 @@ func validateContainerPath(p string) error {
 	}
 	denied := []string{"/", "/etc", "/var", "/var/run", "/run", "/home", "/usr", "/root", "/bin", "/sbin", "/lib", "/lib64", "/proc", "/sys", "/dev", "/boot", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64", "/usr/libexec", "/usr/local/bin", "/usr/local/sbin", "/usr/local/lib"}
 	for _, d := range denied {
-		if p == d || strings.HasPrefix(p, d+"/") {
+		protectedTree := d != "/var" && d != "/home"
+		if p == d || protectedTree && strings.HasPrefix(p, d+"/") {
 			return fmt.Errorf("path %q would shadow a protected system directory", p)
 		}
 	}
@@ -367,5 +490,27 @@ func ApplyTemplate(s string, env map[string]string) string {
 		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
 	}
 	return s
+}
+
+// ServiceEnabled resolves a sidecar's optional enabled value. An unresolved
+// placeholder is false so adding an opt-in variable does not start a new
+// service unexpectedly for servers created by an older template version.
+func ServiceEnabled(expression string, env map[string]string) (bool, error) {
+	value := strings.TrimSpace(expression)
+	if value == "" {
+		return true, nil
+	}
+	value = strings.TrimSpace(ApplyTemplate(value, env))
+	if unresolvedBooleanPlaceholder.MatchString(value) {
+		return false, nil
+	}
+	switch strings.ToLower(value) {
+	case "true", "1", "yes", "on":
+		return true, nil
+	case "false", "0", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("enabled=%q is neither true nor false", value)
+	}
 }
 func ToJSON(g Rune) string { b, _ := json.Marshal(g); return string(b) }

@@ -29,7 +29,7 @@ On first install, the script prints `http://<host>:8080` and a generated one-tim
 5. Wait for the server readiness check. It remains in **Starting** until its startup pattern matches. Templates with a `web` port must also accept a local TCP connection on that port.
 6. Use the server tabs to view metrics, query player counts, issue console commands, edit files, manage backups, and change settings.
 
-The built-in Minecraft Java and Bedrock templates require accepting the Minecraft EULA. Minecraft Java also has a generated RCON password; the host RCON mapping is loopback-only. Vaultwarden and Uptime Kuma publish a web port. Cloudflare Tunnel runs `cloudflared` with a required encrypted tunnel token; route and DNS reconciliation is not included in this release.
+The built-in Minecraft Java and Bedrock templates require accepting the Minecraft EULA. Minecraft Java also has a generated RCON password; the host RCON mapping is loopback-only. Vaultwarden and Uptime Kuma publish a web port. WordPress + MariaDB is a single app stack: the database stays on the server's private network, and Docklight backs up both services' data. See the [app-stack guide](guides/stacks.md). Cloudflare Tunnel runs `cloudflared` with a required encrypted tunnel token; route and DNS reconciliation is not included in this release.
 
 ## Reverse proxy
 
