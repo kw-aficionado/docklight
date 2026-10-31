@@ -74,13 +74,25 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 20 {
-		t.Fatalf("expected 20 migrations, got %d", count)
+	if count != 21 {
+		t.Fatalf("expected 21 migrations, got %d", count)
 	}
 	for _, column := range []string{"protocol", "port"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_target_settings') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("backup target migration is missing %q: count=%d err=%v", column, found, err)
+		}
+	}
+	for _, column := range []string{"source_host", "source_repo", "source_path", "source_ref"} {
+		var found int
+		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('gameskills') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
+			t.Fatalf("catalog source migration is missing %q: count=%d err=%v", column, found, err)
+		}
+	}
+	for _, table := range []string{"rune_repos", "github_catalog_settings"} {
+		var found int
+		if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&found); err != nil || found != 1 {
+			t.Fatalf("catalog migration is missing table %q: count=%d err=%v", table, found, err)
 		}
 	}
 	var sidecarTable string

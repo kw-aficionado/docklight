@@ -54,9 +54,15 @@ Realm management is implemented with a numbered SQLite migration, template-categ
 
 Realm tests cover migration assignment, realm-only and category-default server creation, hidden-server denial, realm metadata filtering, per-user collapse, admin move/reorder, and deletion cleanup. The complete Go suite, race detector, `go vet`, JavaScript syntax/unit checks, and Linux amd64/arm64 cross-builds passed. Removing the realm visibility filter made the test expose the inaccessible **Staging** realm; restoring the filter made the targeted test pass again.
 
+## Phase 2 catalog repositories
+
+The admin Templates page can save, browse, install, and remove GitHub, Gitea, and Forgejo catalogs. Saved credentials are encrypted and masked; repo tokens stay bound to their saved host/repository, while the optional panel-wide GitHub token is sent only to GitHub's API. Catalog traffic uses HTTPS, rejects redirects, bounds response and YAML sizes, caches successful directory listings for ten minutes, and exposes at most one subfolder level. Installing an existing community ID updates its YAML; built-in IDs are protected. Installed sources retain host, repository, path, and ref, and the manual update check reports missing or unreachable sources without applying changes automatically. No remote catalog is preconfigured; an administrator adds trusted repositories.
+
+Catalog tests cover encrypted/masked/cleared tokens, GitHub-token isolation, redirect stopping, HTTPS repository validation, listing cache and depth, 512 KiB file limits, built-in protection, existing-ID updates, source provenance, manual version comparison, and source removal. The migration test covers schema 21. The live administration UI still needs browser review, and live GitHub/Gitea interoperability depends on external repositories and credentials.
+
 ## Not implemented
 
-- Phase 2: scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; Discord, Telegram, and SMTP; Git template repositories; email resets; passkeys.
+- Phase 2: scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; Discord, Telegram, and SMTP; email resets; passkeys.
 - Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, cross-server ban automation, and importers.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
@@ -67,7 +73,7 @@ The remaining areas have no active controls in the UI. The Cloudflare Tunnel tem
 
 - Docker CLI and daemon are absent here. A Minecraft server install/start/ready/query/console/graceful-save cycle, Vaultwarden and Uptime Kuma browser access, and live WordPress + MariaDB behavior remain unverified. Stack lifecycle has deterministic fake-Engine coverage.
 - This environment denies local TCP/UDP binds, so the network fixture tests are skipped by default. Set `YGGDRASIL_TEST_NETWORK=1` on a host that permits loopback binds to run them.
-- The new Backup storage, private-services overview, and public status-page screens were syntax-checked and API-tested but not visually exercised in a live browser: this sandbox rejected the panel listener with `bind: operation not permitted`.
+- The Backup storage, private-services overview, public status page, and catalog administration screens were syntax-checked and API-tested but not visually exercised in a live browser: this sandbox rejected the panel listener with `bind: operation not permitted`.
 - `install.sh` syntax is checked but its package installation, systemd setup, and re-run preservation must be tested on a fresh Debian 12 or Ubuntu 24.04 VM.
 - No release owner/repository is configured. The installer needs a source checkout, `YGG_BINARY_URL`, `YGG_BINARY_FILE`, or `YGG_REPO` until release artifacts are published.
 - No MinIO or other S3-compatible emulator is available here. The S3 path has deterministic fake-store and signed-request coverage, but credential policy and provider interoperability still need the gated live-object test.

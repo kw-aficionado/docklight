@@ -18,6 +18,8 @@ Use API tokens in the `Authorization: Bearer ygg_…` header. Tokens in URL quer
 
 Template credentials are encrypted with AES-256-GCM using a key derived from `auth.secret_key`. The same config key also signs sessions. Server responses mask secret environment variables, and install/container log streams redact the stored plaintext values declared by the template. TOTP setup reveals a provisioning secret once so it can be added to an authenticator. API token creation similarly returns the new credential once.
 
+Catalog repository tokens and the optional panel-wide GitHub token are also encrypted with `auth.secret_key` and never returned by the API. A saved repository token is used only for its configured repository; the panel-wide GitHub token is sent only to `api.github.com`. Non-GitHub catalog hosts require HTTPS, and catalog requests do not follow redirects.
+
 The audit page records the user and server actions implemented in this release, including user/grant changes, token creation/revocation, server lifecycle, settings changes, and file changes. Audit records are not a substitute for host/systemd or Docker logs.
 
 ## Host boundary

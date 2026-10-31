@@ -34,7 +34,18 @@ Password and TOTP endpoints:
 | `PUT /api/settings/status-page` | Admin only; save `enabled`, `title`, and `server_ids` together. The master switch and each server opt-in are both required for public display. |
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
-| `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). |
+| `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). Replacing a catalog template clears its source metadata. |
+| `GET /api/gameskills/github?repo=owner/name&path=...&ref=main` | Admin only; browse a GitHub repository. Lists YAML files up to 512 KiB and folders one level deep; successful listings are cached for 10 minutes. |
+| `POST /api/gameskills/install-from-github` | Admin only; install or update a GitHub YAML file with `repo`, `path`, and optional `ref`. Built-in IDs return `409`. |
+| `GET /api/gameskills/updates` | Admin only; compare installed non-built-in template versions with saved catalogs. It lists updates and source errors without applying changes. |
+| `GET /api/rune-repos` | Admin only; list repositories without returning credentials. |
+| `POST /api/rune-repos` | Admin only; save `{name,host,repo,path,ref,token}`. Empty `host` means GitHub; other hosts must be HTTPS base URLs. |
+| `PUT /api/rune-repos/{id}` | Admin only; replace a repository. A masked token keeps the saved token; an empty token clears it. |
+| `DELETE /api/rune-repos/{id}` | Admin only; remove a repository. Installed templates retain their source record so checks can report the source as gone. |
+| `GET /api/rune-repos/{id}/browse?path=...` | Admin only; browse the configured repository, including at most one subfolder level. |
+| `POST /api/rune-repos/{id}/install` | Admin only; install or update a YAML file by its returned `path`, with an optional `ref` override for applying an update from its recorded source branch. |
+| `GET /api/settings/github` | Admin only; return whether the optional panel-wide GitHub token is configured. |
+| `PUT /api/settings/github` | Admin only; save or clear the optional panel-wide GitHub token. The token is never returned. |
 | `DELETE /api/gameskills/{id}` | Admin only; custom template must be unused. |
 | `GET /api/realms` | List realms visible through `server.view` or `server.create`; includes caller-specific `collapsed`, visible `server_count`, and `can_create`. |
 | `POST /api/realms` | Admin only; create a realm with `name` and optional `description`. |

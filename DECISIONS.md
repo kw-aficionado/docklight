@@ -70,3 +70,10 @@
 - SFTP uses the Go SSH/SFTP libraries with password authentication. SSH host-key verification remains disabled to match the supplied brief; use a trusted network or tunnel. SMB uses the native SMB2 client with NTLMv2 authentication.
 - Remote records lock the protocol, host, port, bucket or share, region, and prefix. Credentials can rotate without changing the object key identity. One remote destination is configured at a time.
 - The SFTP integration test uses an in-process SSH/SFTP server over buffered `net.Pipe`; SMB has constructor and target-management coverage. No separate live SFTP or SMB server was available for acceptance.
+
+## 2026-10-31: Docklight template catalogs
+
+- No public catalog organization was provided for Docklight, so the app does not invent or hard-code one. Administrators explicitly save the repositories they trust; unsourced templates are checked against those saved catalogs.
+- GitHub uses its HTTPS API host. Gitea and Forgejo use an administrator-saved HTTPS base URL. Redirects are stopped, YAML downloads are bounded to 512 KiB, browse results are cached for ten minutes, and browsing exposes only the configured folder plus one child level.
+- Repository access tokens and the optional panel-wide GitHub API token are encrypted using `auth.secret_key`. Repository tokens are loaded only for the exact saved repository and host; the panel-wide token is never attached to non-GitHub requests.
+- Installed templates keep source host, repository, file path, and ref. Update checks compare versions by template ID and only report candidates; applying an update remains an explicit admin action. Removing a repository leaves provenance intact so checks can report that the source is gone.

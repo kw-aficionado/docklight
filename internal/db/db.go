@@ -641,6 +641,61 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 21 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct {
+			name string
+			ddl  string
+		}{
+			{"source_host", `ALTER TABLE gameskills ADD COLUMN source_host TEXT NOT NULL DEFAULT ''`},
+			{"source_repo", `ALTER TABLE gameskills ADD COLUMN source_repo TEXT NOT NULL DEFAULT ''`},
+			{"source_path", `ALTER TABLE gameskills ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`},
+			{"source_ref", `ALTER TABLE gameskills ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''`},
+		} {
+			if !hasColumn(tx, "gameskills", column.name) {
+				if _, err = tx.Exec(column.ddl); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS rune_repos (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			host TEXT NOT NULL DEFAULT '',
+			repo TEXT NOT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			ref TEXT NOT NULL DEFAULT 'main',
+			token_enc TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_rune_repos_source ON rune_repos(host,repo,path,ref)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS github_catalog_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			token_enc TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(21)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

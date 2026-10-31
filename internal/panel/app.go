@@ -27,42 +27,45 @@ import (
 )
 
 type App struct {
-	cfg                config.Config
-	configPath         string
-	db                 *sql.DB
-	engine             *docker.Engine
-	dataRoot           string
-	backupRoot         string
-	backupStoreFactory func(backupTargetConfig) (backupObjectStore, error)
-	booted             time.Time
-	dataMu             sync.Mutex
-	scheduleMu         sync.Mutex
-	scheduleRestart    func(context.Context, string, bool, int) (string, error)
-	scheduleControl    func(context.Context, string, string) (string, string, error)
-	schedulePlayers    func(context.Context, string) (int, error)
-	scheduleWait       func(context.Context, time.Duration) error
-	scheduleCommand    func(context.Context, Server, string) error
-	notificationClient *http.Client
-	runtimeMu          sync.Mutex
-	runtimePending     map[string]pendingRuntimeIncident
-	runtimeInspect     func(context.Context, string) (docker.Inspect, error)
-	runtimePing        func(context.Context) error
-	diskAlertMu        sync.Mutex
-	diskProbe          func(string) (diskUsage, error)
-	watchdogMu         sync.Mutex
-	watchdogStates     map[string]*watchdogRuntimeState
-	watchdogQuery      func(context.Context, Server, rune.Rune) error
-	watchdogHeal       func(context.Context, Server) error
-	watchdogStart      func(context.Context, Server) error
-	watchdogWait       func(context.Context, time.Duration) error
-	statusMu           sync.Mutex
-	statusCache        []byte
-	statusCacheUntil   time.Time
-	rateMu             sync.Mutex
-	loginIPs           map[string][]time.Time
-	loginUsers         map[string][]time.Time
-	jobsMu             sync.RWMutex
-	jobs               map[string]*installJob
+	cfg                   config.Config
+	configPath            string
+	db                    *sql.DB
+	engine                *docker.Engine
+	dataRoot              string
+	backupRoot            string
+	backupStoreFactory    func(backupTargetConfig) (backupObjectStore, error)
+	booted                time.Time
+	dataMu                sync.Mutex
+	scheduleMu            sync.Mutex
+	scheduleRestart       func(context.Context, string, bool, int) (string, error)
+	scheduleControl       func(context.Context, string, string) (string, string, error)
+	schedulePlayers       func(context.Context, string) (int, error)
+	scheduleWait          func(context.Context, time.Duration) error
+	scheduleCommand       func(context.Context, Server, string) error
+	notificationClient    *http.Client
+	runeCatalogHTTPClient *http.Client
+	runeCatalogMu         sync.Mutex
+	runeCatalogCache      map[string]runeCatalogCacheEntry
+	runtimeMu             sync.Mutex
+	runtimePending        map[string]pendingRuntimeIncident
+	runtimeInspect        func(context.Context, string) (docker.Inspect, error)
+	runtimePing           func(context.Context) error
+	diskAlertMu           sync.Mutex
+	diskProbe             func(string) (diskUsage, error)
+	watchdogMu            sync.Mutex
+	watchdogStates        map[string]*watchdogRuntimeState
+	watchdogQuery         func(context.Context, Server, rune.Rune) error
+	watchdogHeal          func(context.Context, Server) error
+	watchdogStart         func(context.Context, Server) error
+	watchdogWait          func(context.Context, time.Duration) error
+	statusMu              sync.Mutex
+	statusCache           []byte
+	statusCacheUntil      time.Time
+	rateMu                sync.Mutex
+	loginIPs              map[string][]time.Time
+	loginUsers            map[string][]time.Time
+	jobsMu                sync.RWMutex
+	jobs                  map[string]*installJob
 }
 
 type User struct {
@@ -190,6 +193,8 @@ func (a *App) Router() http.Handler {
 			})
 			priv.Get("/gameskills", a.listRunes)
 			priv.Get("/gameskills/{id}", a.getRune)
+			priv.Get("/gameskills/github", a.admin(a.browseGitHubCatalog))
+			priv.Get("/gameskills/updates", a.admin(a.checkRuneUpdates))
 			priv.Get("/realms", a.listRealms)
 			priv.Post("/realms", a.admin(a.createRealm))
 			priv.Post("/realms/reorder", a.admin(a.reorderRealms))
@@ -197,7 +202,16 @@ func (a *App) Router() http.Handler {
 			priv.Put("/realms/{id}", a.admin(a.updateRealm))
 			priv.Delete("/realms/{id}", a.admin(a.deleteRealm))
 			priv.Post("/gameskills", a.uploadRune)
+			priv.Post("/gameskills/install-from-github", a.admin(a.installGitHubRune))
 			priv.Delete("/gameskills/{id}", a.deleteRune)
+			priv.Get("/rune-repos", a.admin(a.listRuneRepos))
+			priv.Post("/rune-repos", a.admin(a.createRuneRepo))
+			priv.Get("/rune-repos/{id}/browse", a.admin(a.browseSavedRuneRepo))
+			priv.Post("/rune-repos/{id}/install", a.admin(a.installSavedRuneRepo))
+			priv.Put("/rune-repos/{id}", a.admin(a.updateRuneRepo))
+			priv.Delete("/rune-repos/{id}", a.admin(a.deleteRuneRepo))
+			priv.Get("/settings/github", a.admin(a.getGitHubCatalogSettings))
+			priv.Put("/settings/github", a.admin(a.updateGitHubCatalogSettings))
 			priv.Get("/message-templates", a.listMessageTemplates)
 			priv.Post("/message-templates", a.admin(a.createMessageTemplate))
 			priv.Put("/message-templates/{id}", a.admin(a.updateMessageTemplate))
@@ -586,19 +600,19 @@ func (a *App) totpDisable(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.Query(`SELECT id,name,category,version,yaml_blob,builtin FROM gameskills ORDER BY category,name`)
+	rows, err := a.db.Query(`SELECT id,name,category,version,yaml_blob,builtin,source_host,source_repo FROM gameskills ORDER BY category,name`)
 	if err != nil {
 		writeError(w, 500, "could not list templates")
 		return
 	}
 	type row struct {
-		id, name, category, yaml string
-		version, builtin         int
+		id, name, category, yaml, sourceHost, sourceRepo string
+		version, builtin                                 int
 	}
 	all := []row{}
 	for rows.Next() {
 		var x row
-		if rows.Scan(&x.id, &x.name, &x.category, &x.version, &x.yaml, &x.builtin) == nil {
+		if rows.Scan(&x.id, &x.name, &x.category, &x.version, &x.yaml, &x.builtin, &x.sourceHost, &x.sourceRepo) == nil {
 			all = append(all, x)
 		}
 	}
@@ -611,7 +625,11 @@ func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
 		}
 		rr, _ := rune.Parse(x.yaml)
 		rr = publicRune(rr)
-		out = append(out, map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "can_create_default": a.allowedRuneScope(u, "server.create", x.id), "description": rr.Description, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query})
+		item := map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "can_create_default": a.allowedRuneScope(u, "server.create", x.id), "description": rr.Description, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query}
+		if u.Role == "admin" {
+			item["source_host"], item["source_repo"] = x.sourceHost, x.sourceRepo
+		}
+		out = append(out, item)
 	}
 	writeJSON(w, 200, out)
 }
@@ -654,7 +672,7 @@ func (a *App) uploadRune(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "built-in templates cannot be overwritten")
 		return
 	}
-	_, e = a.db.Exec(`INSERT INTO gameskills(id,name,category,version,yaml_blob,builtin) VALUES(?,?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,version=excluded.version,yaml_blob=excluded.yaml_blob`, gs.ID, gs.Name, gs.Category, gs.Version, string(b))
+	_, e = a.db.Exec(`INSERT INTO gameskills(id,name,category,version,yaml_blob,builtin) VALUES(?,?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,version=excluded.version,yaml_blob=excluded.yaml_blob,source_host='',source_repo='',source_path='',source_ref=''`, gs.ID, gs.Name, gs.Category, gs.Version, string(b))
 	if e != nil {
 		writeError(w, 500, "could not save template")
 		return
