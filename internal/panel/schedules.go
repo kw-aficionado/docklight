@@ -229,8 +229,8 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	if destination == "" {
 		destination = "local"
 	}
-	if destination != "local" && destination != "s3" {
-		writeError(w, http.StatusBadRequest, "backup destination must be local or s3")
+	if destination != "local" && destination != "s3" && destination != "sftp" && destination != "smb" {
+		writeError(w, http.StatusBadRequest, "backup destination must be local, s3, sftp, or smb")
 		return
 	}
 	if in.Action != "backup" && destination != "local" {
@@ -246,10 +246,14 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
 		return
 	}
-	if destination == "s3" {
+	if isRemoteBackupStorage(destination) {
 		_, target, targetErr := a.backupStoreForRemote()
-		if targetErr != nil || !target.Enabled {
-			writeError(w, http.StatusBadRequest, "enable and configure the S3 backup target before scheduling S3 backups")
+		if targetErr != nil || !target.Enabled || target.protocol() != destination {
+			if destination == "s3" {
+				writeError(w, http.StatusBadRequest, "enable and configure the S3 backup target before scheduling S3 backups")
+			} else {
+				writeError(w, http.StatusBadRequest, "enable and configure the selected "+strings.ToUpper(destination)+" backup target before scheduling remote backups")
+			}
 			return
 		}
 	}

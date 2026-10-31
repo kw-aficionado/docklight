@@ -16,7 +16,7 @@ The main application's configured ports are published on the host. Sidecars have
 - Restart removes and recreates the containers while keeping the network and persistent data.
 - Delete removes sidecars and the network before deleting the server's data. If Docker cannot confirm cleanup, the server data remains for a safe retry.
 - The main app binds only `<server data directory>/_app`; sidecar data binds below `<server data directory>/_stack/<service name>`. This keeps raw database files out of the main app's filesystem and Files tab.
-- Backups archive the full server data root, so both `_app` and `_stack` are included in the same local and S3-compatible snapshot.
+- Backups archive the full server data root, so both `_app` and `_stack` are included in the same local or remote snapshot.
 - CPU and memory limits apply to the whole stack. The main app receives weight 3; sidecars default to weight 1 and can set a value from 1 to 100.
 
 Sidecar status is refreshed by the runtime monitor. If Docker cannot be reached, Docklight keeps the last known status. A confirmed missing or exited sidecar appears as **Needs attention** in the server overview; it does not silently change the main container's state.

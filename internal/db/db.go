@@ -614,6 +614,33 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 20 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct {
+			name string
+			ddl  string
+		}{
+			{"protocol", `ALTER TABLE backup_target_settings ADD COLUMN protocol TEXT NOT NULL DEFAULT 's3'`},
+			{"port", `ALTER TABLE backup_target_settings ADD COLUMN port INTEGER NOT NULL DEFAULT 0`},
+		} {
+			if !hasColumn(tx, "backup_target_settings", column.name) {
+				if _, err = tx.Exec(column.ddl); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(20)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

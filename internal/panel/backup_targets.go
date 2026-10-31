@@ -24,8 +24,10 @@ type backupObjectStore interface {
 }
 
 type backupTargetConfig struct {
+	Type      string
 	Enabled   bool
 	Endpoint  string
+	Port      int
 	Bucket    string
 	Region    string
 	AccessKey string
@@ -34,25 +36,46 @@ type backupTargetConfig struct {
 }
 
 type backupTargetSummary struct {
+	Type                string `json:"type"`
 	Enabled             bool   `json:"enabled"`
 	Configured          bool   `json:"configured"`
 	Endpoint            string `json:"endpoint,omitempty"`
+	Host                string `json:"host,omitempty"`
+	Port                int    `json:"port,omitempty"`
 	Bucket              string `json:"bucket,omitempty"`
+	Share               string `json:"share,omitempty"`
 	Region              string `json:"region,omitempty"`
 	Prefix              string `json:"prefix,omitempty"`
 	AccessKeyConfigured bool   `json:"access_key_configured"`
+	UsernameConfigured  bool   `json:"username_configured"`
 	SecretConfigured    bool   `json:"secret_key_configured"`
 }
 
 func (t backupTargetConfig) configured() bool {
-	return t.Endpoint != "" && t.Bucket != "" && t.Region != "" && t.AccessKey != "" && t.SecretKey != ""
+	switch t.protocol() {
+	case "s3":
+		return t.Endpoint != "" && t.Bucket != "" && t.Region != "" && t.AccessKey != "" && t.SecretKey != ""
+	case "sftp":
+		return t.Endpoint != "" && t.AccessKey != "" && t.SecretKey != ""
+	case "smb":
+		return t.Endpoint != "" && t.Bucket != "" && t.AccessKey != "" && t.SecretKey != ""
+	default:
+		return false
+	}
+}
+
+func (t backupTargetConfig) protocol() string {
+	if t.Type == "" {
+		return "s3"
+	}
+	return t.Type
 }
 
 func (a *App) readBackupTarget() (backupTargetConfig, error) {
 	var enabled int
 	var endpointEnc, accessKeyEnc, secretKeyEnc string
 	var target backupTargetConfig
-	err := a.db.QueryRow(`SELECT enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix FROM backup_target_settings WHERE id=1`).Scan(&enabled, &endpointEnc, &target.Bucket, &target.Region, &accessKeyEnc, &secretKeyEnc, &target.Prefix)
+	err := a.db.QueryRow(`SELECT enabled,protocol,port,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix FROM backup_target_settings WHERE id=1`).Scan(&enabled, &target.Type, &target.Port, &endpointEnc, &target.Bucket, &target.Region, &accessKeyEnc, &secretKeyEnc, &target.Prefix)
 	if errors.Is(err, sql.ErrNoRows) {
 		return backupTargetConfig{}, nil
 	}
@@ -74,7 +97,7 @@ func (a *App) readBackupTarget() (backupTargetConfig, error) {
 		}
 		plain, decryptErr := security.Decrypt([]byte(a.cfg.Auth.SecretKey), field.cipher)
 		if decryptErr != nil {
-			return backupTargetConfig{}, fmt.Errorf("stored S3 %s cannot be decrypted; check auth.secret_key", field.name)
+			return backupTargetConfig{}, fmt.Errorf("stored backup %s cannot be decrypted; check auth.secret_key", field.name)
 		}
 		*field.destination = plain
 	}
@@ -96,29 +119,47 @@ func (a *App) backupTargetStatus(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read backup target status")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"enabled": target.Enabled && target.configured()})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": target.Enabled && target.configured(), "configured": target.configured(), "type": target.protocol()})
 }
 
 func summarizeBackupTarget(target backupTargetConfig) backupTargetSummary {
-	return backupTargetSummary{
+	protocol := target.protocol()
+	summary := backupTargetSummary{
+		Type:                protocol,
 		Enabled:             target.Enabled,
 		Configured:          target.configured(),
-		Endpoint:            target.Endpoint,
-		Bucket:              target.Bucket,
-		Region:              target.Region,
-		Prefix:              target.Prefix,
-		AccessKeyConfigured: target.AccessKey != "",
+		AccessKeyConfigured: protocol == "s3" && target.AccessKey != "",
+		UsernameConfigured:  protocol != "s3" && target.AccessKey != "",
 		SecretConfigured:    target.SecretKey != "",
+		Port:                target.Port,
+		Prefix:              target.Prefix,
 	}
+	if protocol == "s3" {
+		summary.Endpoint = target.Endpoint
+		summary.Bucket = target.Bucket
+		summary.Region = target.Region
+	} else {
+		summary.Host = target.Endpoint
+		if protocol == "smb" {
+			summary.Share = target.Bucket
+		}
+	}
+	return summary
 }
 
 func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Enabled     *bool   `json:"enabled"`
+		Type        string  `json:"type"`
+		Protocol    string  `json:"protocol"`
 		Endpoint    string  `json:"endpoint"`
+		Host        string  `json:"host"`
+		Port        *int    `json:"port"`
 		Bucket      string  `json:"bucket"`
+		Share       string  `json:"share"`
 		Region      string  `json:"region"`
 		AccessKey   string  `json:"access_key"`
+		Username    string  `json:"username"`
 		SecretKey   string  `json:"secret_key"`
 		Prefix      *string `json:"prefix"`
 		ClearTarget bool    `json:"clear_target"`
@@ -135,32 +176,59 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.ClearTarget {
 		if count, countErr := a.remoteBackupCount(); countErr != nil {
-			writeError(w, http.StatusInternalServerError, "could not check existing S3 backups before clearing the target")
+			writeError(w, http.StatusInternalServerError, "could not check existing remote backups before clearing the target")
 			return
 		} else if count != 0 {
-			writeError(w, http.StatusConflict, "delete the existing S3 backups before clearing this target")
+			writeError(w, http.StatusConflict, "delete the existing remote backups before clearing this target")
 			return
 		}
 		if _, err = a.db.Exec(`DELETE FROM backup_target_settings WHERE id=1`); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not clear backup target settings")
 			return
 		}
-		a.audit(principal(r), "backup.target.clear", "backup_target", "s3", "")
+		a.audit(principal(r), "backup.target.clear", "backup_target", current.protocol(), "")
 		writeJSON(w, http.StatusOK, summarizeBackupTarget(backupTargetConfig{}))
 		return
 	}
-	next := current
-	if in.Endpoint != "" {
-		next.Endpoint = strings.TrimSpace(in.Endpoint)
+	requestedType := strings.TrimSpace(in.Type)
+	if requestedType == "" {
+		requestedType = strings.TrimSpace(in.Protocol)
 	}
-	if in.Bucket != "" {
+	if requestedType == "" {
+		requestedType = current.protocol()
+	}
+	if requestedType != "s3" && requestedType != "sftp" && requestedType != "smb" {
+		writeError(w, http.StatusBadRequest, "backup target type must be s3, sftp, or smb")
+		return
+	}
+	next := current
+	if requestedType != current.protocol() {
+		next = backupTargetConfig{Type: requestedType}
+	} else {
+		next.Type = requestedType
+	}
+	host := strings.TrimSpace(in.Host)
+	if host == "" {
+		host = strings.TrimSpace(in.Endpoint)
+	}
+	if host != "" {
+		next.Endpoint = host
+	}
+	if in.Port != nil {
+		next.Port = *in.Port
+	}
+	if in.Share != "" {
+		next.Bucket = strings.TrimSpace(in.Share)
+	} else if in.Bucket != "" {
 		next.Bucket = strings.TrimSpace(in.Bucket)
 	}
 	if in.Region != "" {
 		next.Region = strings.TrimSpace(in.Region)
 	}
-	if in.AccessKey != "" {
-		next.AccessKey = in.AccessKey
+	if in.Username != "" {
+		next.AccessKey = strings.TrimSpace(in.Username)
+	} else if in.AccessKey != "" {
+		next.AccessKey = strings.TrimSpace(in.AccessKey)
 	}
 	if in.SecretKey != "" {
 		next.SecretKey = in.SecretKey
@@ -176,72 +244,99 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if anyBackupTargetValue(next) && !next.configured() {
-		writeError(w, http.StatusBadRequest, "enter the S3 endpoint, bucket, region, access key, and secret key before saving the target")
+		writeError(w, http.StatusBadRequest, incompleteTargetMessage(next.protocol()))
 		return
 	}
 	if next.Enabled && !next.configured() {
-		writeError(w, http.StatusBadRequest, "configure all S3 target fields before enabling S3 backups")
+		writeError(w, http.StatusBadRequest, "configure all required "+strings.ToUpper(next.protocol())+" target fields before enabling remote backups")
 		return
 	}
 	if next.configured() {
-		if _, err = backup.NewS3Client(next.Endpoint, next.Bucket, next.Region, next.AccessKey, next.SecretKey, nil); err != nil {
+		if err = validateBackupTarget(next); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	if count, countErr := a.remoteBackupCount(); countErr != nil {
-		writeError(w, http.StatusInternalServerError, "could not check existing S3 backups before updating the target")
+		writeError(w, http.StatusInternalServerError, "could not check existing remote backups before updating the target")
 		return
 	} else if count != 0 && !sameBackupTargetIdentity(current, next) {
-		writeError(w, http.StatusConflict, "delete the existing S3 backups before changing the endpoint, bucket, region, or prefix")
+		writeError(w, http.StatusConflict, "delete the existing remote backups before changing the protocol, host, port, bucket, share, region, or prefix")
 		return
 	}
 	endpointEnc, accessKeyEnc, secretKeyEnc := "", "", ""
 	if next.Endpoint != "" {
 		endpointEnc, err = security.Encrypt([]byte(a.cfg.Auth.SecretKey), next.Endpoint)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not encrypt the S3 endpoint")
+			writeError(w, http.StatusInternalServerError, "could not encrypt the backup host or endpoint")
 			return
 		}
 	}
 	if next.AccessKey != "" {
 		accessKeyEnc, err = security.Encrypt([]byte(a.cfg.Auth.SecretKey), next.AccessKey)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not encrypt the S3 access key")
+			writeError(w, http.StatusInternalServerError, "could not encrypt the backup access key or username")
 			return
 		}
 	}
 	if next.SecretKey != "" {
 		secretKeyEnc, err = security.Encrypt([]byte(a.cfg.Auth.SecretKey), next.SecretKey)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not encrypt the S3 secret key")
+			writeError(w, http.StatusInternalServerError, "could not encrypt the backup secret")
 			return
 		}
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,updated_at)
-		VALUES(1,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,endpoint_enc=excluded.endpoint_enc,bucket=excluded.bucket,region=excluded.region,access_key_enc=excluded.access_key_enc,secret_key_enc=excluded.secret_key_enc,prefix=excluded.prefix,updated_at=CURRENT_TIMESTAMP`, boolInt(next.Enabled), endpointEnc, next.Bucket, next.Region, accessKeyEnc, secretKeyEnc, next.Prefix); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not save S3 backup target settings")
+	if _, err = a.db.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,protocol,port,updated_at)
+		VALUES(1,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,endpoint_enc=excluded.endpoint_enc,bucket=excluded.bucket,region=excluded.region,access_key_enc=excluded.access_key_enc,secret_key_enc=excluded.secret_key_enc,prefix=excluded.prefix,protocol=excluded.protocol,port=excluded.port,updated_at=CURRENT_TIMESTAMP`, boolInt(next.Enabled), endpointEnc, next.Bucket, next.Region, accessKeyEnc, secretKeyEnc, next.Prefix, next.protocol(), next.Port); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save remote backup target settings")
 		return
 	}
-	a.audit(principal(r), "backup.target.update", "backup_target", "s3", fmt.Sprintf("enabled=%t bucket=%s region=%s", next.Enabled, next.Bucket, next.Region))
+	a.audit(principal(r), "backup.target.update", "backup_target", next.protocol(), fmt.Sprintf("enabled=%t host=%s", next.Enabled, next.Endpoint))
 	writeJSON(w, http.StatusOK, summarizeBackupTarget(next))
+}
+
+func incompleteTargetMessage(protocol string) string {
+	switch protocol {
+	case "sftp":
+		return "enter the SFTP host, username, and password before saving the target"
+	case "smb":
+		return "enter the SMB host, share, username, and password before saving the target"
+	default:
+		return "enter the S3 endpoint, bucket, region, access key, and secret key before saving the target"
+	}
+}
+
+func validateBackupTarget(target backupTargetConfig) error {
+	switch target.protocol() {
+	case "s3":
+		_, err := backup.NewS3Client(target.Endpoint, target.Bucket, target.Region, target.AccessKey, target.SecretKey, nil)
+		return err
+	case "sftp":
+		_, err := backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, "")
+		return err
+	case "smb":
+		_, err := backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
+		return err
+	default:
+		return errors.New("backup target type must be s3, sftp, or smb")
+	}
 }
 
 func normalizeBackupPrefix(value string) (string, error) {
 	value = strings.Trim(value, "/")
 	if len(value) > 256 || strings.ContainsAny(value, "\\\x00") || strings.IndexFunc(value, unicode.IsControl) >= 0 {
-		return "", errors.New("S3 prefix must be 256 characters or fewer and cannot contain control characters")
+		return "", errors.New("remote backup prefix must be 256 characters or fewer and cannot contain control characters")
 	}
 	if value == "" {
 		return "", nil
 	}
 	for _, segment := range strings.Split(value, "/") {
 		if segment == "" || segment == "." || segment == ".." {
-			return "", errors.New("S3 prefix cannot contain empty or dot path segments")
+			return "", errors.New("remote backup prefix cannot contain empty or dot path segments")
 		}
 		for _, r := range segment {
 			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_.~", r)) {
-				return "", errors.New("S3 prefix segments may contain only letters, numbers, hyphens, periods, underscores, and tildes")
+				return "", errors.New("remote backup prefix segments may contain only letters, numbers, hyphens, periods, underscores, and tildes")
 			}
 		}
 	}
@@ -249,16 +344,16 @@ func normalizeBackupPrefix(value string) (string, error) {
 }
 
 func anyBackupTargetValue(target backupTargetConfig) bool {
-	return target.Endpoint != "" || target.Bucket != "" || target.Region != "" || target.AccessKey != "" || target.SecretKey != "" || target.Prefix != ""
+	return target.Endpoint != "" || target.Port != 0 || target.Bucket != "" || target.Region != "" || target.AccessKey != "" || target.SecretKey != "" || target.Prefix != ""
 }
 
 func sameBackupTargetIdentity(first, second backupTargetConfig) bool {
-	return first.Endpoint == second.Endpoint && first.Bucket == second.Bucket && first.Region == second.Region && first.Prefix == second.Prefix
+	return first.protocol() == second.protocol() && first.Endpoint == second.Endpoint && first.Port == second.Port && first.Bucket == second.Bucket && first.Region == second.Region && first.Prefix == second.Prefix
 }
 
 func (a *App) remoteBackupCount() (int, error) {
 	var count int
-	err := a.db.QueryRow(`SELECT count(*) FROM server_backups WHERE storage='s3'`).Scan(&count)
+	err := a.db.QueryRow(`SELECT count(*) FROM server_backups WHERE storage IN ('s3','sftp','smb')`).Scan(&count)
 	return count, err
 }
 
@@ -272,12 +367,31 @@ func (a *App) newS3BackupStore(target backupTargetConfig) (backupObjectStore, er
 	return backup.NewS3Client(target.Endpoint, target.Bucket, target.Region, target.AccessKey, target.SecretKey, nil)
 }
 
+func (a *App) newRemoteBackupStore(target backupTargetConfig) (backupObjectStore, error) {
+	if !target.configured() {
+		return nil, errors.New("configure the remote backup destination in Backup storage first")
+	}
+	if a.backupStoreFactory != nil {
+		return a.backupStoreFactory(target)
+	}
+	switch target.protocol() {
+	case "s3":
+		return a.newS3BackupStore(target)
+	case "sftp":
+		return backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, "")
+	case "smb":
+		return backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
+	default:
+		return nil, errors.New("backup target type must be s3, sftp, or smb")
+	}
+}
+
 func (a *App) backupStoreForRemote() (backupObjectStore, backupTargetConfig, error) {
 	target, err := a.readBackupTarget()
 	if err != nil {
-		return nil, backupTargetConfig{}, errors.New("could not read S3 backup target settings")
+		return nil, backupTargetConfig{}, errors.New("could not read remote backup target settings")
 	}
-	store, err := a.newS3BackupStore(target)
+	store, err := a.newRemoteBackupStore(target)
 	if err != nil {
 		return nil, backupTargetConfig{}, err
 	}
@@ -294,20 +408,29 @@ func (a *App) testBackupTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := newID()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not generate an S3 connectivity test ID")
+		writeError(w, http.StatusInternalServerError, "could not generate a remote connectivity test ID")
 		return
 	}
 	if err = os.MkdirAll(a.dataRoot, 0700); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not prepare panel data storage for the S3 connectivity test")
+		writeError(w, http.StatusInternalServerError, "could not prepare panel data storage for the remote connectivity test")
 		return
 	}
 	if err = ensureBackupDirectory(a.dataRoot); err != nil {
-		writeError(w, http.StatusConflict, "panel data storage is not a real directory; repair it before testing the S3 destination")
+		writeError(w, http.StatusConflict, "panel data storage is not a real directory; repair it before testing the remote destination")
 		return
 	}
-	path, err := os.CreateTemp(a.dataRoot, ".s3-check-*.tmp")
+	path, err := os.CreateTemp(a.dataRoot, ".remote-check-*.tmp")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create an S3 test file under panel data storage")
+		writeError(w, http.StatusInternalServerError, "could not create a remote test file under panel data storage")
+		return
+	}
+	if _, err = io.WriteString(path, "Docklight remote backup connectivity check\n"); err == nil {
+		err = path.Sync()
+	}
+	if err != nil {
+		_ = path.Close()
+		_ = os.Remove(path.Name())
+		writeError(w, http.StatusInternalServerError, "could not prepare the remote connectivity test file")
 		return
 	}
 	key := backupObjectKey(target.Prefix, "connectivity-checks", id)
@@ -320,7 +443,7 @@ func (a *App) testBackupTarget(w http.ResponseWriter, r *http.Request) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		cleanupErr := store.DeleteObject(cleanupCtx, key)
 		cleanupCancel()
-		message := explainS3BackupError("upload", uploadErr)
+		message := explainRemoteBackupError(target.protocol(), "upload", uploadErr)
 		if cleanupErr != nil {
 			message += "; a partial test object may remain at " + key + " and could not be removed"
 		}
@@ -331,10 +454,10 @@ func (a *App) testBackupTarget(w http.ResponseWriter, r *http.Request) {
 	err = store.DeleteObject(cleanupCtx, key)
 	cleanupCancel()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "S3 accepted the connectivity test object, but Docklight could not remove "+key+"; check s3:DeleteObject permissions and remove that test key manually")
+		writeError(w, http.StatusBadGateway, strings.ToUpper(target.protocol())+" accepted the connectivity test object, but Docklight could not remove "+key+"; check delete permissions and remove that test object manually")
 		return
 	}
-	a.audit(principal(r), "backup.target.test", "backup_target", "s3", "connectivity test succeeded")
+	a.audit(principal(r), "backup.target.test", "backup_target", target.protocol(), "connectivity test succeeded")
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -368,4 +491,21 @@ func explainS3BackupError(action string, err error) string {
 		return "S3 endpoint is unreachable; check its host, port, firewall, and network route"
 	}
 	return fmt.Sprintf("S3 %s failed: %s", action, message)
+}
+
+func explainRemoteBackupError(protocol, action string, err error) string {
+	if protocol == "s3" {
+		return explainS3BackupError(action, err)
+	}
+	message := err.Error()
+	if strings.Contains(message, "no such host") {
+		return strings.ToUpper(protocol) + " host could not be resolved; check the host name and panel-host DNS"
+	}
+	if strings.Contains(message, "connection refused") || strings.Contains(message, "network is unreachable") || strings.Contains(message, "i/o timeout") || strings.Contains(message, "context deadline exceeded") {
+		return strings.ToUpper(protocol) + " host is unreachable; check its port, firewall, and network route"
+	}
+	if strings.Contains(message, "permission denied") || strings.Contains(message, "authentication failed") || strings.Contains(message, "STATUS_LOGON_FAILURE") {
+		return strings.ToUpper(protocol) + " authentication or file permissions were rejected; check the saved username, password, and destination access"
+	}
+	return fmt.Sprintf("%s %s failed: %s", strings.ToUpper(protocol), action, message)
 }

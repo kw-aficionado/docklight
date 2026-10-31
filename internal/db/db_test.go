@@ -74,8 +74,14 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 19 {
-		t.Fatalf("expected 19 migrations, got %d", count)
+	if count != 20 {
+		t.Fatalf("expected 20 migrations, got %d", count)
+	}
+	for _, column := range []string{"protocol", "port"} {
+		var found int
+		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_target_settings') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
+			t.Fatalf("backup target migration is missing %q: count=%d err=%v", column, found, err)
+		}
 	}
 	var sidecarTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='server_sidecars'`).Scan(&sidecarTable); err != nil || sidecarTable != "server_sidecars" {

@@ -89,8 +89,8 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	if in.Destination == "" {
 		in.Destination = "local"
 	}
-	if in.Destination != "local" && in.Destination != "s3" {
-		writeError(w, http.StatusBadRequest, "destination must be local or s3")
+	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" {
+		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, or smb")
 		return
 	}
 	a.dataMu.Lock()
@@ -136,19 +136,23 @@ type backupOperationError struct {
 
 func (e *backupOperationError) Error() string { return e.message }
 
+func isRemoteBackupStorage(storage string) bool {
+	return storage == "s3" || storage == "sftp" || storage == "smb"
+}
+
 func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupRecord, int, string, error) {
 	destination := "local"
 	if len(destinations) != 0 && strings.TrimSpace(destinations[0]) != "" {
 		destination = strings.TrimSpace(destinations[0])
 	}
-	if destination == "s3" {
-		return a.createS3BackupSnapshot(s)
+	if destination == "s3" || destination == "sftp" || destination == "smb" {
+		return a.createRemoteBackupSnapshot(s, destination)
 	}
 	fail := func(status int, message string) (backupRecord, int, string, error) {
 		return backupRecord{}, 0, "", &backupOperationError{status: status, message: message}
 	}
 	if destination != "local" {
-		return fail(http.StatusBadRequest, "backup destination must be local or s3")
+		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, or smb")
 	}
 	if pathsOverlap(s.DataDir, a.backupRoot) {
 		return fail(http.StatusConflict, "backup directory overlaps this server's data directory; set backups.path outside the servers directory")
@@ -230,6 +234,10 @@ func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupReco
 }
 
 func (a *App) createS3BackupSnapshot(s Server) (backupRecord, int, string, error) {
+	return a.createRemoteBackupSnapshot(s, "s3")
+}
+
+func (a *App) createRemoteBackupSnapshot(s Server, protocol string) (backupRecord, int, string, error) {
 	fail := func(status int, message string) (backupRecord, int, string, error) {
 		return backupRecord{}, 0, "", &backupOperationError{status: status, message: message}
 	}
@@ -237,8 +245,11 @@ func (a *App) createS3BackupSnapshot(s Server) (backupRecord, int, string, error
 	if err != nil {
 		return fail(http.StatusBadRequest, err.Error())
 	}
+	if target.protocol() != protocol {
+		return fail(http.StatusBadRequest, "the configured remote backup destination is "+strings.ToUpper(target.protocol())+", not "+strings.ToUpper(protocol))
+	}
 	if !target.Enabled {
-		return fail(http.StatusBadRequest, "enable and configure the S3 backup target in Backup storage before selecting S3")
+		return fail(http.StatusBadRequest, "enable and configure the "+strings.ToUpper(protocol)+" backup target in Backup storage before selecting it")
 	}
 	if err = ensureBackupDirectory(a.dataRoot); err != nil {
 		return fail(http.StatusInternalServerError, "panel server-data storage is missing or is not a real directory")
@@ -276,14 +287,14 @@ func (a *App) createS3BackupSnapshot(s Server) (backupRecord, int, string, error
 	}
 	result := <-created
 	if uploadErr != nil {
-		message := explainS3BackupError("upload", uploadErr)
+		message := explainRemoteBackupError(protocol, "upload", uploadErr)
 		if cleanupS3Object(store, objectKey) != nil {
 			message += "; a partial object may remain at " + objectKey + " and could not be removed"
 		}
 		return fail(http.StatusBadGateway, message)
 	}
 	if result.err != nil {
-		message := "S3 backup archive could not be created: " + result.err.Error()
+		message := strings.ToUpper(protocol) + " backup archive could not be created: " + result.err.Error()
 		if cleanupS3Object(store, objectKey) != nil {
 			message += "; a partial object may remain at " + objectKey
 		}
@@ -291,30 +302,30 @@ func (a *App) createS3BackupSnapshot(s Server) (backupRecord, int, string, error
 	}
 	checksum := hex.EncodeToString(hasher.Sum(nil))
 	size := int64(byteCount)
-	verified, verifiedChecksum, verifiedSize, verifyErr := verifyS3BackupObject(ctx, store, objectKey, []byte(a.cfg.Auth.SecretKey))
+	verified, verifiedChecksum, verifiedSize, verifyErr := verifyRemoteBackupObject(ctx, store, objectKey, []byte(a.cfg.Auth.SecretKey))
 	if verifyErr != nil || verified.Files != result.summary.Files || verified.Directories != result.summary.Directories || verified.Bytes != result.summary.Bytes || verifiedChecksum != checksum || verifiedSize != size {
-		message := "S3 backup did not pass remote integrity verification; check bucket read access and retry"
+		message := strings.ToUpper(protocol) + " backup did not pass remote integrity verification; check destination read access and retry"
 		if cleanupS3Object(store, objectKey) != nil {
 			message += "; the unverified object may remain at " + objectKey
 		}
 		return fail(http.StatusBadGateway, message)
 	}
 	createdAt := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
-	if _, err = a.db.Exec(`INSERT INTO server_backups(id,server_id,storage,storage_key,size_bytes,sha256,files,directories,data_bytes,created_at) VALUES(?,?,'s3',?,?,?,?,?,?,?)`, id, s.ID, objectKey, size, checksum, result.summary.Files, result.summary.Directories, result.summary.Bytes, createdAt); err != nil {
+	if _, err = a.db.Exec(`INSERT INTO server_backups(id,server_id,storage,storage_key,size_bytes,sha256,files,directories,data_bytes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, s.ID, protocol, objectKey, size, checksum, result.summary.Files, result.summary.Directories, result.summary.Bytes, createdAt); err != nil {
 		cleanupErr := cleanupS3Object(store, objectKey)
 		if cleanupErr != nil {
-			return fail(http.StatusInternalServerError, "S3 backup uploaded but its database record could not be saved; remove the orphaned object after fixing panel storage")
+			return fail(http.StatusInternalServerError, strings.ToUpper(protocol)+" backup uploaded but its database record could not be saved; remove the orphaned object after fixing panel storage")
 		}
-		return fail(http.StatusInternalServerError, "S3 backup was uploaded but its metadata could not be saved; check panel storage and retry")
+		return fail(http.StatusInternalServerError, strings.ToUpper(protocol)+" backup was uploaded but its metadata could not be saved; check panel storage and retry")
 	}
 	item, err := a.getBackup(s.ID, id)
 	if err != nil {
-		return fail(http.StatusInternalServerError, "S3 backup was saved but its metadata could not be read")
+		return fail(http.StatusInternalServerError, strings.ToUpper(protocol)+" backup was saved but its metadata could not be read")
 	}
 	pruned, _, pruneErr := a.pruneServerBackups(s.ID, a.backupRetention())
 	warning := ""
 	if pruneErr != nil {
-		warning = "S3 backup was saved, but retention cleanup failed; check bucket permissions and prune again after fixing access"
+		warning = strings.ToUpper(protocol) + " backup was saved, but retention cleanup failed; check destination permissions and prune again after fixing access"
 	}
 	return item, pruned, warning, nil
 }
@@ -327,6 +338,10 @@ func (counter *backupByteCounter) Write(p []byte) (int, error) {
 }
 
 func verifyS3BackupObject(ctx context.Context, store backupObjectStore, key string, encryptionKey []byte) (backup.Summary, string, int64, error) {
+	return verifyRemoteBackupObject(ctx, store, key, encryptionKey)
+}
+
+func verifyRemoteBackupObject(ctx context.Context, store backupObjectStore, key string, encryptionKey []byte) (backup.Summary, string, int64, error) {
 	reader, writer := io.Pipe()
 	downloaded := make(chan error, 1)
 	go func() {
@@ -376,7 +391,7 @@ func (a *App) verifyBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	filePath, cleanup, err := a.materializeBackupFile(item, filePath)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, explainS3BackupError("download", err))
+		writeError(w, http.StatusBadGateway, explainRemoteBackupError(item.Storage, "download", err))
 		return
 	}
 	defer cleanup()
@@ -416,7 +431,7 @@ func (a *App) restoreBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	filePath, cleanup, err := a.materializeBackupFile(item, filePath)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "restore stopped before changing server data: "+explainS3BackupError("download", err))
+		writeError(w, http.StatusBadGateway, "restore stopped before changing server data: "+explainRemoteBackupError(item.Storage, "download", err))
 		return
 	}
 	defer cleanup()
@@ -545,14 +560,14 @@ func (a *App) backupFileRecord(serverID, backupID string) (backupRecord, string,
 	if !safePathSegment(serverID) || !safePathSegment(backupID) {
 		return backupRecord{}, "", errors.New("backup identifier is invalid")
 	}
-	if item.Storage == "s3" {
-		var prefix string
-		if err = a.db.QueryRow(`SELECT prefix FROM backup_target_settings WHERE id=1`).Scan(&prefix); err != nil {
-			return backupRecord{}, "", errors.New("S3 target settings are missing; restore the backup target configuration before using remote backups")
+	if isRemoteBackupStorage(item.Storage) {
+		target, targetErr := a.readBackupTarget()
+		if targetErr != nil || target.protocol() != item.Storage {
+			return backupRecord{}, "", errors.New("remote target settings do not match this backup; restore the saved destination configuration before using it")
 		}
-		wantKey := backupObjectKey(prefix, serverID, backupID)
-		if item.StorageKey != wantKey || !safeS3BackupObjectKey(item.StorageKey) {
-			return backupRecord{}, "", errors.New("S3 backup metadata contains an invalid object key")
+		wantKey := backupObjectKey(target.Prefix, serverID, backupID)
+		if item.StorageKey != wantKey || !safeRemoteBackupObjectKey(item.StorageKey) {
+			return backupRecord{}, "", errors.New("remote backup metadata contains an invalid object key")
 		}
 		return item, "", nil
 	}
@@ -575,6 +590,10 @@ func (a *App) getBackup(serverID, backupID string) (backupRecord, error) {
 }
 
 func safeS3BackupObjectKey(key string) bool {
+	return safeRemoteBackupObjectKey(key)
+}
+
+func safeRemoteBackupObjectKey(key string) bool {
 	if key == "" || len(key) > 1024 || strings.ContainsAny(key, "\\\x00") || strings.IndexFunc(key, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 		return false
 	}
@@ -590,14 +609,17 @@ func (a *App) materializeBackupFile(item backupRecord, filePath string) (string,
 	if item.Storage == "local" {
 		return filePath, func() {}, nil
 	}
-	if item.Storage != "s3" {
+	if !isRemoteBackupStorage(item.Storage) {
 		return "", func() {}, errors.New("backup record contains an unsupported storage type")
 	}
-	store, _, err := a.backupStoreForRemote()
+	store, target, err := a.backupStoreForRemote()
 	if err != nil {
 		return "", func() {}, err
 	}
-	file, err := os.CreateTemp(a.dataRoot, ".docklight-s3-download-*.tmp")
+	if target.protocol() != item.Storage {
+		return "", func() {}, errors.New("remote target type does not match the saved backup")
+	}
+	file, err := os.CreateTemp(a.dataRoot, ".docklight-"+item.Storage+"-download-*.tmp")
 	if err != nil {
 		return "", func() {}, errors.New("could not create a temporary download under panel data storage; check free space and permissions")
 	}
@@ -605,7 +627,7 @@ func (a *App) materializeBackupFile(item backupRecord, filePath string) (string,
 	if err = file.Chmod(0600); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
-		return "", func() {}, errors.New("could not secure the temporary S3 download")
+		return "", func() {}, errors.New("could not secure the temporary remote download")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	downloadErr := store.GetObject(ctx, item.StorageKey, file)
@@ -631,17 +653,20 @@ func (a *App) deleteBackupArtifact(item backupRecord, filePath string) error {
 		}
 		return nil
 	}
-	if item.Storage != "s3" {
+	if !isRemoteBackupStorage(item.Storage) {
 		return errors.New("backup record contains an unsupported storage type")
 	}
-	store, _, err := a.backupStoreForRemote()
+	store, target, err := a.backupStoreForRemote()
 	if err != nil {
 		return err
+	}
+	if target.protocol() != item.Storage {
+		return errors.New("remote target type does not match the saved backup")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err = store.DeleteObject(ctx, item.StorageKey); err != nil {
-		return errors.New(explainS3BackupError("delete", err))
+		return errors.New(explainRemoteBackupError(item.Storage, "delete", err))
 	}
 	return nil
 }
@@ -717,34 +742,34 @@ func (a *App) removeServerBackups(serverID string) error {
 	if !safePathSegment(serverID) {
 		return errors.New("server identifier is invalid; backup cleanup was stopped")
 	}
-	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage='s3' ORDER BY created_at,id`, serverID)
+	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb') ORDER BY created_at,id`, serverID)
 	if err != nil {
-		return errors.New("could not read S3 backup records before deleting the server")
+		return errors.New("could not read remote backup records before deleting the server")
 	}
 	remoteIDs := []string{}
 	for remoteRows.Next() {
 		var id string
 		if err = remoteRows.Scan(&id); err != nil {
 			_ = remoteRows.Close()
-			return errors.New("could not read S3 backup records before deleting the server")
+			return errors.New("could not read remote backup records before deleting the server")
 		}
 		remoteIDs = append(remoteIDs, id)
 	}
 	if err = remoteRows.Err(); err != nil {
 		_ = remoteRows.Close()
-		return errors.New("could not read S3 backup records before deleting the server")
+		return errors.New("could not read remote backup records before deleting the server")
 	}
 	_ = remoteRows.Close()
 	for _, id := range remoteIDs {
 		item, _, findErr := a.backupFileRecord(serverID, id)
 		if findErr != nil {
-			return errors.New("an S3 backup record is invalid; repair its target settings before deleting the server")
+			return errors.New("a remote backup record is invalid; repair its target settings before deleting the server")
 		}
 		if err = a.deleteBackupArtifact(item, ""); err != nil {
-			return fmt.Errorf("could not remove S3 backup %s; server deletion was stopped: %w", id, err)
+			return fmt.Errorf("could not remove remote backup %s; server deletion was stopped: %w", id, err)
 		}
 		if _, err = a.db.Exec(`DELETE FROM server_backups WHERE id=? AND server_id=?`, id, serverID); err != nil {
-			return errors.New("an S3 backup was deleted but its record could not be removed; retry server deletion")
+			return errors.New("a remote backup was deleted but its record could not be removed; retry server deletion")
 		}
 	}
 	rootInfo, err := os.Lstat(a.backupRoot)

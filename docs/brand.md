@@ -4,6 +4,8 @@
 
 **Docklight** is the chosen product name. It works in English without a mythology reference and joins two useful ideas: a dock for containers and a light that makes their state easy to read.
 
+The official product domain is [docklight.app](https://docklight.app).
+
 Two alternate names worth keeping for future naming checks are **Relay** (short, international, suggests dependable operation) and **Launchdeck** (more explicit about deployment, with a more playful tone). Docklight is the current product identity and the implementation uses it throughout the interface.
 
 ## Mark and visual system

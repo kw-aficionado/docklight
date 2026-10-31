@@ -12,7 +12,7 @@ The panel sets status to **Starting** after Docker starts the container. It scan
 
 Stopping sends `startup.save_command` and `startup.stop` to container input when set, then asks Docker to stop the main app gracefully using `startup.stop_timeout` (30 seconds when unset). App-stack sidecars stop afterward in reverse template order. The Minecraft Java template sends `save-all flush` followed by `stop` before Docker's stop request.
 
-Changing server settings or CPU/RAM limits while running recreates and starts its container with the existing data directory. Deleting a server removes its container, data directory, recorded local and S3 backups, port reservations, and server-scoped grants after Docker confirms the container is absent or removed.
+Changing server settings or CPU/RAM limits while running recreates and starts its container with the existing data directory. Deleting a server removes its container, data directory, recorded local and remote backups, port reservations, and server-scoped grants after Docker confirms the container is absent or removed.
 
 ## Console, query, and files
 
