@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Rune struct {
@@ -23,6 +24,7 @@ type Rune struct {
 	Ports       []Port     `json:"ports,omitempty"`
 	Query       *Query     `json:"query,omitempty"`
 	RCON        *RCON      `json:"rcon,omitempty"`
+	Restart     *Restart   `json:"restart,omitempty"`
 	Steam       *Steam     `json:"steam,omitempty"`
 	ConfigFiles []string   `json:"config_files,omitempty"`
 }
@@ -75,12 +77,20 @@ type RCON struct {
 	Type        string `json:"type,omitempty"`
 	PasswordVar string `json:"password_var,omitempty"`
 }
+type Restart struct {
+	Warnings []RestartWarning `json:"warnings,omitempty"`
+}
+type RestartWarning struct {
+	At  string `json:"at"`
+	Msg string `json:"msg"`
+}
 type Steam struct {
 	AppID     int  `json:"app_id"`
 	Anonymous bool `json:"anonymous"`
 }
 
 var runeID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+var restartPlaceholder = regexp.MustCompile(`{{([^{}]*)}}`)
 
 func Parse(src string) (Rune, error) {
 	var env struct {
@@ -113,6 +123,33 @@ func (g Rune) Validate() error {
 	if g.Startup.DoneRegex != "" {
 		if _, err := regexp.Compile(g.Startup.DoneRegex); err != nil {
 			return fmt.Errorf("startup.done_regex: %w", err)
+		}
+	}
+	if g.Restart != nil {
+		seen := map[time.Duration]bool{}
+		for i, warning := range g.Restart.Warnings {
+			at, err := time.ParseDuration(strings.TrimSpace(warning.At))
+			if err != nil || at <= 0 || at > 24*time.Hour {
+				return fmt.Errorf("restart.warnings[%d].at must be a duration greater than 0 and at most 24h", i)
+			}
+			if seen[at] {
+				return fmt.Errorf("restart.warnings contains duplicate duration %q", warning.At)
+			}
+			seen[at] = true
+			if strings.TrimSpace(warning.Msg) == "" || len(warning.Msg) > 4096 || strings.ContainsAny(warning.Msg, "\r\n\x00") {
+				return fmt.Errorf("restart.warnings[%d].msg must be a single command of 1 to 4096 characters", i)
+			}
+			for _, match := range restartPlaceholder.FindAllStringSubmatch(warning.Msg, -1) {
+				switch match[1] {
+				case "server_name", "minutes", "seconds":
+				default:
+					return fmt.Errorf("restart.warnings[%d].msg contains unsupported placeholder %q", i, match[0])
+				}
+			}
+			withoutPlaceholders := restartPlaceholder.ReplaceAllString(warning.Msg, "")
+			if strings.Contains(withoutPlaceholders, "{{") || strings.Contains(withoutPlaceholders, "}}") {
+				return fmt.Errorf("restart.warnings[%d].msg contains an incomplete placeholder", i)
+			}
 		}
 	}
 	declared := map[string]bool{}

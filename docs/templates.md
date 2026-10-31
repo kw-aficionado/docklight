@@ -40,6 +40,12 @@ gameskill:
     type: a2s
   rcon:
     enabled: false
+  restart:
+    warnings:
+      - at: 5m
+        msg: say Server restart in 5 minutes.
+      - at: 1m
+        msg: say Server restart in 1 minute.
 ```
 
 `docker.image` is required. At least one of `startup.command`, `startup.exec`, or `docker.keep_entrypoint: true` is required.
@@ -63,6 +69,7 @@ gameskill:
 | `startup.done_regex` | Regular expression searched in recent container output to mark startup ready. |
 | `startup.stop`, `startup.save_command` | Commands sent to container input before Docker's graceful stop. |
 | `startup.stop_timeout` | Grace period in seconds before Docker kills the container. Defaults to 30. |
+| `restart.warnings[]` | Optional countdown points for scheduled restarts. `at` is a Go duration up to 24 hours; `msg` is a complete console command sent through RCON when available, then stdin. `{{server_name}}`, `{{minutes}}`, and `{{seconds}}` are available. |
 | `ports` | Container ports to publish. Protocol is `tcp`, `udp`, or `tcp+udp`; a free host port is allocated from config. A port named `rcon` binds to loopback. |
 | `query.type` | `minecraft`, `minecraft-java`, `minecraft-bedrock`, `a2s`, or `source`. |
 | `rcon` | Enables RCON commands using a declared `password_var`. The host mapping is loopback-only when its port is named `rcon`. |

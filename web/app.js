@@ -93,15 +93,51 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
   async function renderSchedules(s){
     const b=document.querySelector('#detail-body');
     const canBackup=(s.permissions||[]).includes('server.backup');
-    b.innerHTML=`<section class="panel-card schedule-panel"><div class="panel-head"><div><h2>Scheduled backups</h2><p>Run and verify local backups on a recurring schedule.</p></div><button class="button primary" id="add-backup-schedule" ${canBackup?'':'disabled'}>+ Add schedule</button></div><div class="backup-note">Cron runs in the panel host's local time. Use five fields (minute hour day month weekday) or six fields with seconds first. The server must be stopped when a backup runs.</div>${canBackup?'':'<div class="schedule-permission-note">Grant server.backup as well as server.schedule to create backup schedules.</div>'}<div class="schedule-list" id="schedule-list"><div class="files-empty">Loading schedules…</div></div></section>`;
+    const canControl=(s.permissions||[]).includes('server.control');
+    let restartWarnings=[];
+    let scheduleOptionsError=false;
+    try{restartWarnings=(await api(`/api/servers/${s.id}/schedule-options`)).restart_warnings||[]}catch{scheduleOptionsError=true}
+    const canRestart=canControl&&!scheduleOptionsError;
+    const canCreate=canBackup||canRestart;
+    function warningSeconds(value){
+      const units={h:3600,m:60,s:1,ms:.001,us:.000001,'µs':.000001,ns:.000000001};
+      const parts=[...String(value||'').matchAll(/(\d+(?:\.\d+)?)(ms|us|µs|ns|h|m|s)/g)];
+      if(!parts.length||parts.map(x=>x[0]).join('')!==String(value))return 0;
+      const total=parts.reduce((sum,part)=>sum+Number(part[1])*units[part[2]],0);
+      return Number.isInteger(total)&&total>0&&total<=86400?total:0;
+    }
+    const warningOptions=[...new Set(restartWarnings.map(w=>warningSeconds(w.at)).filter(Boolean))].sort((a,b)=>a-b);
+    const defaultWarning=warningOptions.includes(60)?60:(warningOptions[0]||0);
+    const warningLabel=value=>value%3600===0?`${value/3600} hour${value===3600?'':'s'}`:value%60===0?`${value/60} minute${value===60?'':'s'}`:`${value} seconds`;
+    b.innerHTML=`<section class="panel-card schedule-panel"><div class="panel-head"><div><h2>Schedules</h2><p>Run backups or restarts on a recurring schedule.</p></div><button class="button primary" id="add-backup-schedule" ${canCreate?'':'disabled'}>+ Add schedule</button></div><div class="backup-note">Cron runs in the panel host's local time. Use five fields (minute hour day month weekday) or six fields with seconds first. Backups require the server to be stopped. Restart warnings use this template's configured commands.</div>${scheduleOptionsError?'<div class="schedule-permission-note">Restart options could not be loaded. Refresh this view before creating a restart schedule.</div>':''}${canCreate?'':'<div class="schedule-permission-note">Grant server.backup or server.control, plus server.schedule, to create schedules.</div>'}<div class="schedule-list" id="schedule-list"><div class="files-empty">Loading schedules…</div></div></section>`;
     const host=document.querySelector('#schedule-list');
     const add=document.querySelector('#add-backup-schedule');
-    add.onclick=()=>{modal(`<div class="modal-heading"><div><div class="eyebrow">AUTOMATION</div><h2>Schedule a backup</h2></div><button class="icon-button" data-close>×</button></div><form id="create-backup-schedule"><label>Schedule name<input name="name" maxlength="80" value="Scheduled backup" required></label><label>Cron expression<input name="cron" value="0 3 * * *" required><small>Host-local time · five fields, or six with leading seconds</small></label><label class="checkline"><input type="checkbox" name="enabled" checked> Enable schedule</label><div class="modal-actions"><button type="button" class="button subtle" data-close>Cancel</button><button class="button primary" type="submit">Save schedule</button></div></form>`);document.querySelector('#create-backup-schedule').addEventListener('submit',async e=>{e.preventDefault();const form=new FormData(e.currentTarget);try{await api(`/api/servers/${s.id}/schedules`,{method:'POST',body:JSON.stringify({name:form.get('name'),cron:form.get('cron'),enabled:form.has('enabled')})});closeModal();toast('Backup schedule saved','success');await load()}catch(err){toast(err.message,'error')}});};
+    add.onclick=()=>{
+      const actions=[...(canBackup?['backup']:[]),...(canRestart?['restart']:[])];
+      const initial=actions[0]||'backup';
+      modal(`<div class="modal-heading"><div><div class="eyebrow">AUTOMATION</div><h2>New schedule</h2></div><button class="icon-button" data-close>×</button></div><form id="create-backup-schedule"><label>Action<select name="action">${actions.map(action=>`<option value="${action}">${action==='backup'?'Create backup':'Restart server'}</option>`).join('')}</select></label><label>Schedule name<input name="name" maxlength="80" value="${initial==='backup'?'Scheduled backup':'Scheduled restart'}" required></label><label>Cron expression<input name="cron" value="0 3 * * *" required><small>Host-local time · five fields, or six with leading seconds</small></label><div id="restart-schedule-fields" ${initial==='restart'?'':'hidden'}><label class="checkline"><input type="checkbox" name="warn_players" ${defaultWarning?'checked':''} ${warningOptions.length?'':'disabled'}>Warn players before restart</label><label>Warning countdown<select name="warning_seconds" ${defaultWarning?'':'disabled'}>${warningOptions.map(value=>`<option value="${value}" ${value===defaultWarning?'selected':''}>${warningLabel(value)}</option>`).join('')}</select></label>${warningOptions.length?'':'<small>This template has no restart warning commands; the restart will run immediately.</small>'}</div><label class="checkline"><input type="checkbox" name="enabled" checked> Enable schedule</label><div class="modal-actions"><button type="button" class="button subtle" data-close>Cancel</button><button class="button primary" type="submit">Save schedule</button></div></form>`);
+      const formEl=document.querySelector('#create-backup-schedule');
+      const actionSelect=formEl.elements.action;
+      const restartFields=formEl.querySelector('#restart-schedule-fields');
+      actionSelect.onchange=()=>{
+        const restart=actionSelect.value==='restart';
+        restartFields.hidden=!restart;
+        formEl.elements.name.value=restart?'Scheduled restart':'Scheduled backup';
+      };
+      formEl.elements.warn_players.onchange=()=>{formEl.elements.warning_seconds.disabled=!formEl.elements.warn_players.checked};
+      formEl.addEventListener('submit',async e=>{
+        e.preventDefault();
+        const form=new FormData(e.currentTarget),action=form.get('action');
+        const body={name:form.get('name'),action,cron:form.get('cron'),enabled:form.has('enabled')};
+        if(action==='restart'){body.warn_players=form.has('warn_players');if(body.warn_players)body.warning_seconds=Number(form.get('warning_seconds'))}
+        try{await api(`/api/servers/${s.id}/schedules`,{method:'POST',body:JSON.stringify(body)});closeModal();toast('Schedule saved','success');await load()}catch(err){toast(err.message,'error')}
+      });
+    };
     async function load(){
       try{
         const items=await api(`/api/servers/${s.id}/schedules`);
-        if(!items.length){host.innerHTML='<div class="files-empty">No scheduled backups yet.</div>';return}
-        host.innerHTML=items.map(item=>{const when=value=>value?new Date(value).toLocaleString():'Not run yet';return `<article class="schedule-row" data-schedule="${esc(item.id)}"><div class="schedule-summary"><b>${esc(item.name)}</b><code>${esc(item.cron)}</code><span>${item.enabled?`Enabled · next ${esc(when(item.next_run))}`:'Disabled'}</span>${item.last_status?`<small>Last run · ${esc(when(item.last_run))} · ${esc(item.last_status)}${item.last_error?` · ${esc(item.last_error)}`:''}</small>`:'<small>No run recorded yet</small>'}</div><div class="schedule-actions"><button class="button subtle" data-schedule-op="runs">Run history</button><button class="button subtle" data-schedule-op="toggle" ${!item.enabled&&!canBackup?'disabled':''}>${item.enabled?'Disable':'Enable'}</button><button class="button danger" data-schedule-op="delete">Delete</button></div><div class="schedule-runs" hidden></div></article>`}).join('');
+        if(!items.length){host.innerHTML='<div class="files-empty">No schedules yet.</div>';return}
+        host.innerHTML=items.map(item=>{const when=value=>value?new Date(value).toLocaleString():'Not run yet';const action=item.action==='restart'?'Restart':'Backup';const canChange=item.action==='restart'?canControl:canBackup;return `<article class="schedule-row" data-schedule="${esc(item.id)}"><div class="schedule-summary"><b>${esc(item.name)}</b><small>${action}${item.action==='restart'&&item.warn_players?` · ${warningLabel(item.warning_seconds)} warning`:''}</small><code>${esc(item.cron)}</code><span>${item.enabled?`Enabled · next ${esc(when(item.next_run))}`:'Disabled'}</span>${item.last_status?`<small>Last run · ${esc(when(item.last_run))} · ${esc(item.last_status)}${item.last_error?` · ${esc(item.last_error)}`:''}</small>`:'<small>No run recorded yet</small>'}</div><div class="schedule-actions"><button class="button subtle" data-schedule-op="runs">Run history</button><button class="button subtle" data-schedule-op="toggle" ${!item.enabled&&!canChange?'disabled':''}>${item.enabled?'Disable':'Enable'}</button><button class="button danger" data-schedule-op="delete">Delete</button></div><div class="schedule-runs" hidden></div></article>`}).join('');
         host.querySelectorAll('[data-schedule-op]').forEach(button=>button.onclick=async()=>{
           const row=button.closest('.schedule-row'),id=row.dataset.schedule,op=button.dataset.scheduleOp,item=items.find(x=>x.id===id);
           if(op==='delete'&&!confirm(`Delete the schedule “${item.name}”?`))return;

@@ -20,12 +20,12 @@ The default policy keeps the 10 most recent backups per server. Set `backups.ret
 
 Deleting a server also removes its local backups. Export or copy the backup directory before deleting a server if those snapshots must be retained.
 
-## Scheduled backups
+## Schedules
 
-Open a server's **Schedules** tab and add a backup schedule. Cron expressions accept five fields (`minute hour day month weekday`) or six fields with seconds first. Times use the panel host's local timezone. Schedules are enabled when created; they retain their history until deleted. The latest 50 runs are shown per schedule. A run records success or failure, and retention applies after a successful backup. The server must be stopped when the schedule fires; a running server produces a recorded failure and the next cron occurrence remains scheduled.
+Open a server's **Schedules** tab to schedule a backup or restart. Cron expressions accept five fields (`minute hour day month weekday`) or six fields with seconds first. Times use the panel host's local timezone. Schedules are enabled when created; they retain their history until deleted. The latest 50 runs are shown per schedule. A run records success or failure, and retention applies after a successful backup. The server must be stopped when a backup schedule fires; a running server produces a recorded failure and the next cron occurrence remains scheduled.
 
-Schedule management needs `server.schedule`. Creating a backup schedule also needs `server.backup`. Deleting the server removes its schedules and run history.
+Restart schedules can warn players using countdown commands declared in the template's `restart.warnings`. Choose a warning duration configured by that template, or turn warnings off to restart immediately. A warned restart runs in the background. If a manual action stops or replaces the server during its countdown, Docklight cancels the scheduled restart. Restart schedules need `server.schedule` and `server.control`; backup schedules need `server.schedule` and `server.backup`. Deleting the server removes its schedules and run history.
 
 ## Current limits
 
-Backups are local only. SFTP, SMB, S3-compatible storage, Discord, Telegram, SMTP, and notifications for non-backup events are not implemented yet. A generic signed webhook can report backup success and failure; see [notifications](notifications.md). Schedules are per-server; realm and global schedules are not available. Restore replaces the entire server data directory, not only selected files.
+Backups are local only. SFTP, SMB, S3-compatible storage, Discord, Telegram, SMTP, and schedule-run notifications are not implemented yet. A generic signed webhook can report backup success and failure; see [notifications](notifications.md). Schedules are per-server; realm and global schedules are not available. Restore replaces the entire server data directory, not only selected files.

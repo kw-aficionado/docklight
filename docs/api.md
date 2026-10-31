@@ -48,9 +48,10 @@ Password and TOTP endpoints:
 | `POST /api/servers/{id}/backups/{backupID}/verify` | Verify the checksum, encryption, and archive structure. |
 | `POST /api/servers/{id}/backups/{backupID}/restore` | Restore after verifying; server must be stopped. |
 | `DELETE /api/servers/{id}/backups/{backupID}` | Delete a local backup. |
-| `GET /api/servers/{id}/schedules` | List per-server backup schedules; requires `server.schedule`. |
-| `POST /api/servers/{id}/schedules` | Create an enabled backup schedule from a five- or six-field cron expression; requires `server.schedule` and `server.backup`. |
-| `PUT /api/servers/{id}/schedules/{scheduleID}` | Change the name, cron expression, or enabled state. |
+| `GET /api/servers/{id}/schedules` | List per-server backup and restart schedules; requires `server.schedule`. |
+| `GET /api/servers/{id}/schedule-options` | Return restart warning durations when the caller also has `server.control`; requires `server.schedule`. |
+| `POST /api/servers/{id}/schedules` | Create an enabled backup or restart schedule from a five- or six-field cron expression. Requires `server.schedule` and the action permission (`server.backup` or `server.control`). |
+| `PUT /api/servers/{id}/schedules/{scheduleID}` | Change the name, cron expression, or enabled state. Changing cron or enabling a schedule also requires its action permission. |
 | `DELETE /api/servers/{id}/schedules/{scheduleID}` | Delete a schedule and its run history. |
 | `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
 | `GET /api/servers/{id}/crashes` | Read the 50 most recent confirmed container exits or missing-container incidents; requires `server.view`. |
@@ -60,9 +61,9 @@ Password and TOTP endpoints:
 | `POST /api/notifications/test` | Send a signed test event to the configured webhook; admin only. |
 | `GET /api/system/disk` | Read current capacity and low-space alert state for the filesystem containing Docklight data; admin only. |
 
-Create a schedule with `{"name":"Nightly","cron":"0 3 * * *","enabled":true}`. The enabled field may be omitted; new schedules are enabled by default. Five-field cron uses minute, hour, day of month, month, and weekday. Six-field cron adds seconds first. Times are interpreted in the panel host local timezone. A scheduled backup runs only when the server is stopped; otherwise the failed attempt is recorded and the next cron time remains scheduled.
+Create a backup with `{"action":"backup","name":"Nightly","cron":"0 3 * * *","enabled":true}`. The action defaults to `backup` for compatibility. A restart can include `"action":"restart"`, `"warn_players":true`, and `"warning_seconds":60`; the countdown must match a warning configured by the server template. Player warnings are enabled by default for restart schedules that support them. The enabled field may be omitted; new schedules are enabled by default. Five-field cron uses minute, hour, day of month, month, and weekday. Six-field cron adds seconds first. Times are interpreted in the panel host local timezone. A scheduled backup runs only when the server is stopped; otherwise the failed attempt is recorded and the next cron time remains scheduled. A warned restart runs in the background, sends configured countdown commands through RCON or stdin, then recreates the server. If the server is manually stopped or replaced during the countdown, the scheduled restart is canceled.
 
-Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires `server.backup`; schedule management requires `server.schedule`, and creating a backup schedule also requires `server.backup`. API token permissions are intersected with the account's grants.
+Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires `server.backup`; schedule management requires `server.schedule`, and creating a backup or restart schedule also requires `server.backup` or `server.control`, respectively. API token permissions are intersected with the account's grants.
 
 Webhook notification settings accept `enabled`, `endpoint`, `signing_secret`, `events`, `clear_endpoint`, and `clear_signing_secret`. Supported events are `backup.success`, `backup.failure`, `server.crash`, `server.watchdog`, and `host.disk_low`. Blank endpoint or signing secret fields preserve the saved value; use the `clear_*` flags to remove them. Endpoint and signing secret are encrypted at rest and omitted from every response. See [notifications](guides/notifications.md) for delivery and signature details.
 
@@ -100,4 +101,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, Discord, Telegram, SMTP, sidecars, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup and restart, realm/global schedules, Discord, Telegram, SMTP, sidecars, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.

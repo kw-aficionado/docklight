@@ -61,3 +61,11 @@ gameskill:
     enabled: true
     type: minecraft
     password_var: RCON_PASSWORD
+  restart:
+    warnings:
+      - at: 15m
+        msg: say Server restart in 15 minutes.
+      - at: 5m
+        msg: say Server restart in 5 minutes.
+      - at: 1m
+        msg: say Server restart in 1 minute.

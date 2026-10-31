@@ -284,6 +284,34 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 10 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct {
+			name string
+			ddl  string
+		}{
+			{"action", `ALTER TABLE backup_schedules ADD COLUMN action TEXT NOT NULL DEFAULT 'backup'`},
+			{"warn_players", `ALTER TABLE backup_schedules ADD COLUMN warn_players INTEGER NOT NULL DEFAULT 0`},
+			{"warning_seconds", `ALTER TABLE backup_schedules ADD COLUMN warning_seconds INTEGER NOT NULL DEFAULT 60`},
+		} {
+			if !hasColumn(tx, "backup_schedules", column.name) {
+				if _, err = tx.Exec(column.ddl); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(10)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

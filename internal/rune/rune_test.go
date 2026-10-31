@@ -3,6 +3,7 @@ package rune
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,46 @@ func TestParseBlockScriptAndRejectProtectedMount(t *testing.T) {
 `
 	if _, err := Parse(bad); err == nil {
 		t.Fatal("expected a protected system mount to fail validation")
+	}
+}
+
+func TestRestartWarningConfigurationAndValidation(t *testing.T) {
+	src := `gameskill:
+  id: restart-test
+  name: Restart Test
+  docker:
+    image: example/restart-test:1
+  startup:
+    command: exec test
+  restart:
+    warnings:
+      - at: 5m
+        msg: say {{server_name}} restarts in {{minutes}} minutes
+      - at: 1m
+        msg: say restart in {{seconds}} seconds
+`
+	gs, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gs.Restart == nil || len(gs.Restart.Warnings) != 2 || gs.Restart.Warnings[0].At != "5m" || gs.Restart.Warnings[1].Msg != "say restart in {{seconds}} seconds" {
+		t.Fatalf("restart warning metadata was not parsed: %#v", gs.Restart)
+	}
+	duplicate := strings.Replace(src, "at: 1m", "at: 300s", 1)
+	if _, err = Parse(duplicate); err == nil || !strings.Contains(err.Error(), "duplicate duration") {
+		t.Fatalf("duplicate restart durations were not rejected: %v", err)
+	}
+	invalidDuration := strings.Replace(src, "at: 5m", "at: soon", 1)
+	if _, err = Parse(invalidDuration); err == nil || !strings.Contains(err.Error(), "restart.warnings[0].at") {
+		t.Fatalf("invalid restart warning duration was not rejected: %v", err)
+	}
+	invalidMessage := strings.Replace(src, "msg: say restart in {{seconds}} seconds", "msg: ''", 1)
+	if _, err = Parse(invalidMessage); err == nil || !strings.Contains(err.Error(), "restart.warnings[1].msg") {
+		t.Fatalf("empty restart warning command was not rejected: %v", err)
+	}
+	unknownPlaceholder := strings.Replace(src, "{{seconds}}", "{{player}}", 1)
+	if _, err = Parse(unknownPlaceholder); err == nil || !strings.Contains(err.Error(), "unsupported placeholder") {
+		t.Fatalf("unknown restart warning placeholder was not rejected: %v", err)
 	}
 }
 

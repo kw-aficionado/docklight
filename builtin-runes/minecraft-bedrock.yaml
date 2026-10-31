@@ -42,3 +42,9 @@ gameskill:
       protocol: udp
   query:
     type: minecraft-bedrock
+  restart:
+    warnings:
+      - at: 5m
+        msg: say Server restart in 5 minutes.
+      - at: 1m
+        msg: say Server restart in 1 minute.

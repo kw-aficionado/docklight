@@ -36,6 +36,9 @@ type App struct {
 	booted             time.Time
 	dataMu             sync.Mutex
 	scheduleMu         sync.Mutex
+	scheduleRestart    func(context.Context, string, bool, int) (string, error)
+	scheduleWait       func(context.Context, time.Duration) error
+	scheduleCommand    func(context.Context, Server, string) error
 	notificationClient *http.Client
 	runtimeMu          sync.Mutex
 	runtimePending     map[string]pendingRuntimeIncident
@@ -192,6 +195,7 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/backups/{backupID}/restore", a.restoreBackup)
 			priv.Delete("/servers/{id}/backups/{backupID}", a.deleteBackup)
 			priv.Get("/servers/{id}/schedules", a.listBackupSchedules)
+			priv.Get("/servers/{id}/schedule-options", a.scheduleOptions)
 			priv.Post("/servers/{id}/schedules", a.createBackupSchedule)
 			priv.Put("/servers/{id}/schedules/{scheduleID}", a.updateBackupSchedule)
 			priv.Delete("/servers/{id}/schedules/{scheduleID}", a.deleteBackupSchedule)

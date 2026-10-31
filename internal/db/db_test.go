@@ -17,6 +17,23 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if _, err = legacy.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = legacy.Exec(`CREATE TABLE backup_schedules (
+		id TEXT PRIMARY KEY,
+		server_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		cron TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		next_run TEXT NOT NULL DEFAULT '',
+		last_run TEXT NOT NULL DEFAULT '',
+		last_status TEXT NOT NULL DEFAULT '',
+		last_error TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = legacy.Exec(`INSERT INTO backup_schedules(id,server_id,name,cron) VALUES('legacy-schedule','legacy-server','Legacy backup','0 3 * * *')`); err != nil {
+		t.Fatal(err)
+	}
 	if err = legacy.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +47,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 9 {
-		t.Fatalf("expected 9 migrations, got %d", count)
+	if count != 10 {
+		t.Fatalf("expected 10 migrations, got %d", count)
 	}
 	var notificationTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_settings'`).Scan(&notificationTable); err != nil || notificationTable != "notification_settings" {
@@ -89,5 +106,17 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	}
 	if schedulesTable != 1 || runsTable != 1 {
 		t.Fatalf("version 4 did not create schedule tables: schedules=%d runs=%d", schedulesTable, runsTable)
+	}
+	var scheduleColumns int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_schedules') WHERE name IN ('action','warn_players','warning_seconds')`).Scan(&scheduleColumns); err != nil || scheduleColumns != 3 {
+		t.Fatalf("version 10 schedule columns missing: count=%d err=%v", scheduleColumns, err)
+	}
+	var action string
+	var warnPlayers, warningSeconds int
+	if err = d.QueryRow(`SELECT action,warn_players,warning_seconds FROM backup_schedules WHERE id='legacy-schedule'`).Scan(&action, &warnPlayers, &warningSeconds); err != nil {
+		t.Fatal(err)
+	}
+	if action != "backup" || warnPlayers != 0 || warningSeconds != 60 {
+		t.Fatalf("legacy backup schedule migrated as action=%q warn=%d seconds=%d", action, warnPlayers, warningSeconds)
 	}
 }
