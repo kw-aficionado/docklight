@@ -52,9 +52,15 @@ Tests cover default-off routing, admin-only settings, the two opt-in gates, titl
 
 ## Phase 3 Docker Compose import
 
-Admins can import one Compose YAML document from **Templates → Import Compose** or `POST /api/gameskills/import-compose`. The importer selects an explicit or heuristically chosen main service, converts other pullable images to private sidecars, maps short-form ports to Docklight-allocated host ports, and maps named volumes to persistent main and sidecar paths. It round-trips the generated template through the rune parser before saving. Unsupported or host-specific fields produce warnings. Specific host-IP port mappings are omitted so localhost-only exposure is never widened. Existing Compose volume contents are not copied. Bind mounts are omitted; this checkout does not yet have per-server host-mount controls. Environment values for secret-looking keys are discarded and requested again at server creation, so importer secrets do not enter the template row or API response.
+Admins can import one Compose YAML document from **Templates → Import Compose** or `POST /api/gameskills/import-compose`. The importer selects an explicit or heuristically chosen main service, converts other pullable images to private sidecars, maps short-form ports to Docklight-allocated host ports, and maps named volumes to persistent main and sidecar paths. It round-trips the generated template through the rune parser before saving. Unsupported or host-specific fields produce warnings. Specific host-IP port mappings are omitted so localhost-only exposure is never widened. Existing Compose volume contents are not copied. Bind mounts are omitted; admins can re-add them under the server's Settings → Host mounts and select the matching main or sidecar container. Environment values for secret-looking keys are discarded and requested again at server creation, so importer secrets do not enter the template row or API response.
 
 Tests cover the main-service heuristics and override, app/sidecar conversion, port ranges and protocols, host-binding protection, multiple persistent paths, environment map/list forms, reserved variables, secret value removal, Compose size and document limits, admin-only access, multipart upload, raw YAML requests, built-in collisions, generated YAML round-trip, and re-import upsert with catalog provenance clearing. The fake Docker Engine stack lifecycle test verifies an additional sidecar path is bound under `_stack/<service>/_extra`; a planted symlink escape was refused before creating any outside files. Live Docker installation, Compose file compatibility across Compose versions, and browser interaction remain pending; this sandbox still blocks the panel listener.
+
+## Phase 1 per-server host mounts
+
+Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
+
+Tests cover migration, admin-only browse and edit routes, path redaction, symlink and protected-path rejection, data-path collisions, target overlap, and read-only versus writable Docker binds. The UI script passes syntax checks; live mount browsing and the responsive layout still need browser acceptance because this sandbox blocks the panel listener.
 
 ## Phase 2 realm management
 
@@ -86,7 +92,6 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 1: administrator-selected per-server host mounts.
 - Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, cross-server ban automation, and Pterodactyl egg/XML importers.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.

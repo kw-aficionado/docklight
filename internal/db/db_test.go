@@ -74,8 +74,12 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 26 {
-		t.Fatalf("expected 26 migrations, got %d", count)
+	if count != 27 {
+		t.Fatalf("expected 27 migrations, got %d", count)
+	}
+	var hostMountColumn int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='host_mounts'`).Scan(&hostMountColumn); err != nil || hostMountColumn != 1 {
+		t.Fatalf("host mount migration is missing servers.host_mounts: count=%d err=%v", hostMountColumn, err)
 	}
 	for _, column := range []string{"protocol", "port"} {
 		var found int

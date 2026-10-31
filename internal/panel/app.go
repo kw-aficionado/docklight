@@ -249,6 +249,8 @@ func (a *App) Router() http.Handler {
 			priv.Put("/servers/{id}/realm", a.admin(a.moveServerRealm))
 			priv.Get("/servers/{id}", a.getServerHandler)
 			priv.Put("/servers/{id}", a.updateServer)
+			priv.Get("/servers/{id}/host-mounts", a.admin(a.getServerHostMounts))
+			priv.Put("/servers/{id}/host-mounts", a.admin(a.updateServerHostMounts))
 			priv.Delete("/servers/{id}", a.deleteServer)
 			priv.Get("/servers/{id}/backups", a.listBackups)
 			priv.Post("/servers/{id}/backups", a.createBackup)
@@ -278,6 +280,8 @@ func (a *App) Router() http.Handler {
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))
 			priv.Post("/backups/target/test", a.admin(a.testBackupTarget))
 			priv.Get("/system/disk", a.admin(a.getDiskStatus))
+			priv.Get("/host/mounts", a.admin(a.listHostMountDirectories))
+			priv.Get("/host/browse", a.admin(a.browseHostMountDirectories))
 			priv.Post("/servers/{id}/install", a.installServer)
 			priv.Get("/servers/{id}/install/status", a.installStatus)
 			priv.Post("/servers/{id}/start", a.startServer)
@@ -893,10 +897,10 @@ func (a *App) grant(uid, perm, scope, id string) bool {
 }
 func (a *App) getServer(id string) (Server, error) {
 	var s Server
-	var env, ports string
+	var env, ports, hostMounts string
 	var installed int
 	var watchdogEnabled, watchdogQuarantined int
-	err := a.db.QueryRow(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined)
+	err := a.db.QueryRow(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined,host_mounts FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined, &hostMounts)
 	if err != nil {
 		return s, err
 	}
@@ -908,6 +912,12 @@ func (a *App) getServer(id string) (Server, error) {
 	}
 	if json.Unmarshal([]byte(ports), &s.Ports) != nil {
 		s.Ports = map[string]int{}
+	}
+	if err := json.Unmarshal([]byte(hostMounts), &s.HostMounts); err != nil {
+		return Server{}, fmt.Errorf("stored host mounts are invalid")
+	}
+	if s.HostMounts == nil {
+		s.HostMounts = []HostMount{}
 	}
 	return s, nil
 }

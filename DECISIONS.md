@@ -109,6 +109,14 @@
 - When multiple services publish ports, explicit `main` wins, then a conventional `web`/`app`/`server`/`main`/`game`/`frontend` name, then Compose file order. If no service publishes ports, the first declared service is used. The browser exposes an optional main-service override.
 - Host ports are not preserved because Docklight owns conflict-free allocation. Named Compose volumes map to Docklight-managed `_app` and `_stack` storage; Compose volume contents are not migrated. Additional sidecar paths live under `_stack/<service>/_extra/<container-path>` and are included by the existing server-root backup archive.
 - Host-IP port bindings cannot be represented by the current port model. The importer therefore drops explicit non-wildcard bindings, including localhost-only ports, instead of widening them to all interfaces.
-- Bind mounts are omitted with warnings. Per-server administrator host-mount controls are still missing from this checkout, so the import guide calls this out and tells operators to copy required files into Docklight-managed storage before installing.
+- Bind mounts are omitted with warnings. Administrators can re-add them after creating the server, choosing the matching main or sidecar container in Settings → Host mounts.
 - Values whose environment-key names signal passwords, tokens, secrets, keys, DSNs, or credential-bearing URLs are discarded during import and represented by secret template variables with no default. Operators enter those values when creating a server; this keeps them out of template YAML and import responses.
 - Compose interpolation, `build`, custom commands and entrypoints, dependency health ordering, and service networks are not translated. The importer returns specific warnings and does not attempt to execute a Compose project or read its `.env` files.
+
+
+## 2026-11-01: administrator host mounts
+
+- Store mounts in `servers.host_mounts` and expose them only through admin-only routes, because host paths reveal filesystem layout and bind mounts grant a container host access.
+- Resolve symlinks before applying the source denylist; also exclude Docklight data and backup roots. Validate sources again at container start.
+- Keep mounts read-only unless `write` is explicitly enabled. Store container selection so a stack mount is only shared with the chosen sidecar; an empty service targets the primary container. Apply saved changes on the next start.
+- Docker Engine bind sources are interpreted on the daemon host, so the panel's browse results are useful only when the daemon sees the same absolute path.

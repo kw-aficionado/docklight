@@ -34,6 +34,7 @@ type Server struct {
 	Installed           bool                 `json:"installed"`
 	Env                 map[string]string    `json:"env"`
 	Ports               map[string]int       `json:"ports"`
+	HostMounts          []HostMount          `json:"-"`
 	DataDir             string               `json:"-"`
 	FilesRoot           string               `json:"-"`
 	ContainerID         string               `json:"-"`
@@ -1101,6 +1102,10 @@ func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]st
 	if containerPath == "" {
 		containerPath = "/data"
 	}
+	hostMounts, err := a.validateHostMounts(gs, s.HostMounts)
+	if err != nil {
+		return docker.CreateConfig{}, fmt.Errorf("validate server host mounts: %w", err)
+	}
 	appDataDir := serverAppDataDir(s, gs)
 	if err := os.MkdirAll(appDataDir, 0770); err != nil {
 		return docker.CreateConfig{}, fmt.Errorf("create app data directory: %w", err)
@@ -1112,6 +1117,16 @@ func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]st
 			return docker.CreateConfig{}, fmt.Errorf("create data volume for %s: %w", v, err)
 		}
 		binds = append(binds, target+":"+v)
+	}
+	for _, mount := range hostMounts {
+		if mount.Service != "" {
+			continue
+		}
+		bind := mount.Source + ":" + mount.Target
+		if !mount.Write {
+			bind += ":ro"
+		}
+		binds = append(binds, bind)
 	}
 	hostCfg := docker.HostConfig{Binds: binds, PortBindings: map[string][]docker.PortBinding{}, RestartPolicy: map[string]any{"Name": "on-failure", "MaximumRetryCount": 3}}
 	for _, capability := range gs.Docker.Capabilities {

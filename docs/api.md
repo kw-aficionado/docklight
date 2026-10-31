@@ -53,7 +53,7 @@ Registration and sign-in require user verification and discoverable credentials.
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). Replacing a catalog template clears its source metadata. |
-| `POST /api/gameskills/import-compose` | Admin only; import a Compose YAML file as a Docklight template. Accepts multipart field `file` (and optional `main` service and `name`) or a raw YAML body with `main` and `name` query parameters. Maximum 1 MiB. Returns `{id,name,warnings}`; built-in ID collisions return `409`. Bind mounts are omitted because per-server host-mount controls are not implemented in this checkout. Specific host-IP port bindings are omitted, so localhost-only ports are never widened. |
+| `POST /api/gameskills/import-compose` | Admin only; import a Compose YAML file as a Docklight template. Accepts multipart field `file` (and optional `main` service and `name`) or a raw YAML body with `main` and `name` query parameters. Maximum 1 MiB. Returns `{id,name,warnings}`; built-in ID collisions return `409`. Bind mounts are omitted; administrators can re-add them under Settings → Host mounts after creating the server. Specific host-IP port bindings are omitted, so localhost-only ports are never widened. |
 | `GET /api/gameskills/github?repo=owner/name&path=...&ref=main` | Admin only; browse a GitHub repository. Lists YAML files up to 512 KiB and folders one level deep; successful listings are cached for 10 minutes. |
 | `POST /api/gameskills/install-from-github` | Admin only; install or update a GitHub YAML file with `repo`, `path`, and optional `ref`. Built-in IDs return `409`. |
 | `GET /api/gameskills/updates` | Admin only; compare installed non-built-in template versions with saved catalogs. It lists updates and source errors without applying changes. |
@@ -85,6 +85,10 @@ Registration and sign-in require user verification and discoverable credentials.
 | `GET /api/servers` | List only servers with `server.view`. Secret environment values are masked. |
 | `POST /api/servers` | Create from a template. Body: `name`, `gameskill_id`, optional `realm_id`, `env`, `cpu_limit`, `memory_limit_mb`. Without `realm_id`, Docklight uses the template-category realm. |
 | `GET /api/servers/{id}` | Read one server; requires `server.view`. |
+| `GET /api/host/mounts` | Admin only; list safe host mount points visible to the panel. |
+| `GET /api/host/browse?path=/mnt` | Admin only; browse safe host directories. Protected system and Docklight storage paths are filtered. |
+| `GET /api/servers/{id}/host-mounts` | Admin only; read the server's host mounts and `applies_on` state. |
+| `PUT /api/servers/{id}/host-mounts` | Admin only; replace mounts with `{"mounts":[{"source":"/mnt/media","target":"/media","service":"","write":false}]}`. Empty `service` selects the primary container; a stack service name selects that sidecar. Sources are canonicalized through symlinks, protected host and container paths are rejected, and mounts apply on the next start. |
 | `PUT /api/servers/{id}/realm` | Admin only; move the server with `{"realm_id":"…"}` or detach it with an empty ID. |
 | `PUT /api/servers/{id}/realm` | Admin only; move the server with `{"realm_id":"…"}` or detach it with an empty ID. |
 | `PUT /api/servers/{id}` | Update name, settings, or resource limits; requires `server.control`. |

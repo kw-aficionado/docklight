@@ -376,6 +376,10 @@ func (a *App) createStackSidecars(ctx context.Context, s Server, gs rune.Rune, e
 	if gs.Stack == nil {
 		return nil
 	}
+	hostMounts, err := a.validateHostMounts(gs, s.HostMounts)
+	if err != nil {
+		return fmt.Errorf("validate server host mounts: %w", err)
+	}
 	if err := a.cleanupStackSidecars(ctx, s, &gs, true); err != nil {
 		return err
 	}
@@ -423,6 +427,16 @@ func (a *App) createStackSidecars(ctx context.Context, s Server, gs rune.Rune, e
 				}
 				host.Binds = append(host.Binds, extraDir+":"+target)
 			}
+		}
+		for _, mount := range hostMounts {
+			if mount.Service != service.Name {
+				continue
+			}
+			bind := mount.Source + ":" + mount.Target
+			if !mount.Write {
+				bind += ":ro"
+			}
+			host.Binds = append(host.Binds, bind)
 		}
 		labels := map[string]string{docklightServerLabel: s.ID, docklightRoleLabel: "sidecar", docklightServiceLabel: service.Name}
 		config := docker.CreateConfig{

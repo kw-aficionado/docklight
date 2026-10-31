@@ -345,6 +345,30 @@ func TestWordPressStackStartsStopsAndKeepsSidecarInPrivateNetwork(t *testing.T) 
 		t.Fatalf("main application port or secret isolation is wrong: ports=%#v env=%#v", mainPreview.HostConfig.PortBindings, mainPreview.Env)
 	}
 	s := insertWordPressStackServer(t, a, d, config.Database.Path)
+	hostMountRoot := t.TempDir()
+	mainHostPath := filepath.Join(hostMountRoot, "public-media")
+	databaseHostPath := filepath.Join(hostMountRoot, "database-dumps")
+	for _, hostPath := range []string{mainHostPath, databaseHostPath} {
+		if err := os.Mkdir(hostPath, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	canonicalMainHostPath, err := filepath.EvalSymlinks(mainHostPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalDatabaseHostPath, err := filepath.EvalSymlinks(databaseHostPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.HostMounts = []HostMount{
+		{Source: mainHostPath, Target: "/mnt/media"},
+		{Source: databaseHostPath, Target: "/mnt/dumps", Service: "database", Write: true},
+	}
+	mountsJSON, _ := json.Marshal(s.HostMounts)
+	if _, err := d.Exec(`UPDATE servers SET host_mounts=? WHERE id=?`, string(mountsJSON), s.ID); err != nil {
+		t.Fatal(err)
+	}
 	privateData := filepath.Join(s.DataDir, "_stack", "database")
 	if err := os.MkdirAll(privateData, 0700); err != nil {
 		t.Fatal(err)
@@ -389,7 +413,7 @@ func TestWordPressStackStartsStopsAndKeepsSidecarInPrivateNetwork(t *testing.T) 
 	if !mainOK || !sidecarOK {
 		t.Fatal("main app and MariaDB containers were not both created")
 	}
-	if len(mainConfig.HostConfig.Binds) == 0 || mainConfig.HostConfig.Binds[0] != filepath.Join(s.DataDir, "_app")+":/var/www/html" {
+	if len(mainConfig.HostConfig.Binds) != 2 || mainConfig.HostConfig.Binds[0] != filepath.Join(s.DataDir, "_app")+":/var/www/html" || mainConfig.HostConfig.Binds[1] != canonicalMainHostPath+":/mnt/media:ro" {
 		t.Fatalf("main application can see the server-wide backup root: %#v", mainConfig.HostConfig.Binds)
 	}
 	if strings.Contains(strings.Join(operations, "|"), "container:start:"+mainName) && strings.Index(strings.Join(operations, "|"), "container:start:"+stackContainerName(s.ID, "database")) > strings.Index(strings.Join(operations, "|"), "container:start:"+mainName) {
@@ -409,7 +433,7 @@ func TestWordPressStackStartsStopsAndKeepsSidecarInPrivateNetwork(t *testing.T) 
 	if len(sidecarConfig.HostConfig.PortBindings) != 0 {
 		t.Fatalf("sidecar unexpectedly published host ports: %#v", sidecarConfig.HostConfig.PortBindings)
 	}
-	if len(sidecarConfig.HostConfig.Binds) != 2 || !strings.Contains(sidecarConfig.HostConfig.Binds[0], filepath.Join("_stack", "database")+":/var/lib/mysql") || !strings.Contains(sidecarConfig.HostConfig.Binds[1], filepath.Join("_stack", "database", "_extra", "var", "lib", "mysql-files")+":/var/lib/mysql-files") {
+	if len(sidecarConfig.HostConfig.Binds) != 3 || !strings.Contains(sidecarConfig.HostConfig.Binds[0], filepath.Join("_stack", "database")+":/var/lib/mysql") || !strings.Contains(sidecarConfig.HostConfig.Binds[1], filepath.Join("_stack", "database", "_extra", "var", "lib", "mysql-files")+":/var/lib/mysql-files") || sidecarConfig.HostConfig.Binds[2] != canonicalDatabaseHostPath+":/mnt/dumps" {
 		t.Fatalf("MariaDB data is not mounted under the server backup root: %#v", sidecarConfig.HostConfig.Binds)
 	}
 	if !strings.Contains(strings.Join(sidecarConfig.Env, "\n"), "MARIADB_PASSWORD=unique-db-password-234567890") || !strings.Contains(strings.Join(sidecarConfig.Env, "\n"), "MARIADB_ROOT_PASSWORD=unique-root-password-987654321") {

@@ -857,6 +857,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 27 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "servers", "host_mounts") {
+			if _, err = tx.Exec(`ALTER TABLE servers ADD COLUMN host_mounts TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(27)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
