@@ -16,4 +16,4 @@ Docklight checks the filesystem that contains its data directory every five minu
 
 ## Current limits
 
-The runtime monitor does not restart containers automatically, send crash notifications, or retain Docker logs as crash artifacts. Review the Console and host Docker logs, then restart a server after addressing the cause.
+The runtime monitor does not restart containers automatically or retain Docker logs as crash artifacts. Review the Console and host Docker logs, then restart a server after addressing the cause. Enable `server.crash` under Notifications to receive confirmed incident events.

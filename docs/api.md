@@ -55,7 +55,7 @@ Password and TOTP endpoints:
 | `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
 | `GET /api/servers/{id}/crashes` | Read the 50 most recent confirmed container exits or missing-container incidents; requires `server.view`. |
 | `GET /api/notifications` | Read admin-only webhook notification state; secrets and endpoint are never returned. |
-| `PUT /api/notifications` | Save admin-only webhook settings and event filters for backups and host disk alerts. |
+| `PUT /api/notifications` | Save admin-only webhook settings and event filters for backups, container crashes, and host disk alerts. |
 | `POST /api/notifications/test` | Send a signed test event to the configured webhook; admin only. |
 | `GET /api/system/disk` | Read current capacity and low-space alert state for the filesystem containing Docklight data; admin only. |
 

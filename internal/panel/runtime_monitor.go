@@ -209,6 +209,7 @@ func (a *App) recordServerCrash(s Server, reason string, exitCode int, message s
 	a.clearRuntimePending(s.ID)
 	detail := fmt.Sprintf("reason=%s exit_code=%d", reason, exitCode)
 	a.audit(User{Username: "runtime monitor"}, "server.container_crash", "server", s.ID, detail)
+	a.dispatchWebhookNotification(notificationServerCrash, &webhookServer{ID: s.ID, Name: s.Name}, message)
 	if _, err = a.db.Exec(`DELETE FROM server_crashes WHERE server_id=? AND id NOT IN (SELECT id FROM server_crashes WHERE server_id=? ORDER BY detected_at DESC,id DESC LIMIT 100)`, s.ID, s.ID); err != nil {
 		log.Printf("could not prune crash history for server %s", s.ID)
 	}

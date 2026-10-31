@@ -47,8 +47,8 @@ func TestNotificationSettingsAreAdminOnlyEncryptedAndSigned(t *testing.T) {
 	}
 	endpoint := "http://127.0.0.1:18765/hook?private=url-token"
 	secret := "signing-secret-do-not-store-plaintext"
-	updated := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"`+endpoint+`","signing_secret":"`+secret+`","events":["backup.success","backup.failure","host.disk_low"]}`, adminToken)
-	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"endpoint_configured":true`) || !strings.Contains(updated.Body.String(), `"signing_secret_configured":true`) || !strings.Contains(updated.Body.String(), `"host.disk_low"`) {
+	updated := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"`+endpoint+`","signing_secret":"`+secret+`","events":["backup.success","backup.failure","server.crash","host.disk_low"]}`, adminToken)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"endpoint_configured":true`) || !strings.Contains(updated.Body.String(), `"signing_secret_configured":true`) || !strings.Contains(updated.Body.String(), `"host.disk_low"`) || !strings.Contains(updated.Body.String(), `"server.crash"`) {
 		t.Fatalf("save notification settings: %d %s", updated.Code, updated.Body.String())
 	}
 	if strings.Contains(updated.Body.String(), secret) || strings.Contains(updated.Body.String(), "private=url-token") || strings.Contains(updated.Body.String(), `"endpoint"`) {

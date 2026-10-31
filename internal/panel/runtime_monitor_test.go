@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"example.com/yggdrasil-panel/internal/docker"
+	"example.com/yggdrasil-panel/internal/security"
 )
 
 func insertRuntimeServer(t *testing.T, a *App, id string) string {
@@ -125,6 +127,47 @@ func TestRuntimeMonitorDebouncesMissingContainerAndKeepsServerData(t *testing.T)
 	}
 	if content, err := os.ReadFile(filepath.Join(dataDir, "keep.dat")); err != nil || string(content) != "server data stays on disk" {
 		t.Fatalf("runtime monitor removed or changed server data: %q err=%v", content, err)
+	}
+}
+
+func TestConfirmedCrashSendsOptInWebhook(t *testing.T) {
+	a, d, _ := testApp(t)
+	insertRuntimeServer(t, a, "crash-webhook")
+	endpoint, err := security.Encrypt([]byte(a.cfg.Auth.SecretKey), "http://127.0.0.1:18765/crash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO notification_settings(id,enabled,endpoint_enc,events_json) VALUES(1,1,?,'["server.crash"]')`, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	requests := make(chan webhookPayload, 1)
+	a.notificationClient = &http.Client{Transport: notificationRoundTripper(func(r *http.Request) (*http.Response, error) {
+		body, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			t.Errorf("read webhook body: %v", readErr)
+		}
+		var payload webhookPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode webhook body: %v", err)
+		}
+		requests <- payload
+		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+	})}
+	s, err := a.getServer("crash-webhook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := "Container exited unexpectedly with code 137; review its logs before restarting."
+	if err = a.recordServerCrash(s, "container_exited", 137, message); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-requests:
+		if payload.Event != notificationServerCrash || payload.Server == nil || payload.Server.ID != s.ID || payload.Server.Name != s.Name || payload.Message != message {
+			t.Fatalf("unexpected crash webhook: %#v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("confirmed crash webhook was not delivered")
 	}
 }
 
