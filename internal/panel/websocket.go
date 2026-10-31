@@ -156,20 +156,28 @@ func (a *App) consoleWS(w http.ResponseWriter, r *http.Request) {
 	a.streamLogs(w, r, s, true)
 }
 
-type stackLogTargetError struct {
+type stackServiceTargetError struct {
 	status  int
 	message string
 }
 
-func (e *stackLogTargetError) Error() string { return e.message }
+func (e *stackServiceTargetError) Error() string { return e.message }
 
 func (a *App) stackServiceLogTarget(ctx context.Context, s Server, serviceName string) (string, []string, error) {
+	return a.stackServiceTarget(ctx, s, serviceName, false)
+}
+
+func (a *App) stackServiceExecTarget(ctx context.Context, s Server, serviceName string) (string, []string, error) {
+	return a.stackServiceTarget(ctx, s, serviceName, true)
+}
+
+func (a *App) stackServiceTarget(ctx context.Context, s Server, serviceName string, requireRunning bool) (string, []string, error) {
 	gs, err := a.loadRune(s.GameskillID)
 	if err != nil {
-		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "server template is unavailable"}
+		return "", nil, &stackServiceTargetError{status: http.StatusNotFound, message: "server template is unavailable"}
 	}
 	if gs.Stack == nil {
-		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "server has no private services"}
+		return "", nil, &stackServiceTargetError{status: http.StatusNotFound, message: "server has no private services"}
 	}
 	found := false
 	for _, service := range gs.Stack.Services {
@@ -179,30 +187,33 @@ func (a *App) stackServiceLogTarget(ctx context.Context, s Server, serviceName s
 		}
 	}
 	if !found {
-		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "private service not found"}
+		return "", nil, &stackServiceTargetError{status: http.StatusNotFound, message: "private service not found"}
 	}
 	var containerID string
 	if err = a.db.QueryRowContext(ctx, `SELECT container_id FROM server_sidecars WHERE server_id=? AND service_name=?`, s.ID, serviceName).Scan(&containerID); errors.Is(err, sql.ErrNoRows) || err == nil && containerID == "" {
-		return "", nil, &stackLogTargetError{status: http.StatusConflict, message: "private service has not started yet"}
+		return "", nil, &stackServiceTargetError{status: http.StatusConflict, message: "private service has not started yet"}
 	} else if err != nil {
-		return "", nil, &stackLogTargetError{status: http.StatusInternalServerError, message: "private service state could not be read"}
+		return "", nil, &stackServiceTargetError{status: http.StatusInternalServerError, message: "private service state could not be read"}
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, runtimeInspectTimeout)
 	ins, inspectErr := a.engine.Inspect(inspectCtx, containerID)
 	cancel()
 	if docker.IsNotFound(inspectErr) {
-		return "", nil, &stackLogTargetError{status: http.StatusConflict, message: "Docker no longer has this private service container; restart the server stack"}
+		return "", nil, &stackServiceTargetError{status: http.StatusConflict, message: "Docker no longer has this private service container; restart the server stack"}
 	}
 	if inspectErr != nil {
-		return "", nil, &stackLogTargetError{status: http.StatusServiceUnavailable, message: "Docker could not inspect this private service; check Docker Engine and try again"}
+		return "", nil, &stackServiceTargetError{status: http.StatusServiceUnavailable, message: "Docker could not inspect this private service; check Docker Engine and try again"}
 	}
 	labels := ins.Config.Labels
 	if labels[docklightServerLabel] != s.ID || labels[docklightRoleLabel] != "sidecar" || labels[docklightServiceLabel] != serviceName {
-		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "private service container ownership could not be verified"}
+		return "", nil, &stackServiceTargetError{status: http.StatusNotFound, message: "private service container ownership could not be verified"}
+	}
+	if requireRunning && !ins.State.Running {
+		return "", nil, &stackServiceTargetError{status: http.StatusConflict, message: "private service must be running before commands can be sent"}
 	}
 	env, err := a.runtimeEnv(s, gs)
 	if err != nil {
-		return "", nil, &stackLogTargetError{status: http.StatusInternalServerError, message: "server secrets could not be loaded for log redaction"}
+		return "", nil, &stackServiceTargetError{status: http.StatusInternalServerError, message: "server secrets could not be loaded for log redaction"}
 	}
 	return containerID, runeSecretValues(gs, env), nil
 }
@@ -218,7 +229,7 @@ func (a *App) stackServiceLogsWS(w http.ResponseWriter, r *http.Request) {
 	}
 	containerID, secrets, err := a.stackServiceLogTarget(r.Context(), s, chi.URLParam(r, "service"))
 	if err != nil {
-		var targetErr *stackLogTargetError
+		var targetErr *stackServiceTargetError
 		if errors.As(err, &targetErr) {
 			writeError(w, targetErr.status, targetErr.message)
 		} else {

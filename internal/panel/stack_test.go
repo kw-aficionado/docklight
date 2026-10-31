@@ -94,6 +94,10 @@ type fakeStackDocker struct {
 	nextID         int
 	logsOutput     string
 	healthInspects int
+	execCommand    []string
+	execOutput     string
+	execExitCode   int
+	execCount      int
 }
 
 func newFakeStackDocker(serverID, failStart string) *fakeStackDocker {
@@ -165,6 +169,25 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if req.Method == http.MethodPost && strings.HasPrefix(path, "/v1.45/containers/") {
 		parts := strings.Split(strings.TrimPrefix(path, "/v1.45/containers/"), "/")
+		if len(parts) == 2 && parts[1] == "exec" {
+			container, ok := f.containers[parts[0]]
+			if !ok {
+				return respond(http.StatusNotFound, `{"message":"No such container"}`)
+			}
+			if container.state != "running" {
+				return respond(http.StatusConflict, `{"message":"Container is not running"}`)
+			}
+			var config struct {
+				Cmd []string `json:"Cmd"`
+			}
+			if err := json.Unmarshal(body, &config); err != nil || len(config.Cmd) == 0 {
+				return respond(http.StatusBadRequest, `{"message":"bad exec config"}`)
+			}
+			f.execCommand = append([]string(nil), config.Cmd...)
+			f.execCount++
+			f.operations = append(f.operations, "exec:create:"+container.name)
+			return respond(http.StatusCreated, `{"Id":"exec-1"}`)
+		}
 		if len(parts) == 2 && parts[1] == "start" {
 			container, ok := f.containers[parts[0]]
 			if !ok {
@@ -188,6 +211,18 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 			f.operations = append(f.operations, "container:stop:"+container.name)
 			return respond(http.StatusNoContent, "")
 		}
+	}
+	if req.Method == http.MethodPost && path == "/v1.45/exec/exec-1/start" {
+		frame := make([]byte, 8+len(f.execOutput))
+		frame[0] = 1
+		binary.BigEndian.PutUint32(frame[4:8], uint32(len(f.execOutput)))
+		copy(frame[8:], f.execOutput)
+		f.operations = append(f.operations, "exec:start")
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(frame)), Request: req}, nil
+	}
+	if req.Method == http.MethodGet && path == "/v1.45/exec/exec-1/json" {
+		f.operations = append(f.operations, "exec:inspect")
+		return respond(http.StatusOK, fmt.Sprintf(`{"Running":false,"ExitCode":%d}`, f.execExitCode))
 	}
 	if req.Method == http.MethodGet && strings.HasPrefix(path, "/v1.45/containers/") && strings.HasSuffix(path, "/json") {
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/v1.45/containers/"), "/json")
@@ -617,6 +652,92 @@ func TestStackServiceLogTargetChecksOwnershipAndRedactsSecrets(t *testing.T) {
 	fake.mu.Unlock()
 	if _, _, err = a.stackServiceLogTarget(context.Background(), s, "database"); err == nil || !strings.Contains(err.Error(), "ownership could not be verified") {
 		t.Fatalf("sidecar logs were allowed for an unowned container: %v", err)
+	}
+}
+
+func TestStackServiceCommandsRequirePermissionAndRunSafely(t *testing.T) {
+	a, d, config := testApp(t)
+	fake := newFakeStackDocker("stack-server", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	s := insertWordPressStackServer(t, a, d, config.Database.Path)
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.engine.CreateNetwork(context.Background(), "stack-exec-network", docker.NetworkCreateConfig{Driver: "bridge", Labels: map[string]string{docklightServerLabel: s.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.createStackSidecars(context.Background(), s, gs, env, "stack-exec-network", stackResourceLimits(s, gs)); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	fake.execOutput = "connected with unique-db-password-234567890\n"
+	fake.execExitCode = 0
+	fake.mu.Unlock()
+
+	requestFor := func(user User) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/servers/stack-server/stack-services/database/exec", strings.NewReader(`{"command":"printf safe"}`))
+		route := chi.NewRouteContext()
+		route.URLParams.Add("id", s.ID)
+		route.URLParams.Add("service", "database")
+		ctx := context.WithValue(request.Context(), chi.RouteCtxKey, route)
+		ctx = context.WithValue(ctx, principalKey{}, user)
+		request = request.WithContext(ctx)
+		response := httptest.NewRecorder()
+		a.execStackService(response, request)
+		return response
+	}
+	limited := requestFor(User{ID: "limited", Username: "limited", Role: "user"})
+	if limited.Code != http.StatusForbidden || !strings.Contains(limited.Body.String(), "server.console permission is required") {
+		t.Fatalf("sidecar command access did not require server.console: status=%d body=%s", limited.Code, limited.Body.String())
+	}
+
+	response := requestFor(User{ID: "admin", Username: "admin", Role: "admin"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("sidecar command failed: %d %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Service  string `json:"service"`
+		Output   string `json:"output"`
+		ExitCode int    `json:"exit_code"`
+		Success  bool   `json:"success"`
+	}
+	if err = json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Service != "database" || result.Output != "connected with [redacted]\n" || !result.Success || result.ExitCode != 0 {
+		t.Fatalf("sidecar command response leaked or lost result fields: %+v", result)
+	}
+	fake.mu.Lock()
+	command := append([]string(nil), fake.execCommand...)
+	execCount := fake.execCount
+	containerID := fake.byName[stackContainerName(s.ID, "database")]
+	container := fake.containers[containerID]
+	container.state = "exited"
+	fake.containers[containerID] = container
+	fake.mu.Unlock()
+	if strings.Join(command, "|") != "/bin/sh|-c|printf safe" || execCount != 1 {
+		t.Fatalf("sidecar command config=%v exec count=%d", command, execCount)
+	}
+	var auditDetail string
+	if err = d.QueryRow(`SELECT detail FROM audit_log WHERE action='server.stack.command' AND target_id=?`, s.ID).Scan(&auditDetail); err != nil {
+		t.Fatal(err)
+	}
+	if auditDetail != "service=database exit_code=0" || strings.Contains(auditDetail, "printf safe") || strings.Contains(auditDetail, "unique-db-password") {
+		t.Fatalf("command audit detail contains user input or secret: %q", auditDetail)
+	}
+	stopped := requestFor(User{ID: "admin", Username: "admin", Role: "admin"})
+	if stopped.Code != http.StatusConflict {
+		t.Fatalf("commands were accepted by a stopped private service: %d %s", stopped.Code, stopped.Body.String())
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.execCount != 1 {
+		t.Fatalf("stopped private service created another exec: %d", fake.execCount)
 	}
 }
 

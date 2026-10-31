@@ -227,6 +227,7 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/rcon", a.serverRCON)
 			priv.Get("/servers/{id}/logs", a.logsWS)
 			priv.Get("/servers/{id}/stack-services/{service}/logs", a.stackServiceLogsWS)
+			priv.Post("/servers/{id}/stack-services/{service}/exec", a.execStackService)
 			priv.Get("/servers/{id}/console", a.consoleWS)
 			priv.Get("/servers/{id}/install/log", a.installWS)
 			priv.Get("/servers/{id}/files", a.fileList)
