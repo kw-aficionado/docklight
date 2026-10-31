@@ -113,6 +113,15 @@
 - Values whose environment-key names signal passwords, tokens, secrets, keys, DSNs, or credential-bearing URLs are discarded during import and represented by secret template variables with no default. Operators enter those values when creating a server; this keeps them out of template YAML and import responses.
 - Compose interpolation, `build`, custom commands and entrypoints, dependency health ordering, and service networks are not translated. The importer returns specific warnings and does not attempt to execute a Compose project or read its `.env` files.
 
+## 2026-11-01: Pterodactyl egg and XML imports
+
+- Keep both importers as data-only translators. Never run egg install entrypoints/scripts during import; the XML and egg outputs must pass the Docklight rune validator before storage.
+- Sort Pterodactyl `docker_images` and `config.files` keys so repeated imports of the same JSON produce the same selected image and path order, despite JSON object ordering.
+- Keep the XML importer limited to the documented `<gameskill>` subset; ignore unrelated elements and reject malformed fields through the shared rune validator.
+- Strip defaults for variables whose names look like credentials before the generated YAML is marshaled. Return only a generic warning so secret values cannot escape through responses or audit details.
+- Treat imports like manual local edits: upsert non-built-in IDs, clear catalog provenance, and refuse any built-in ID collision in a transaction.
+- Make validated `config_files` useful in the server UI: list only existing paths as Files-tab shortcuts, keep edits behind the existing `server.files` permission, and preserve comments/unsupported lines when the key/value form editor is used.
+
 
 ## 2026-11-01: administrator host mounts
 

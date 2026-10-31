@@ -16,6 +16,8 @@ type Rune struct {
 	Name        string     `json:"name"`
 	Category    string     `json:"category"`
 	Description string     `json:"description,omitempty"`
+	Author      string     `json:"author,omitempty"`
+	Icon        string     `json:"icon,omitempty"`
 	Version     int        `json:"version"`
 	Docker      Docker     `json:"docker"`
 	Variables   []Variable `json:"variables,omitempty"`
@@ -129,6 +131,12 @@ func (g Rune) Validate() error {
 	if strings.TrimSpace(g.Name) == "" {
 		return errors.New("gameskill.name is required")
 	}
+	if len(g.Author) > 128 || strings.ContainsAny(g.Author, "\r\n\x00") {
+		return errors.New("gameskill.author must be 128 characters or fewer and cannot contain line breaks")
+	}
+	if len(g.Icon) > 4096 || strings.ContainsAny(g.Icon, "\r\n\x00") {
+		return errors.New("gameskill.icon must be 4096 characters or fewer and cannot contain line breaks")
+	}
 	if strings.TrimSpace(g.Docker.Image) == "" {
 		return errors.New("gameskill.docker.image is required")
 	}
@@ -180,7 +188,7 @@ func (g Rune) Validate() error {
 			return fmt.Errorf("variable %q is declared more than once", v.Key)
 		}
 		declared[v.Key] = true
-		secretDeclared[v.Key] = v.Secret || sensitiveVariableName(v.Key)
+		secretDeclared[v.Key] = v.Secret || SensitiveVariableName(v.Key)
 		switch v.Type {
 		case "string", "int", "bool":
 		case "select":
@@ -344,10 +352,18 @@ func (g Rune) Validate() error {
 			return fmt.Errorf("docker.extra_volumes: %w", err)
 		}
 	}
+	if len(g.ConfigFiles) > 64 {
+		return errors.New("gameskill.config_files can contain at most 64 paths")
+	}
+	configFiles := map[string]bool{}
 	for _, p := range g.ConfigFiles {
-		if p == "" || strings.HasPrefix(p, "/") || path.Clean(p) != p || strings.HasPrefix(p, "..") {
+		if p == "" || len(p) > 1024 || path.IsAbs(p) || path.Clean(p) != p || strings.HasPrefix(p, "..") || strings.ContainsAny(p, "\\\x00\r\n") {
 			return fmt.Errorf("config_files path %q must be a clean relative path", p)
 		}
+		if configFiles[p] {
+			return fmt.Errorf("config_files path %q is listed more than once", p)
+		}
+		configFiles[p] = true
 	}
 	if g.Query != nil {
 		switch g.Query.Type {
@@ -365,9 +381,6 @@ func (g Rune) Validate() error {
 	}
 	if g.RCON != nil && g.RCON.PasswordVar != "" && !declared[g.RCON.PasswordVar] {
 		return fmt.Errorf("rcon.password_var %q is not a declared variable", g.RCON.PasswordVar)
-	}
-	if len(g.ConfigFiles) != 0 {
-		return errors.New("gameskill.config_files is not supported in this release; use the server Files tab")
 	}
 	if g.Steam != nil {
 		return errors.New("gameskill.steam installation metadata is not supported in this release")
@@ -397,9 +410,9 @@ func rejectSecretRuneTemplate(field, value string, secrets map[string]bool) erro
 	return nil
 }
 
-func sensitiveVariableName(key string) bool {
+func SensitiveVariableName(key string) bool {
 	name := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(key))
-	for _, suffix := range []string{"password", "passwd", "pass", "secret", "token", "credential", "apikey", "privatekey", "accesskey"} {
+	for _, suffix := range []string{"password", "passwd", "pass", "secret", "token", "credential", "apikey", "privatekey", "accesskey", "encryptionkey", "databaseurl", "redisurl", "connectionstring", "dsn"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}

@@ -249,7 +249,11 @@ func TestValidatedOptionalDockerFeaturesAndUnsupportedMetadata(t *testing.T) {
 	}
 	base.Steam = nil
 	base.ConfigFiles = []string{"app.conf"}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("safe config-file shortcut was rejected: %v", err)
+	}
+	base.ConfigFiles = []string{"../outside.conf"}
 	if err := base.Validate(); err == nil {
-		t.Fatal("unsupported config-file metadata was silently accepted")
+		t.Fatal("config-file path escaped the server data directory")
 	}
 }

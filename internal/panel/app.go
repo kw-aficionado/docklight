@@ -168,6 +168,7 @@ func (a *App) Router() http.Handler {
 	r.Get("/app.js", a.static("web/app.js", "text/javascript; charset=utf-8"))
 	r.Get("/ui-utils.mjs", a.static("web/ui-utils.mjs", "text/javascript; charset=utf-8"))
 	r.Get("/style.css", a.static("web/style.css", "text/css; charset=utf-8"))
+	r.Get("/config-editor.css", a.static("web/config-editor.css", "text/css; charset=utf-8"))
 	r.Get("/status", a.publicStatusPage)
 	r.Get("/status.js", a.publicStatusScript)
 	r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +221,8 @@ func (a *App) Router() http.Handler {
 			priv.Delete("/realms/{id}", a.admin(a.deleteRealm))
 			priv.Post("/gameskills", a.uploadRune)
 			priv.Post("/gameskills/import-compose", a.importCompose)
+			priv.Post("/gameskills/import-egg", a.importEgg)
+			priv.Post("/gameskills/import-xml", a.importXML)
 			priv.Post("/gameskills/install-from-github", a.admin(a.installGitHubRune))
 			priv.Delete("/gameskills/{id}", a.deleteRune)
 			priv.Get("/rune-repos", a.admin(a.listRuneRepos))
@@ -329,7 +332,7 @@ func (a *App) headers(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
-		if r.URL.Path == "/robots.txt" || r.URL.Path == "/app.js" || r.URL.Path == "/style.css" {
+		if r.URL.Path == "/robots.txt" || r.URL.Path == "/app.js" || r.URL.Path == "/style.css" || r.URL.Path == "/config-editor.css" {
 			w.Header().Set("Cache-Control", "public, max-age=60")
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -669,7 +672,7 @@ func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
 		}
 		rr, _ := rune.Parse(x.yaml)
 		rr = publicRune(rr)
-		item := map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "can_create_default": a.allowedRuneScope(u, "server.create", x.id), "description": rr.Description, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query}
+		item := map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "can_create_default": a.allowedRuneScope(u, "server.create", x.id), "description": rr.Description, "author": rr.Author, "icon": rr.Icon, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query, "config_files": rr.ConfigFiles}
 		if u.Role == "admin" {
 			item["source_host"], item["source_repo"] = x.sourceHost, x.sourceRepo
 		}

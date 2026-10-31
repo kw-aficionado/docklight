@@ -1,0 +1,15 @@
+.config-shortcuts{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border-soft)}
+.config-shortcuts[hidden]{display:none}
+.config-shortcuts-title{margin-right:3px;color:var(--faint);font-size:9px;font-weight:800;letter-spacing:1px}
+.config-shortcuts .button{height:31px;padding:0 10px;font-size:10px}
+.config-editor-tabs{display:flex;gap:7px;margin:12px 0 8px}
+.config-editor-tabs .button{height:31px;padding:0 12px}
+.config-editor-tabs .button.active{border-color:#3b7165;color:var(--green)}
+.config-editor-help{margin:7px 0;color:var(--muted);font-size:10px}
+.config-kv-list{display:flex;flex-direction:column;gap:7px;max-height:min(52vh,500px);overflow:auto;padding:2px 1px 6px}
+.config-kv-row{display:grid;grid-template-columns:minmax(130px,.42fr) minmax(180px,1fr);gap:8px}
+.config-kv-row input{min-width:0;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--panel-2);color:var(--text);font-size:11px}
+.config-kv-list>.button{align-self:flex-start;height:31px;font-size:10px}
+.config-kv-list>.config-editor-help{margin:0}
+@media(max-width:560px){.config-shortcuts{padding:9px 11px}.config-shortcuts-title{width:100%}.config-kv-row{grid-template-columns:minmax(90px,.4fr) minmax(130px,1fr);gap:6px}}
+.light .config-kv-row input{background:#fff;color:#1b2922;border-color:#ccd8d0}

@@ -62,7 +62,7 @@ gameskill:
 
 | Field | Behavior |
 | --- | --- |
-| `id`, `name`, `category`, `version`, `description` | Template metadata. IDs use lowercase letters, digits, hyphens, and underscores. |
+| `id`, `name`, `category`, `version`, `description`, `author`, `icon` | Template metadata. IDs use lowercase letters, digits, hyphens, and underscores. |
 | `docker.image` | Image to pull for server startup. |
 | `docker.data_path` | Container path backed by the server app-data directory; defaults to `/data`. For stack templates the main app gets only `<server data directory>/_app`, leaving sidecar data outside its mount. |
 | `docker.user` | Optional container UID:GID or username. Without `keep_entrypoint`, the panel sets a UID and mounts a minimal passwd shim. |
@@ -73,6 +73,7 @@ gameskill:
 | `docker.devices` | Restricted host device allowlist: `/dev/net/tun`, `/dev/dri`, `/dev/fuse`; optional container path and `rwm` permissions. |
 | `docker.sysctls` | Restricted allowlist for selected forwarding sysctls. |
 | `variables` | Form fields of type `string`, `int`, `bool`, or `select`; optional default, required, min/max, pattern, secret, and hint. |
+| `config_files` | Up to 64 safe, relative file paths. Existing files appear as shortcuts in the Files tab; `.properties`, `.env`, `.cfg`, and `.conf` support a key/value form and a raw editor. Missing files are skipped. |
 | `install.image`, `install.script` | Optional temporary install container and shell script. The script runs as root with the data mounted at `/data`. |
 | `startup.command` | Shell string run with `/bin/sh -c` when the image entrypoint is replaced. |
 | `startup.exec` | Argument list for the container command. When `keep_entrypoint` is true these are entrypoint arguments. |
@@ -95,7 +96,7 @@ Variable keys that conflict with panel-injected names (including `SERVER_NAME`, 
 
 The reader supports nested mappings, sequences, scalar values, inline lists, and literal/folded block strings. It is a bounded subset parser rather than a general YAML 1.2 implementation. Unknown fields are ignored, so use only fields listed here.
 
-Container capabilities, devices, mounts, and sysctls are allowlisted to limit host access. `steam` installation metadata and `config_files` shortcuts are rejected because their behavior is not implemented; use the Files tab for editing data. Rune-defined app-data import steps and backup hooks are not supported in this release. Private image access is managed by an administrator under **Templates → Registry access**; saved logins cover runtime images, sidecars, install images, and update pulls.
+Container capabilities, devices, mounts, and sysctls are allowlisted to limit host access. `config_files` accepts up to 64 clean relative paths. The Files tab shows shortcuts for paths that exist; `.properties`, `.env`, `.cfg`, and `.conf` files support a key/value form and raw editing, preserving comments and unsupported lines. Rune-defined app-data import steps and backup hooks are not supported in this release. Private image access is managed by an administrator under **Templates → Registry access**; saved logins cover runtime images, sidecars, install images, and update pulls.
 
 Six built-in templates are embedded in the binary: Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. Built-in IDs cannot be overwritten or deleted. Community templates can be imported from the Templates page, subject to the same validation.
 
@@ -112,6 +113,14 @@ The browser lists `.yaml` and `.yml` files up to 512 KiB and folders at the repo
 Administrators can import one Compose YAML document from **Templates → Import Compose**. The API accepts a multipart `file` field and optional `main` service and display `name`; raw YAML is also accepted with `main` and `name` query parameters. Files are limited to 1 MiB. Docklight chooses a main service from published ports and common service names, or the administrator can name it explicitly. Other services with pullable images become sidecars on the private per-server network.
 
 Short-form main-service ports are converted to container ports and Docklight allocates free host ports. Specific host-IP bindings are dropped because the panel cannot preserve them; localhost-only ports are never widened to all interfaces. Named volumes become Docklight-managed persistent paths on the main service and sidecars, but existing Compose volume contents are not copied. Bind mounts are reported as warnings and omitted from the template. After creating the server, an administrator can re-add each mount under Settings → Host mounts and select the matching main or sidecar container. Host folders are mounted in place, so their contents are not copied into Docklight-managed storage. The importer also reports dropped `build`, network, command, environment-file, health-check, dependency, and other unsupported settings. Compose interpolation is not evaluated. Values for environment keys that look secret are not stored; the template prompts for those values when creating a server. The importer validates and round-trips the generated template before saving it. Re-importing a non-built-in ID updates the existing template; built-in IDs are protected.
+
+## Pterodactyl egg and XML imports
+
+Administrators can import one Pterodactyl egg JSON file or one XML `<gameskill>` document from **Templates**. Each upload is limited to 1 MiB and accepts either a multipart `file` field or a raw request body. The generated template is serialized and validated by the same Docklight parser before storage. Built-in IDs are protected; importing an existing community ID updates it and clears its catalog provenance.
+
+Egg IDs are slugified from the name and start at version 1. `docker_image` is used unless `docker_images` supplies images, in which case the first key in sorted order is selected for repeatable imports. The egg startup command is preserved verbatim; the first `config.startup.done` value becomes a literal-quoted ready regex. Installation scripts use the egg's installation container or fall back to its runtime image. `config.files` keys are sorted into `config_files`. Variable rules map Laravel `boolean`, `integer`/`numeric`, and `in:a,b` to Docklight bool, int and select types; other rules become strings. No egg ports are inferred.
+
+XML supports `<gameskill>` identity, description, author and icon fields; Docker image; typed variables; installation; startup; `config_files`; and ports. Version zero becomes one, an empty category becomes `Imported`, and an empty port protocol becomes `tcp`. Elements outside this subset are ignored. In both formats, defaults for variable names that look like passwords, tokens, secrets, private keys or credentials are removed and a warning is returned; secret values are never written to template YAML or import responses.
 
 **Check updates** compares versions by template ID and reports a missing saved source or network error instead of treating it as current. It only lists; applying an update is an explicit administrator action. Checks do not run on startup or on a timer. No remote catalog is preconfigured: add a repository you trust before browsing or checking templates that do not have recorded source metadata. See the [API reference](api.md) for repository and GitHub token routes.
 

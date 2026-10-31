@@ -56,6 +56,12 @@ Admins can import one Compose YAML document from **Templates → Import Compose*
 
 Tests cover the main-service heuristics and override, app/sidecar conversion, port ranges and protocols, host-binding protection, multiple persistent paths, environment map/list forms, reserved variables, secret value removal, Compose size and document limits, admin-only access, multipart upload, raw YAML requests, built-in collisions, generated YAML round-trip, and re-import upsert with catalog provenance clearing. The fake Docker Engine stack lifecycle test verifies an additional sidecar path is bound under `_stack/<service>/_extra`; a planted symlink escape was refused before creating any outside files. Live Docker installation, Compose file compatibility across Compose versions, and browser interaction remain pending; this sandbox still blocks the panel listener.
 
+## Phase 3 Pterodactyl egg and XML imports
+
+Administrators can import Pterodactyl egg JSON or the supported `<gameskill>` XML subset from Templates. The importers preserve startup, install scripts, variables, ports and safe `config_files` metadata, validate the generated template through Docklight's parser, protect built-in IDs, and update existing community IDs while clearing catalog provenance. Egg image-map and config-file keys are sorted for reproducible output; XML version `0` becomes `1`, and an omitted port protocol becomes TCP. Password-, token-, key- and other secret-looking variable defaults are discarded and reported as an import warning.
+
+Tests cover both translations, deterministic fields, secret default removal, multipart XML upload, admin access, built-in collisions, size limits, re-import provenance clearing and generated-template round-trips. The Files tab lists existing `config_files` paths as shortcuts; `.properties`, `.env`, `.cfg`, and `.conf` files open in a key/value editor with a raw view. The panel listener is blocked in this environment, so this UI has not been visually exercised here.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -92,7 +98,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, cross-server ban automation, and Pterodactyl egg/XML importers.
+- Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

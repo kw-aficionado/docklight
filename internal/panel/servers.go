@@ -1384,13 +1384,7 @@ func secretVariables(gs rune.Rune) map[string]bool {
 	return m
 }
 func secretFieldName(key string) bool {
-	name := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(key))
-	for _, suffix := range []string{"password", "passwd", "pass", "secret", "token", "credential", "apikey", "privatekey", "accesskey"} {
-		if strings.HasSuffix(name, suffix) {
-			return true
-		}
-	}
-	return strings.Contains(name, "clientsecret") || strings.Contains(name, "signingkey")
+	return rune.SensitiveVariableName(key)
 }
 func publicRune(gs rune.Rune) rune.Rune {
 	gs.Variables = append([]rune.Variable(nil), gs.Variables...)
