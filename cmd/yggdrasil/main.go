@@ -137,6 +137,7 @@ func serve(args []string) error {
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	app.StartScheduleWorker(workerCtx)
+	app.StartRuntimeMonitor(workerCtx)
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	errs := make(chan error, 1)

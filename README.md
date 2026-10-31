@@ -52,7 +52,7 @@ The CLI also provides:
 - `reset-password USER [--config PATH]` — root-only break-glass password reset; generates a password unless one is supplied.
 - `reset-2fa USER [--config PATH]` — root-only break-glass authenticator reset.
 
-See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
+See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [monitoring](docs/guides/monitoring.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
 
 ## Network and security
 

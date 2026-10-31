@@ -53,6 +53,7 @@ Password and TOTP endpoints:
 | `PUT /api/servers/{id}/schedules/{scheduleID}` | Change the name, cron expression, or enabled state. |
 | `DELETE /api/servers/{id}/schedules/{scheduleID}` | Delete a schedule and its run history. |
 | `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
+| `GET /api/servers/{id}/crashes` | Read the 50 most recent confirmed container exits or missing-container incidents; requires `server.view`. |
 | `GET /api/notifications` | Read admin-only webhook notification state; secrets and endpoint are never returned. |
 | `PUT /api/notifications` | Save admin-only webhook settings and backup event filters. |
 | `POST /api/notifications/test` | Send a signed test event to the configured webhook; admin only. |
@@ -97,4 +98,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, Discord, Telegram, SMTP, non-backup notifications, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, crash auto-restart/watchdog, Discord, Telegram, SMTP, non-backup notifications, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior and [monitoring](guides/monitoring.md) for confirmed exit history.

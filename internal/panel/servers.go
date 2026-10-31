@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -323,10 +324,15 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "local backups were removed but their schedules could not be deleted")
 		return
 	}
+	if _, err := a.db.Exec(`DELETE FROM server_crashes WHERE server_id=?`, s.ID); err != nil {
+		writeError(w, 500, "server backups were removed but crash history could not be deleted")
+		return
+	}
 	if err := os.RemoveAll(s.DataDir); err != nil {
 		writeError(w, 500, "Docker removed the container but panel data cleanup failed; fix storage permissions and retry cleanup")
 		return
 	}
+	a.clearRuntimePending(s.ID)
 	a.releasePorts(s.ID)
 	_, _ = a.db.Exec(`DELETE FROM permissions WHERE scope_type='server' AND scope_id=?`, s.ID)
 	_, _ = a.db.Exec(`DELETE FROM servers WHERE id=?`, s.ID)
@@ -679,6 +685,7 @@ func (a *App) start(s Server) error {
 	if err != nil {
 		return fmt.Errorf("server started but panel could not record its ID: %w", err)
 	}
+	a.clearRuntimePending(s.ID)
 	s.ContainerID = cid
 	s.Status = "starting"
 	go a.watchReady(s, gs)
@@ -694,12 +701,14 @@ func (a *App) recreateAndStart(ctx context.Context, s Server) error {
 		cancel()
 	}
 	_, _ = a.db.Exec(`UPDATE servers SET container_id='',status='stopped' WHERE id=?`, s.ID)
+	a.clearRuntimePending(s.ID)
 	s.ContainerID = ""
 	return a.start(s)
 }
 func (a *App) stop(s Server) error {
 	if s.ContainerID == "" {
 		_, _ = a.db.Exec(`UPDATE servers SET status='stopped',error_message='' WHERE id=?`, s.ID)
+		a.clearRuntimePending(s.ID)
 		return nil
 	}
 	gs, err := a.loadRune(s.GameskillID)
@@ -725,6 +734,7 @@ func (a *App) stop(s Server) error {
 		return err
 	}
 	_, _ = a.db.Exec(`UPDATE servers SET status='stopped',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, s.ID)
+	a.clearRuntimePending(s.ID)
 	return nil
 }
 func (a *App) watchReady(s Server, gs rune.Rune) {
@@ -749,8 +759,11 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 			return
 		}
 		if !ins.State.Running {
-			_, _ = a.db.Exec(`UPDATE servers SET status='stopped',error_message='server process exited before readiness; review its console logs' WHERE id=?`, s.ID)
-			a.audit(User{Username: "system"}, "server.exited_before_ready", "server", s.ID, "server process exited before readiness")
+			message := fmt.Sprintf("Container exited before readiness with code %d; review its logs and template startup settings.", ins.State.ExitCode)
+			if err = a.recordServerCrash(s, "container_exited", ins.State.ExitCode, message); err != nil {
+				log.Printf("could not record startup exit for server %s", s.ID)
+				_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=? WHERE id=? AND status='starting'`, message, s.ID)
+			}
 			return
 		}
 		logReady := re == nil

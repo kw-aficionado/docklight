@@ -37,6 +37,10 @@ type App struct {
 	dataMu             sync.Mutex
 	scheduleMu         sync.Mutex
 	notificationClient *http.Client
+	runtimeMu          sync.Mutex
+	runtimePending     map[string]pendingRuntimeIncident
+	runtimeInspect     func(context.Context, string) (docker.Inspect, error)
+	runtimePing        func(context.Context) error
 	rateMu             sync.Mutex
 	loginIPs           map[string][]time.Time
 	loginUsers         map[string][]time.Time
@@ -73,7 +77,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}}
 }
 
 func EnsureAdmin(d *sql.DB, username, password string) (string, error) {
@@ -184,6 +188,7 @@ func (a *App) Router() http.Handler {
 			priv.Put("/servers/{id}/schedules/{scheduleID}", a.updateBackupSchedule)
 			priv.Delete("/servers/{id}/schedules/{scheduleID}", a.deleteBackupSchedule)
 			priv.Get("/servers/{id}/schedules/{scheduleID}/runs", a.listBackupScheduleRuns)
+			priv.Get("/servers/{id}/crashes", a.listServerCrashes)
 			priv.Get("/notifications", a.admin(a.getNotificationSettings))
 			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
 			priv.Post("/notifications/test", a.admin(a.testNotification))

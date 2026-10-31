@@ -179,6 +179,35 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 6 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_crashes (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL,
+			container_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL,
+			exit_code INTEGER NOT NULL DEFAULT -1,
+			message TEXT NOT NULL,
+			detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_server_crashes_recent ON server_crashes(server_id, detected_at DESC, id DESC)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(6)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
