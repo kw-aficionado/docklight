@@ -53,6 +53,7 @@ Registration and sign-in require user verification and discoverable credentials.
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). Replacing a catalog template clears its source metadata. |
+| `POST /api/gameskills/import-compose` | Admin only; import a Compose YAML file as a Docklight template. Accepts multipart field `file` (and optional `main` service and `name`) or a raw YAML body with `main` and `name` query parameters. Maximum 1 MiB. Returns `{id,name,warnings}`; built-in ID collisions return `409`. Bind mounts are omitted because per-server host-mount controls are not implemented in this checkout. Specific host-IP port bindings are omitted, so localhost-only ports are never widened. |
 | `GET /api/gameskills/github?repo=owner/name&path=...&ref=main` | Admin only; browse a GitHub repository. Lists YAML files up to 512 KiB and folders one level deep; successful listings are cached for 10 minutes. |
 | `POST /api/gameskills/install-from-github` | Admin only; install or update a GitHub YAML file with `repo`, `path`, and optional `ref`. Built-in IDs return `409`. |
 | `GET /api/gameskills/updates` | Admin only; compare installed non-built-in template versions with saved catalogs. It lists updates and source errors without applying changes. |

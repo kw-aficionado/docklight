@@ -219,6 +219,7 @@ func (a *App) Router() http.Handler {
 			priv.Put("/realms/{id}", a.admin(a.updateRealm))
 			priv.Delete("/realms/{id}", a.admin(a.deleteRealm))
 			priv.Post("/gameskills", a.uploadRune)
+			priv.Post("/gameskills/import-compose", a.importCompose)
 			priv.Post("/gameskills/install-from-github", a.admin(a.installGitHubRune))
 			priv.Delete("/gameskills/{id}", a.deleteRune)
 			priv.Get("/rune-repos", a.admin(a.listRuneRepos))

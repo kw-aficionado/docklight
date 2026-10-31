@@ -102,3 +102,13 @@
 - Reuse the first enabled global SMTP email channel for account recovery, overriding only its configured notification recipient with the account's unique email. Server-scoped channels are excluded.
 - Forgot requests use one generic response and IP/identifier rate limits. Store a SHA-256 token hash for one hour, consume it once in the same transaction as the password/session-version update, and preserve TOTP.
 - Set `server.public_url` to the canonical origin so reset links do not trust a forwarded request Host. If absent, fall back to the validated request origin as specified. The login UI strips the token query parameter as soon as it loads and the panel uses `no-referrer`.
+
+## 2026-11-01: Docker Compose import
+
+- The importer accepts one Compose YAML document up to 1 MiB and uses `go.yaml.in/yaml/v3`; generated Docklight templates are marshaled, parsed by the panel rune parser, and validated before storage.
+- When multiple services publish ports, explicit `main` wins, then a conventional `web`/`app`/`server`/`main`/`game`/`frontend` name, then Compose file order. If no service publishes ports, the first declared service is used. The browser exposes an optional main-service override.
+- Host ports are not preserved because Docklight owns conflict-free allocation. Named Compose volumes map to Docklight-managed `_app` and `_stack` storage; Compose volume contents are not migrated. Additional sidecar paths live under `_stack/<service>/_extra/<container-path>` and are included by the existing server-root backup archive.
+- Host-IP port bindings cannot be represented by the current port model. The importer therefore drops explicit non-wildcard bindings, including localhost-only ports, instead of widening them to all interfaces.
+- Bind mounts are omitted with warnings. Per-server administrator host-mount controls are still missing from this checkout, so the import guide calls this out and tells operators to copy required files into Docklight-managed storage before installing.
+- Values whose environment-key names signal passwords, tokens, secrets, keys, DSNs, or credential-bearing URLs are discarded during import and represented by secret template variables with no default. Operators enter those values when creating a server; this keeps them out of template YAML and import responses.
+- Compose interpolation, `build`, custom commands and entrypoints, dependency health ordering, and service networks are not translated. The importer returns specific warnings and does not attempt to execute a Compose project or read its `.env` files.

@@ -551,13 +551,32 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
     const v=document.querySelector('#view');
     const admin=state.user.role==='admin';
     v.innerHTML=`<div class="page-heading"><div><div class="eyebrow">DECLARATIVE BLUEPRINTS</div><h1>Templates</h1><p>Reusable configurations for games and apps that run in containers.</p></div>${admin?'<div class="detail-actions"><button class="button subtle" id="manage-message-templates">Message templates</button><button class="button subtle" id="upload-rune">↑ Import YAML</button></div>':''}</div><div class="rune-grid">${state.runes.map(r=>`<article class="rune-card"><div class="rune-card-top"><div class="rune-symbol">▤</div><span class="rune-category">${esc(r.category||'Default')}</span></div><h3>${esc(r.name)}</h3><p>${esc(r.description||'Ready-to-run container configuration.')}</p><div class="rune-tags"><span>${r.ports?.length||0} ports</span><span>v${r.version}</span>${r.builtin?'<span class="builtin-tag">Built in</span>':''}</div><button class="rune-create" data-rune="${esc(r.id)}">Create server <span>→</span></button></article>`).join('')}</div>`;
-    if(admin){v.querySelector('.page-heading .detail-actions')?.insertAdjacentHTML('beforeend','<button class="button subtle" id="manage-rune-catalogs">Catalog repositories</button><button class="button subtle" id="manage-registry-logins">Registry access</button><button class="button subtle" id="check-rune-updates">Check updates</button>');}
+    if(admin){v.querySelector('.page-heading .detail-actions')?.insertAdjacentHTML('beforeend','<button class="button subtle" id="import-compose">Import Compose</button><button class="button subtle" id="manage-rune-catalogs">Catalog repositories</button><button class="button subtle" id="manage-registry-logins">Registry access</button><button class="button subtle" id="check-rune-updates">Check updates</button>');}
     if(admin){v.querySelectorAll('.rune-card').forEach((card,index)=>{const item=state.runes[index];if(!item?.source_host)return;const source=document.createElement('small');source.className='catalog-source';source.textContent=`${item.source_host} · ${item.source_repo||''}`;card.insertBefore(source,card.querySelector('.rune-create'));});}
     v.querySelectorAll('[data-rune]').forEach(b=>b.onclick=()=>newServerModal(b.dataset.rune));
     v.querySelector('#manage-message-templates')?.addEventListener('click',manageMessageTemplates);
     v.querySelector('#manage-rune-catalogs')?.addEventListener('click',manageRuneCatalogs);
     v.querySelector('#manage-registry-logins')?.addEventListener('click',manageRegistryLogins);
     v.querySelector('#check-rune-updates')?.addEventListener('click',checkRuneCatalogUpdates);
+    v.querySelector('#import-compose')?.addEventListener('click',()=>{
+      modal(`<div class="modal-heading"><div><div class="eyebrow">APP STACK IMPORT</div><h2>Import Docker Compose</h2></div><button class="icon-button" data-close>×</button></div><p class="muted-copy">Docklight imports images, environment values, published ports and named volumes. Compose secrets are omitted; enter them again when creating a server. Review the warnings before starting the template.</p><form id="compose-import-form"><label>Compose YAML<input type="file" name="file" accept=".yaml,.yml,.compose" required></label><div class="two-fields"><label>Main service<input name="main" maxlength="128" placeholder="Auto-detect"></label><label>Template name<input name="name" maxlength="80" placeholder="Use Compose project name"></label></div><div id="compose-import-error" class="form-error" role="alert"></div><div class="modal-actions"><button type="button" class="button subtle" data-close>Cancel</button><button type="submit" class="button primary">Validate & import</button></div></form>`);
+      document.querySelectorAll('[data-close]').forEach(button=>button.onclick=closeModal);
+      document.querySelector('#compose-import-form').addEventListener('submit',async event=>{
+        event.preventDefault();
+        const form=event.currentTarget;
+        const submit=form.querySelector('[type="submit"]');
+        const error=form.querySelector('#compose-import-error');
+        const data=new FormData(form);
+        submit.disabled=true;error.textContent='';
+        try{
+          const imported=await api('/api/gameskills/import-compose',{method:'POST',body:data});
+          await refresh();render();
+          const warnings=Array.isArray(imported.warnings)?imported.warnings:[];
+          modal(`<div class="modal-heading"><div><div class="eyebrow">TEMPLATE READY</div><h2>${esc(imported.name)}</h2></div><button class="icon-button" data-close>×</button></div><p class="muted-copy">Template <code>${esc(imported.id)}</code> was added. Review the imported configuration before deploying it.</p>${warnings.length?`<section class="panel-card"><h3>Review these Compose differences</h3><ul>${warnings.map(warning=>`<li>${esc(warning)}</li>`).join('')}</ul></section>`:'<p class="muted-copy">No Compose differences were detected.</p>'}<div class="modal-actions"><button class="button primary" data-close>Done</button></div>`);
+          document.querySelectorAll('[data-close]').forEach(button=>button.onclick=closeModal);
+        }catch(err){error.textContent=err.message;submit.disabled=false;}
+      });
+    });
     v.querySelector('#upload-rune')?.addEventListener('click',()=>{modal(`<div class="modal-heading"><div><div class="eyebrow">IMPORT TEMPLATE</div><h2>Upload a template</h2></div><button class="icon-button" data-close>×</button></div><p class="muted-copy">YAML is validated before it is saved. Built-in template IDs are protected.</p><textarea id="rune-yaml" class="yaml-area" placeholder="gameskill:\n  id: my-app\n  name: My App\n  docker:\n    image: example/app:latest\n  startup:\n    command: exec app\n"></textarea><div class="modal-actions"><button class="button subtle" data-close>Cancel</button><button class="button primary" id="save-rune">Validate & import</button></div>`);document.querySelector('[data-close]').onclick=closeModal;document.querySelector('#save-rune').onclick=async()=>{try{const x=await api('/api/gameskills',{method:'POST',body:document.querySelector('#rune-yaml').value});closeModal();toast(`Imported ${x.name}`,'success');await refresh();render()}catch(e){toast(e.message,'error')}};});
   }
   async function manageRegistryLogins(){

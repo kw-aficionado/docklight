@@ -404,12 +404,25 @@ func (a *App) createStackSidecars(ctx context.Context, s Server, gs rune.Rune, e
 			NanoCPUs:      limits[i+1].cpuNano,
 			Memory:        limits[i+1].memoryBytes,
 		}
-		if service.DataPath != "" {
+		if service.DataPath != "" || len(service.ExtraVolumes) > 0 {
 			dataDir := filepath.Join(s.DataDir, "_stack", service.Name)
 			if err := os.MkdirAll(dataDir, 0770); err != nil {
 				return fmt.Errorf("create data directory for app stack service %q: %w", service.Name, err)
 			}
-			host.Binds = []string{dataDir + ":" + service.DataPath}
+			if service.DataPath != "" {
+				host.Binds = append(host.Binds, dataDir+":"+service.DataPath)
+			}
+			for _, target := range service.ExtraVolumes {
+				extraPath := filepath.Join("_extra", filepath.FromSlash(strings.TrimPrefix(target, "/")))
+				extraDir, err := safePath(dataDir, extraPath, false)
+				if err != nil {
+					return fmt.Errorf("extra data path for app stack service %q at %s is unsafe: %w", service.Name, target, err)
+				}
+				if err := os.MkdirAll(extraDir, 0770); err != nil {
+					return fmt.Errorf("create extra data directory for app stack service %q at %s: %w", service.Name, target, err)
+				}
+				host.Binds = append(host.Binds, extraDir+":"+target)
+			}
 		}
 		labels := map[string]string{docklightServerLabel: s.ID, docklightRoleLabel: "sidecar", docklightServiceLabel: service.Name}
 		config := docker.CreateConfig{

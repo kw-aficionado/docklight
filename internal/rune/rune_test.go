@@ -71,6 +71,19 @@ func TestStackRejectsUnsafeNamesPathsAndUndeclaredVariables(t *testing.T) {
 	if err := base.Validate(); err != nil {
 		t.Fatalf("valid stack was rejected: %v", err)
 	}
+	base.Stack.Services[0].ExtraVolumes = []string{"/var/lib/mysql-files"}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid extra sidecar volume was rejected: %v", err)
+	}
+	base.Stack.Services[0].ExtraVolumes = []string{"/var/lib/mysql"}
+	if err := base.Validate(); err == nil {
+		t.Fatal("duplicate sidecar volume target was accepted")
+	}
+	base.Stack.Services[0].ExtraVolumes = []string{"/etc"}
+	if err := base.Validate(); err == nil {
+		t.Fatal("sidecar extra volume shadowing system files was accepted")
+	}
+	base.Stack.Services[0].ExtraVolumes = nil
 	base.Stack.Services[0].DataPath = ""
 	if err := base.Validate(); err != nil {
 		t.Fatalf("stateless sidecar without a data path was rejected: %v", err)

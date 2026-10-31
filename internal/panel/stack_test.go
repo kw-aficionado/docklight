@@ -320,6 +320,18 @@ func TestWordPressStackStartsStopsAndKeepsSidecarInPrivateNetwork(t *testing.T) 
 	a, d, config := testApp(t)
 	fake := newFakeStackDocker("stack-server", "")
 	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	var rawRune string
+	if err := d.QueryRow(`SELECT yaml_blob FROM gameskills WHERE id='wordpress-mariadb'`).Scan(&rawRune); err != nil {
+		t.Fatal(err)
+	}
+	needle := "        data_path: /var/lib/mysql\n"
+	if !strings.Contains(rawRune, needle) {
+		t.Fatal("built-in MariaDB data path fixture was not found")
+	}
+	rawRune = strings.Replace(rawRune, needle, needle+"        extra_volumes:\n          - /var/lib/mysql-files\n", 1)
+	if _, err := d.Exec(`UPDATE gameskills SET yaml_blob=? WHERE id='wordpress-mariadb'`, rawRune); err != nil {
+		t.Fatal(err)
+	}
 	originalRune, err := a.loadRune("wordpress-mariadb")
 	if err != nil {
 		t.Fatal(err)
@@ -397,7 +409,7 @@ func TestWordPressStackStartsStopsAndKeepsSidecarInPrivateNetwork(t *testing.T) 
 	if len(sidecarConfig.HostConfig.PortBindings) != 0 {
 		t.Fatalf("sidecar unexpectedly published host ports: %#v", sidecarConfig.HostConfig.PortBindings)
 	}
-	if len(sidecarConfig.HostConfig.Binds) != 1 || !strings.Contains(sidecarConfig.HostConfig.Binds[0], filepath.Join("_stack", "database")+":/var/lib/mysql") {
+	if len(sidecarConfig.HostConfig.Binds) != 2 || !strings.Contains(sidecarConfig.HostConfig.Binds[0], filepath.Join("_stack", "database")+":/var/lib/mysql") || !strings.Contains(sidecarConfig.HostConfig.Binds[1], filepath.Join("_stack", "database", "_extra", "var", "lib", "mysql-files")+":/var/lib/mysql-files") {
 		t.Fatalf("MariaDB data is not mounted under the server backup root: %#v", sidecarConfig.HostConfig.Binds)
 	}
 	if !strings.Contains(strings.Join(sidecarConfig.Env, "\n"), "MARIADB_PASSWORD=unique-db-password-234567890") || !strings.Contains(strings.Join(sidecarConfig.Env, "\n"), "MARIADB_ROOT_PASSWORD=unique-root-password-987654321") {
@@ -517,6 +529,37 @@ func TestAppStackSupportsStatelessAndDisabledServices(t *testing.T) {
 	}
 	if _, err = os.Stat(filepath.Join(s.DataDir, "_stack", "stateless")); !os.IsNotExist(err) {
 		t.Fatalf("stateless service unexpectedly created a data directory: err=%v", err)
+	}
+}
+
+func TestStackExtraVolumeRejectsSymlinkEscape(t *testing.T) {
+	a, _, _ := testApp(t)
+	fake := newFakeStackDocker("symlink-stack", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	dataRoot := t.TempDir()
+	serviceRoot := filepath.Join(dataRoot, "_stack", "database")
+	if err := os.MkdirAll(serviceRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(serviceRoot, "_extra")); err != nil {
+		t.Fatal(err)
+	}
+	s := Server{ID: "symlink-stack", Name: "Database stack", DataDir: dataRoot}
+	gs := rune.Rune{
+		ID: "symlink-stack", Name: "Database stack", Docker: rune.Docker{Image: "example/app:1", KeepEntrypoint: true},
+		Stack: &rune.Stack{Services: []rune.Service{{Name: "database", Image: "mariadb:11", DataPath: "/var/lib/mysql", ExtraVolumes: []string{"/var/lib/mysql-files"}}}},
+	}
+	err := a.createStackSidecars(context.Background(), s, gs, map[string]string{}, "private-network", stackResourceLimits(s, gs))
+	if err == nil || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("sidecar extra-volume symlink escape was not rejected: %v", err)
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("extra volume created files outside the sidecar directory: %v", entries)
 	}
 }
 

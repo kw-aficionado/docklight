@@ -92,6 +92,7 @@ type Service struct {
 	Name           string            `json:"name"`
 	Image          string            `json:"image"`
 	DataPath       string            `json:"data_path,omitempty"`
+	ExtraVolumes   []string          `json:"extra_volumes,omitempty"`
 	Enabled        string            `json:"enabled,omitempty"`
 	User           string            `json:"user,omitempty"`
 	Command        []string          `json:"command,omitempty"`
@@ -225,6 +226,19 @@ func (g Rune) Validate() error {
 				if err := validateContainerPath(service.DataPath); err != nil {
 					return fmt.Errorf("%s.data_path: %w", field, err)
 				}
+			}
+			volumeTargets := map[string]bool{}
+			if service.DataPath != "" {
+				volumeTargets[service.DataPath] = true
+			}
+			for _, target := range service.ExtraVolumes {
+				if err := validateContainerPath(target); err != nil {
+					return fmt.Errorf("%s.extra_volumes: %w", field, err)
+				}
+				if volumeTargets[target] {
+					return fmt.Errorf("%s mounts container path %q more than once", field, target)
+				}
+				volumeTargets[target] = true
 			}
 			if len(service.Enabled) > 1024 || strings.ContainsAny(service.Enabled, "\r\n\x00") {
 				return fmt.Errorf("%s.enabled must be 1024 characters or fewer and cannot contain line breaks", field)
