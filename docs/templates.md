@@ -94,7 +94,7 @@ Variable keys that conflict with panel-injected names (including `SERVER_NAME`, 
 
 The reader supports nested mappings, sequences, scalar values, inline lists, and literal/folded block strings. It is a bounded subset parser rather than a general YAML 1.2 implementation. Unknown fields are ignored, so use only fields listed here.
 
-Container capabilities, devices, mounts, and sysctls are allowlisted to limit host access. `steam` installation metadata and `config_files` shortcuts are rejected because their behavior is not implemented; use the Files tab for editing data. Backup hooks, importers, and registry credentials are not supported in this release.
+Container capabilities, devices, mounts, and sysctls are allowlisted to limit host access. `steam` installation metadata and `config_files` shortcuts are rejected because their behavior is not implemented; use the Files tab for editing data. Backup hooks and importers are not supported in this release. Private image access is managed by an administrator under **Templates → Registry access**; saved logins cover runtime images, sidecars, install images, and update pulls.
 
 Six built-in templates are embedded in the binary: Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. Built-in IDs cannot be overwritten or deleted. Community templates can be imported from the Templates page, subject to the same validation.
 
@@ -107,3 +107,9 @@ Administrators can save GitHub, Gitea, and Forgejo repositories from **Templates
 The browser lists `.yaml` and `.yml` files up to 512 KiB and folders at the repository root plus one subfolder level. Successful folder listings are cached for 10 minutes. Catalog YAML passes the same parser and privilege checks as an upload. Installing a known ID updates that community template; built-in IDs are rejected. Each installed catalog template records its host, repository, file path, and ref. A manual YAML import of an existing catalog template clears that provenance and becomes the locally managed version.
 
 **Check updates** compares versions by template ID and reports a missing saved source or network error instead of treating it as current. It only lists; applying an update is an explicit administrator action. Checks do not run on startup or on a timer. No remote catalog is preconfigured: add a repository you trust before browsing or checking templates that do not have recorded source metadata. See the [API reference](api.md) for repository and GitHub token routes.
+
+## Private container registries
+
+Administrators manage private image credentials from **Templates → Registry access**. Save one username and password or access token per registry hostname; Docker Hub spellings normalize to `docker.io`, and hostnames are lowercased. Docker image references are matched using Docker's registry split rules, so `nginx:latest` and `team/nginx:latest` use the Docker Hub login while `ghcr.io/team/nginx:latest` uses a `ghcr.io` login. Host and port must match for private registries.
+
+Credentials are encrypted with `auth.secret_key`. Runtime app images, stack sidecars, temporary install images, and the ownership helper's Docker Hub image use the same per-pull lookup. The login test calls Docker Engine's auth-check endpoint. See [access and security](guides/security.md) and the [API reference](api.md).

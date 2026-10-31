@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,6 +75,10 @@ func IsNotModified(err error) bool {
 }
 
 func (e *Engine) do(ctx context.Context, method, p string, body any) (*http.Response, error) {
+	return e.doWithHeaders(ctx, method, p, body, nil)
+}
+
+func (e *Engine) doWithHeaders(ctx context.Context, method, p string, body any, headers http.Header) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -88,6 +93,11 @@ func (e *Engine) do(ctx context.Context, method, p string, body any) (*http.Resp
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for name, values := range headers {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
 	}
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -108,7 +118,9 @@ func (e *Engine) do(ctx context.Context, method, p string, body any) (*http.Resp
 func actionable(s string) string {
 	l := strings.ToLower(s)
 	switch {
-	case strings.Contains(l, "no such image") || strings.Contains(l, "pull access denied") || strings.Contains(l, "manifest unknown"):
+	case strings.Contains(l, "unauthorized") || strings.Contains(l, "authentication required") || strings.Contains(l, "pull access denied") || strings.Contains(l, "requested access to the resource is denied"):
+		return "Login required for this private image; check the saved registry login and repository access."
+	case strings.Contains(l, "no such image") || strings.Contains(l, "manifest unknown"):
 		return "Docker could not pull this image; check the image name, tag and registry access."
 	case strings.Contains(l, "port is already allocated") || strings.Contains(l, "address already in use"):
 		return "Docker could not bind the port because another process is using it; choose another host port."
@@ -129,8 +141,32 @@ func (e *Engine) Ping(ctx context.Context) error {
 }
 
 func (e *Engine) Pull(ctx context.Context, image string) error {
+	return e.pull(ctx, image, nil)
+}
+
+// RegistryAuthConfig is sent only with a single pull request. The Engine does
+// not persist these credentials in its daemon or host credential store.
+type RegistryAuthConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ServerAddress string `json:"serveraddress,omitempty"`
+}
+
+func (e *Engine) PullWithAuth(ctx context.Context, image string, auth RegistryAuthConfig) error {
+	return e.pull(ctx, image, &auth)
+}
+
+func (e *Engine) pull(ctx context.Context, image string, auth *RegistryAuthConfig) error {
 	q := url.Values{"fromImage": {image}}
-	r, err := e.do(ctx, http.MethodPost, "/images/create?"+q.Encode(), nil)
+	headers := make(http.Header)
+	if auth != nil {
+		payload, err := json.Marshal(auth)
+		if err != nil {
+			return fmt.Errorf("encode registry authentication: %w", err)
+		}
+		headers.Set("X-Registry-Auth", base64.URLEncoding.EncodeToString(payload))
+	}
+	r, err := e.doWithHeaders(ctx, http.MethodPost, "/images/create?"+q.Encode(), nil, headers)
 	if err != nil {
 		return fmt.Errorf("pull image %q: %w", image, err)
 	}
@@ -157,6 +193,17 @@ func (e *Engine) Pull(ctx context.Context, image string) error {
 		return fmt.Errorf("pull image %q: %w", image, err)
 	}
 	return nil
+}
+
+// TestRegistryAuth asks Docker to verify the credentials without storing them.
+func (e *Engine) TestRegistryAuth(ctx context.Context, auth RegistryAuthConfig) error {
+	r, err := e.do(ctx, http.MethodPost, "/auth", auth)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	_, err = io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20))
+	return err
 }
 
 type PortBinding struct {

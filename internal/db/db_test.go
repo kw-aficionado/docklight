@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 21 {
-		t.Fatalf("expected 21 migrations, got %d", count)
+	if count != 22 {
+		t.Fatalf("expected 22 migrations, got %d", count)
 	}
 	for _, column := range []string{"protocol", "port"} {
 		var found int
@@ -89,7 +89,7 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 			t.Fatalf("catalog source migration is missing %q: count=%d err=%v", column, found, err)
 		}
 	}
-	for _, table := range []string{"rune_repos", "github_catalog_settings"} {
+	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("catalog migration is missing table %q: count=%d err=%v", table, found, err)

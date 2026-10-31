@@ -488,7 +488,7 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 	image = rune.ApplyTemplate(image, env)
 	script := rune.ApplyTemplate(gs.Install.Script, env)
 	secrets = runeSecretValues(gs, env)
-	if err = a.engine.Pull(ctx, image); err != nil {
+	if err = a.pullImage(ctx, image); err != nil {
 		finish(err)
 		return
 	}
@@ -583,7 +583,7 @@ func (a *App) addJobLine(j *installJob, line string) {
 	j.mu.Unlock()
 }
 func (a *App) fixOwnership(ctx context.Context, data string) error {
-	if e := a.engine.Pull(ctx, "busybox:1.36"); e != nil {
+	if e := a.pullImage(ctx, "busybox:1.36"); e != nil {
 		return fmt.Errorf("could not prepare the data ownership helper: %w", e)
 	}
 	uid, gid := os.Getuid(), os.Getgid()
@@ -712,7 +712,7 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		return err
 	}
 	image := rune.ApplyTemplate(gs.Docker.Image, env)
-	if err = a.engine.Pull(ctx, image); err != nil {
+	if err = a.pullImage(ctx, image); err != nil {
 		return err
 	}
 	cleanupStartedStack := func(cause error) error {

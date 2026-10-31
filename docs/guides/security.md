@@ -20,6 +20,8 @@ Template credentials are encrypted with AES-256-GCM using a key derived from `au
 
 Catalog repository tokens and the optional panel-wide GitHub token are also encrypted with `auth.secret_key` and never returned by the API. A saved repository token is used only for its configured repository; the panel-wide GitHub token is sent only to `api.github.com`. Non-GitHub catalog hosts require HTTPS, and catalog requests do not follow redirects.
 
+Private registry passwords and access tokens are encrypted with `auth.secret_key` and exposed only as a `has_secret` flag. Docklight sends them to Docker Engine in the `X-Registry-Auth` header for a pull matched to that registry. A credential is not written to Docker's daemon login store, a host credential file, an image URL, or audit details. The **Test** action uses Docker Engine's auth-check endpoint and discards its response body. Registry saves and removals are audited as `registry_login.save` and `registry_login.delete`.
+
 The audit page records the user and server actions implemented in this release, including user/grant changes, token creation/revocation, server lifecycle, settings changes, and file changes. Audit records are not a substitute for host/systemd or Docker logs.
 
 ## Host boundary

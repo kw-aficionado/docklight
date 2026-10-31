@@ -77,3 +77,9 @@
 - GitHub uses its HTTPS API host. Gitea and Forgejo use an administrator-saved HTTPS base URL. Redirects are stopped, YAML downloads are bounded to 512 KiB, browse results are cached for ten minutes, and browsing exposes only the configured folder plus one child level.
 - Repository access tokens and the optional panel-wide GitHub API token are encrypted using `auth.secret_key`. Repository tokens are loaded only for the exact saved repository and host; the panel-wide token is never attached to non-GitHub requests.
 - Installed templates keep source host, repository, file path, and ref. Update checks compare versions by template ID and only report candidates; applying an update remains an explicit admin action. Removing a repository leaves provenance intact so checks can report that the source is gone.
+
+## 2026-10-31: private image registry credentials
+
+- Store one encrypted credential per normalized registry. Docker Hub aliases use `docker.io`; image matching follows Docker's rule that a registry is explicit in the first path component only when it contains a dot, a port, or is `localhost`.
+- Send the selected credential only in Docker Engine's `X-Registry-Auth` header for that individual image pull. The auth-check route uses `POST /auth`; the panel does not call `docker login` or persist auth in Docker's daemon/host credential store.
+- Use the same app pull helper for runtime, sidecars, install containers, and the BusyBox ownership helper so no pull path silently bypasses saved logins. Tests use an injected Engine HTTP client; live private-registry pulls remain part of host acceptance.

@@ -2,6 +2,8 @@ package docker
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -93,5 +95,65 @@ func TestIsNotFoundOnlyAcceptsDocker404(t *testing.T) {
 	}
 	if err.Error() != "Docker Engine: No such network" {
 		t.Fatalf("Docker API error text changed: %v", err)
+	}
+}
+
+func TestPullWithAuthSendsCredentialsOnlyInRegistryHeader(t *testing.T) {
+	var received RegistryAuthConfig
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Path != "/v1.45/images/create" || req.URL.Query().Get("fromImage") != "ghcr.io/team/private:latest" {
+			t.Fatalf("unexpected pull request: %s %s", req.Method, req.URL.String())
+		}
+		if req.Body != nil {
+			t.Fatal("pull credentials were written into the request body")
+		}
+		header := req.Header.Get("X-Registry-Auth")
+		decoded, err := base64.URLEncoding.DecodeString(header)
+		if err != nil {
+			t.Fatalf("X-Registry-Auth is not base64url encoded: %v", err)
+		}
+		if err = json.Unmarshal(decoded, &received); err != nil {
+			t.Fatalf("decode registry auth header: %v", err)
+		}
+		if strings.Contains(req.URL.String(), "private-pat") {
+			t.Fatal("registry secret appeared in the pull URL")
+		}
+		return dockerResponse(req, http.StatusOK, `{"status":"Pulled"}`), nil
+	})}
+	e := NewWithHTTPClient("test-socket", "1.45", client)
+	err := e.PullWithAuth(context.Background(), "ghcr.io/team/private:latest", RegistryAuthConfig{Username: "docklight", Password: "private-pat", ServerAddress: "ghcr.io"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if received.Username != "docklight" || received.Password != "private-pat" || received.ServerAddress != "ghcr.io" {
+		t.Fatalf("wrong auth payload: %#v", received)
+	}
+}
+
+func TestTestRegistryAuthUsesDaemonCheckEndpointAndDiscardsResponse(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Path != "/v1.45/auth" {
+			t.Fatalf("unexpected registry auth check request: %s %s", req.Method, req.URL.Path)
+		}
+		var received RegistryAuthConfig
+		if err := json.NewDecoder(req.Body).Decode(&received); err != nil {
+			t.Fatalf("decode auth-check body: %v", err)
+		}
+		if received.Username != "docklight" || received.Password != "private-pat" || received.ServerAddress != "docker.io" {
+			t.Fatalf("wrong auth-check payload: %#v", received)
+		}
+		return dockerResponse(req, http.StatusOK, `{"Status":"Login Succeeded","IdentityToken":"daemon-only-token"}`), nil
+	})}
+	e := NewWithHTTPClient("test-socket", "1.45", client)
+	if err := e.TestRegistryAuth(context.Background(), RegistryAuthConfig{Username: "docklight", Password: "private-pat", ServerAddress: "docker.io"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestActionableRegistryDenialSaysLoginRequired(t *testing.T) {
+	for _, message := range []string{"unauthorized: authentication required", "pull access denied, repository does not exist"} {
+		if got := actionable(message); !strings.Contains(strings.ToLower(got), "login required") {
+			t.Errorf("actionable(%q) = %q", message, got)
+		}
 	}
 }

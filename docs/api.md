@@ -46,6 +46,10 @@ Password and TOTP endpoints:
 | `POST /api/rune-repos/{id}/install` | Admin only; install or update a YAML file by its returned `path`, with an optional `ref` override for applying an update from its recorded source branch. |
 | `GET /api/settings/github` | Admin only; return whether the optional panel-wide GitHub token is configured. |
 | `PUT /api/settings/github` | Admin only; save or clear the optional panel-wide GitHub token. The token is never returned. |
+| `GET /api/registry-logins` | Admin only; list registry host, username, and `has_secret`; never returns a password or token. |
+| `POST /api/registry-logins` | Admin only; save `{registry,username,secret}`. Registry names are normalized, and saving again replaces the login for that registry. |
+| `POST /api/registry-logins/{id}/test` | Admin only; ask Docker Engine to verify a saved login without storing it in the daemon. |
+| `DELETE /api/registry-logins/{id}` | Admin only; remove the encrypted registry login. |
 | `DELETE /api/gameskills/{id}` | Admin only; custom template must be unused. |
 | `GET /api/realms` | List realms visible through `server.view` or `server.create`; includes caller-specific `collapsed`, visible `server_count`, and `can_create`. |
 | `POST /api/realms` | Admin only; create a realm with `name` and optional `description`. |

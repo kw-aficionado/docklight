@@ -391,7 +391,7 @@ func (a *App) createStackSidecars(ctx context.Context, s Server, gs rune.Rune, e
 		if image == "" {
 			return fmt.Errorf("app stack service %q resolved to an empty image", service.Name)
 		}
-		if err := a.engine.Pull(ctx, image); err != nil {
+		if err := a.pullImage(ctx, image); err != nil {
 			return fmt.Errorf("pull app stack service %q: %w", service.Name, err)
 		}
 		serviceEnv := make([]string, 0, len(service.Environment))
