@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha1"
+	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -74,6 +75,9 @@ func (c *wsConn) write(op byte, p []byte) error {
 	}
 	if _, e := c.c.Write(head); e != nil {
 		return e
+	}
+	if len(p) == 0 {
+		return nil
 	}
 	_, e := c.c.Write(p)
 	return e
@@ -151,6 +155,155 @@ func (a *App) consoleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	a.streamLogs(w, r, s, true)
 }
+
+type stackLogTargetError struct {
+	status  int
+	message string
+}
+
+func (e *stackLogTargetError) Error() string { return e.message }
+
+func (a *App) stackServiceLogTarget(ctx context.Context, s Server, serviceName string) (string, []string, error) {
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "server template is unavailable"}
+	}
+	if gs.Stack == nil {
+		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "server has no private services"}
+	}
+	found := false
+	for _, service := range gs.Stack.Services {
+		if service.Name == serviceName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "private service not found"}
+	}
+	var containerID string
+	if err = a.db.QueryRowContext(ctx, `SELECT container_id FROM server_sidecars WHERE server_id=? AND service_name=?`, s.ID, serviceName).Scan(&containerID); errors.Is(err, sql.ErrNoRows) || err == nil && containerID == "" {
+		return "", nil, &stackLogTargetError{status: http.StatusConflict, message: "private service has not started yet"}
+	} else if err != nil {
+		return "", nil, &stackLogTargetError{status: http.StatusInternalServerError, message: "private service state could not be read"}
+	}
+	inspectCtx, cancel := context.WithTimeout(ctx, runtimeInspectTimeout)
+	ins, inspectErr := a.engine.Inspect(inspectCtx, containerID)
+	cancel()
+	if docker.IsNotFound(inspectErr) {
+		return "", nil, &stackLogTargetError{status: http.StatusConflict, message: "Docker no longer has this private service container; restart the server stack"}
+	}
+	if inspectErr != nil {
+		return "", nil, &stackLogTargetError{status: http.StatusServiceUnavailable, message: "Docker could not inspect this private service; check Docker Engine and try again"}
+	}
+	labels := ins.Config.Labels
+	if labels[docklightServerLabel] != s.ID || labels[docklightRoleLabel] != "sidecar" || labels[docklightServiceLabel] != serviceName {
+		return "", nil, &stackLogTargetError{status: http.StatusNotFound, message: "private service container ownership could not be verified"}
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		return "", nil, &stackLogTargetError{status: http.StatusInternalServerError, message: "server secrets could not be loaded for log redaction"}
+	}
+	return containerID, runeSecretValues(gs, env), nil
+}
+
+func (a *App) stackServiceLogsWS(w http.ResponseWriter, r *http.Request) {
+	s, err := a.getServer(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "server not found")
+		return
+	}
+	if !a.requirePerm(w, principal(r), s, "server.view") {
+		return
+	}
+	containerID, secrets, err := a.stackServiceLogTarget(r.Context(), s, chi.URLParam(r, "service"))
+	if err != nil {
+		var targetErr *stackLogTargetError
+		if errors.As(err, &targetErr) {
+			writeError(w, targetErr.status, targetErr.message)
+		} else {
+			writeError(w, http.StatusInternalServerError, "could not prepare private service logs")
+		}
+		return
+	}
+	c, err := upgradeWS(w, r)
+	if err != nil {
+		return
+	}
+	defer c.close()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	type event struct {
+		line string
+		err  error
+		done bool
+	}
+	ch := make(chan event, 64)
+	go func() {
+		body, streamErr := a.engine.Logs(ctx, containerID, "2000", true)
+		if streamErr != nil {
+			ch <- event{err: streamErr, done: true}
+			return
+		}
+		defer body.Close()
+		writer := &wsLineWriter{secrets: secrets, send: func(line string) error {
+			select {
+			case ch <- event{line: line}:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
+		streamErr = docker.CopyLogs(writer, body)
+		if streamErr == nil && writer.carry != "" {
+			_ = writer.send(writer.carry)
+		}
+		ch <- event{err: streamErr, done: true}
+	}()
+	go func() {
+		for {
+			op, payload, readErr := c.read()
+			if readErr != nil {
+				cancel()
+				return
+			}
+			switch op {
+			case 8:
+				cancel()
+				return
+			case 9:
+				_ = c.write(10, payload)
+			}
+		}
+	}()
+	keepalive := time.NewTicker(30 * time.Second)
+	defer keepalive.Stop()
+	for {
+		select {
+		case item := <-ch:
+			if item.line != "" {
+				if err = c.text(item.line); err != nil {
+					return
+				}
+			}
+			if item.err != nil {
+				message := redactSecrets(item.err.Error(), secrets)
+				_ = c.text("Log stream ended: " + message)
+				return
+			}
+			if item.done {
+				return
+			}
+		case <-keepalive.C:
+			if err = c.ping(); err != nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 func (a *App) streamLogs(w http.ResponseWriter, r *http.Request, s Server, console bool) {
 	c, err := upgradeWS(w, r)
 	if err != nil {

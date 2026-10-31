@@ -1,13 +1,18 @@
 package panel
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +24,7 @@ import (
 	"example.com/yggdrasil-panel/internal/docker"
 	"example.com/yggdrasil-panel/internal/rune"
 	"example.com/yggdrasil-panel/internal/security"
+	"github.com/go-chi/chi/v5"
 )
 
 type fakeStackContainer struct {
@@ -31,6 +37,48 @@ type stackRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn stackRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return fn(req) }
 
+type pipeHijackResponseWriter struct {
+	clientReady chan net.Conn
+}
+
+func (w *pipeHijackResponseWriter) Header() http.Header            { return make(http.Header) }
+func (w *pipeHijackResponseWriter) WriteHeader(int)                {}
+func (w *pipeHijackResponseWriter) Write(data []byte) (int, error) { return len(data), nil }
+func (w *pipeHijackResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	server, client := net.Pipe()
+	w.clientReady <- client
+	return server, bufio.NewReadWriter(bufio.NewReader(server), bufio.NewWriter(server)), nil
+}
+
+func readWebSocketFrame(reader *bufio.Reader) (byte, string, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(reader, header); err != nil {
+		return 0, "", err
+	}
+	length := uint64(header[1] & 0x7f)
+	if length == 126 {
+		var extended [2]byte
+		if _, err := io.ReadFull(reader, extended[:]); err != nil {
+			return 0, "", err
+		}
+		length = uint64(binary.BigEndian.Uint16(extended[:]))
+	} else if length == 127 {
+		var extended [8]byte
+		if _, err := io.ReadFull(reader, extended[:]); err != nil {
+			return 0, "", err
+		}
+		length = binary.BigEndian.Uint64(extended[:])
+	}
+	if length > 1<<20 {
+		return 0, "", fmt.Errorf("frame payload exceeded test limit: %d", length)
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return 0, "", err
+	}
+	return header[0] & 0x0f, string(payload), nil
+}
+
 type fakeStackDocker struct {
 	mu          sync.Mutex
 	networkName string
@@ -42,6 +90,7 @@ type fakeStackDocker struct {
 	configs     map[string]docker.CreateConfig
 	operations  []string
 	nextID      int
+	logsOutput  string
 }
 
 func newFakeStackDocker(serverID, failStart string) *fakeStackDocker {
@@ -138,8 +187,20 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 		if !ok {
 			return respond(http.StatusNotFound, `{"message":"No such container"}`)
 		}
-		result, _ := json.Marshal(map[string]any{"Id": id, "Name": "/" + container.name, "Config": map[string]string{"Image": container.config.Image}, "State": map[string]any{"Status": container.state, "Running": container.state == "running", "ExitCode": 0}})
+		result, _ := json.Marshal(map[string]any{"Id": id, "Name": "/" + container.name, "Config": map[string]any{"Image": container.config.Image, "Labels": container.config.Labels}, "State": map[string]any{"Status": container.state, "Running": container.state == "running", "ExitCode": 0}})
 		return respond(http.StatusOK, string(result))
+	}
+	if req.Method == http.MethodGet && strings.HasPrefix(path, "/v1.45/containers/") && strings.HasSuffix(path, "/logs") {
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/v1.45/containers/"), "/logs")
+		if _, ok := f.containers[id]; !ok {
+			return respond(http.StatusNotFound, `{"message":"No such container"}`)
+		}
+		payload := []byte(f.logsOutput)
+		frame := make([]byte, 8+len(payload))
+		frame[0] = 1
+		binary.BigEndian.PutUint32(frame[4:8], uint32(len(payload)))
+		copy(frame[8:], payload)
+		return respond(http.StatusOK, string(frame))
 	}
 	if req.Method == http.MethodDelete && strings.HasPrefix(path, "/v1.45/containers/") {
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/v1.45/containers/"), "")
@@ -406,6 +467,141 @@ func TestAppStackSupportsStatelessAndDisabledServices(t *testing.T) {
 	}
 	if _, err = os.Stat(filepath.Join(s.DataDir, "_stack", "stateless")); !os.IsNotExist(err) {
 		t.Fatalf("stateless service unexpectedly created a data directory: err=%v", err)
+	}
+}
+
+func TestStackServiceLogTargetChecksOwnershipAndRedactsSecrets(t *testing.T) {
+	a, d, config := testApp(t)
+	fake := newFakeStackDocker("stack-server", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	s := insertWordPressStackServer(t, a, d, config.Database.Path)
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	network := "stack-log-test"
+	if _, err = a.engine.CreateNetwork(context.Background(), network, docker.NetworkCreateConfig{Driver: "bridge", Labels: map[string]string{docklightServerLabel: s.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.createStackSidecars(context.Background(), s, gs, env, network, stackResourceLimits(s, gs)); err != nil {
+		t.Fatal(err)
+	}
+	id, secrets, err := a.stackServiceLogTarget(context.Background(), s, "database")
+	if err != nil || id == "" {
+		t.Fatalf("validated sidecar log target: id=%q err=%v", id, err)
+	}
+	if !containsString(secrets, "unique-db-password-234567890") || !containsString(secrets, "unique-root-password-987654321") {
+		t.Fatalf("sidecar log redaction did not load both database secrets: %#v", secrets)
+	}
+	var output []string
+	writer := &wsLineWriter{secrets: secrets, send: func(line string) error { output = append(output, line); return nil }}
+	if _, err = writer.Write([]byte("MariaDB started with unique-root-password-987654321\n")); err != nil {
+		t.Fatal(err)
+	}
+	if len(output) != 1 || output[0] != "MariaDB started with [redacted]" {
+		t.Fatalf("sidecar log writer returned unredacted text: %#v", output)
+	}
+	fake.mu.Lock()
+	containerID := fake.byName[stackContainerName(s.ID, "database")]
+	container := fake.containers[containerID]
+	container.config.Labels[docklightServerLabel] = "another-server"
+	fake.containers[containerID] = container
+	fake.mu.Unlock()
+	if _, _, err = a.stackServiceLogTarget(context.Background(), s, "database"); err == nil || !strings.Contains(err.Error(), "ownership could not be verified") {
+		t.Fatalf("sidecar logs were allowed for an unowned container: %v", err)
+	}
+}
+
+func TestStackServiceLogsRequireServerView(t *testing.T) {
+	a, d, config := testApp(t)
+	_ = insertWordPressStackServer(t, a, d, config.Database.Path)
+	request := httptest.NewRequest(http.MethodGet, "/api/servers/stack-server/stack-services/database/logs", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", "stack-server")
+	route.URLParams.Add("service", "database")
+	ctx := context.WithValue(request.Context(), chi.RouteCtxKey, route)
+	ctx = context.WithValue(ctx, principalKey{}, User{ID: "limited-user", Username: "limited", Role: "user"})
+	request = request.WithContext(ctx)
+	response := httptest.NewRecorder()
+	a.stackServiceLogsWS(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "server.view permission is required") {
+		t.Fatalf("private service logs were not protected by server.view: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestStackServiceLogsWebSocketStreamsRedactedOutput(t *testing.T) {
+	a, d, config := testApp(t)
+	fake := newFakeStackDocker("stack-server", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	s := insertWordPressStackServer(t, a, d, config.Database.Path)
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	network := "stack-logs-network"
+	if _, err = a.engine.CreateNetwork(context.Background(), network, docker.NetworkCreateConfig{Driver: "bridge", Labels: map[string]string{docklightServerLabel: s.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.createStackSidecars(context.Background(), s, gs, env, network, stackResourceLimits(s, gs)); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	fake.logsOutput = "MariaDB started with unique-root-password-987654321\n"
+	fake.mu.Unlock()
+	request := httptest.NewRequest(http.MethodGet, "/api/servers/stack-server/stack-services/database/logs", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", s.ID)
+	route.URLParams.Add("service", "database")
+	ctx := context.WithValue(request.Context(), chi.RouteCtxKey, route)
+	ctx = context.WithValue(ctx, principalKey{}, User{ID: "admin", Username: "admin", Role: "admin"})
+	request = request.WithContext(ctx)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Key", base64.StdEncoding.EncodeToString([]byte("sixteen-byte-key")))
+	writer := &pipeHijackResponseWriter{clientReady: make(chan net.Conn, 1)}
+	done := make(chan struct{})
+	go func() {
+		a.stackServiceLogsWS(writer, request)
+		close(done)
+	}()
+	var client net.Conn
+	select {
+	case client = <-writer.clientReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WebSocket handler did not create a client connection")
+	}
+	defer client.Close()
+	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	reader := bufio.NewReader(client)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatalf("read WebSocket handshake: %v", readErr)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	opcode, output, err := readWebSocketFrame(reader)
+	if err != nil || opcode != 1 || output != "MariaDB started with [redacted]" {
+		t.Fatalf("private service log was not streamed safely: opcode=%d output=%q err=%v", opcode, output, err)
+	}
+	closeOpcode, _, closeErr := readWebSocketFrame(reader)
+	if closeErr != nil || closeOpcode != 8 {
+		t.Fatalf("private service log stream did not close cleanly: opcode=%d err=%v", closeOpcode, closeErr)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("private service log WebSocket did not finish after Docker log stream ended")
 	}
 }
 

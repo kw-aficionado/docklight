@@ -98,6 +98,7 @@ curl -sS http://127.0.0.1:8080/api/servers \
 | `POST /api/servers/{id}/files/upload` | Multipart form fields `path` and `file`; maximum request size 64 MiB. |
 | `GET /api/servers/{id}/files/download?path=…` | Download a file. |
 | `GET /api/servers/{id}/logs` | WebSocket with container log output; requires `server.view`. |
+| `GET /api/servers/{id}/stack-services/{service}/logs` | WebSocket with up to 2,000 recent lines and live private-service output; requires `server.view`. Template secret values are redacted. |
 | `GET /api/servers/{id}/console` | WebSocket for log output and console commands; requires `server.console`. Send `{"type":"command","command":"list"}`. |
 | `GET /api/servers/{id}/install/log` | WebSocket for install output; requires `server.view`. |
 
@@ -109,4 +110,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, sidecar log streaming, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior, [app stacks](guides/stacks.md) for private sidecars, and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, sidecar command input, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior, [app stacks](guides/stacks.md) for private sidecars, and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.

@@ -330,7 +330,8 @@ type Inspect struct {
 	ID     string `json:"Id"`
 	Name   string `json:"Name"`
 	Config struct {
-		Image string `json:"Image"`
+		Image  string            `json:"Image"`
+		Labels map[string]string `json:"Labels"`
 	} `json:"Config"`
 	State struct {
 		Status   string `json:"Status"`
