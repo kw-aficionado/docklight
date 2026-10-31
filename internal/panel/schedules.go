@@ -60,7 +60,7 @@ func scheduleActionPermission(action string) (string, bool) {
 		return "server.backup", true
 	case "restart":
 		return "server.control", true
-	case "start", "stop":
+	case "start", "stop", "update":
 		return "server.control", true
 	case "command":
 		return "server.console", true
@@ -73,7 +73,7 @@ func scheduleActionPermission(action string) (string, bool) {
 
 func (a *App) validateScheduleAction(s Server, action string, warnInput *bool, secondsInput *int) (bool, int, error) {
 	switch action {
-	case "backup", "start", "stop", "command", "message":
+	case "backup", "start", "stop", "command", "message", "update":
 		return false, 60, nil
 	case "restart":
 	default:
@@ -239,11 +239,15 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	permission, ok := scheduleActionPermission(in.Action)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, stop, command, or message")
+		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, stop, update, command, or message")
 		return
 	}
 	if permission != "" && !a.allowedServer(u, permission, s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
+		return
+	}
+	if in.Action == "update" && (!s.Installed || s.Status == "installing" || s.Status == "updating") {
+		writeError(w, http.StatusConflict, "scheduled updates require an installed server with no install or update in progress")
 		return
 	}
 	if isRemoteBackupStorage(destination) {
@@ -258,8 +262,8 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if in.SkipIfPlayersOnline {
-		if in.Action != "restart" {
-			writeError(w, http.StatusBadRequest, "skip_if_players_online is supported only for restart schedules")
+		if in.Action != "restart" && in.Action != "update" {
+			writeError(w, http.StatusBadRequest, "skip_if_players_online is supported only for restart and update schedules")
 			return
 		}
 		gs, loadErr := a.loadRune(s.GameskillID)
@@ -323,6 +327,8 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 			in.Name = "Scheduled start"
 		case "stop":
 			in.Name = "Scheduled stop"
+		case "update":
+			in.Name = "Scheduled update"
 		case "command":
 			in.Name = "Scheduled command"
 		case "message":
@@ -664,7 +670,7 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	if action == "restart" {
+	if action == "restart" || action == "update" {
 		playerCheckDetail := ""
 		if skipIfPlayersOnline != 0 {
 			players, queryErr := a.scheduledPlayerCount(ctx, serverID)
@@ -675,8 +681,29 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 				return a.finishScheduleRun(id, serverID, action, runID, "skipped", fmt.Sprintf("skipped because players are online (%d online)", players))
 			}
 			if queryErr != nil {
-				playerCheckDetail = "player count unavailable; proceeding with scheduled restart"
+				playerCheckDetail = "player count unavailable; proceeding with scheduled " + action
 			}
+		}
+		if action == "update" {
+			var detail string
+			if a.scheduleUpdate != nil {
+				detail, err = a.scheduleUpdate(ctx, serverID)
+			} else {
+				detail, err = a.executeScheduledUpdate(ctx, serverID)
+			}
+			status := "success"
+			if err != nil {
+				status = "error"
+				detail = err.Error()
+			}
+			if playerCheckDetail != "" {
+				if detail != "" {
+					detail = playerCheckDetail + "; " + detail
+				} else {
+					detail = playerCheckDetail
+				}
+			}
+			return a.finishScheduleRun(id, serverID, action, runID, status, detail)
 		}
 		warn := warnPlayers != 0
 		leadSeconds := warningSeconds

@@ -465,7 +465,7 @@ func (a *App) installStatus(w http.ResponseWriter, r *http.Request) {
 func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
-	secrets := []string{}
+	secrets, err := a.runInstallData(ctx, s, gs, j)
 	finish := func(err error) {
 		j.mu.Lock()
 		j.done = true
@@ -480,66 +480,7 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		j.updated = time.Now()
 		j.mu.Unlock()
 	}
-	image := gs.Install.Image
-	if image == "" {
-		image = gs.Docker.Image
-	}
-	env, err := a.runtimeEnv(s, gs)
 	if err != nil {
-		finish(err)
-		return
-	}
-	image = rune.ApplyTemplate(image, env)
-	script := rune.ApplyTemplate(gs.Install.Script, env)
-	secrets = runeSecretValues(gs, env)
-	if err = a.pullImage(ctx, image); err != nil {
-		finish(err)
-		return
-	}
-	appDataDir := serverAppDataDir(s, gs)
-	if err = os.MkdirAll(appDataDir, 0770); err != nil {
-		finish(fmt.Errorf("create app data directory: %w", err))
-		return
-	}
-	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: []string{appDataDir + ":/data"}}}
-	cid, err := a.engine.Create(ctx, "ygg-install-"+shortID(s.ID), cfg)
-	if err != nil {
-		finish(err)
-		return
-	}
-	j.mu.Lock()
-	j.container = cid
-	j.mu.Unlock()
-	if err = a.engine.Start(ctx, cid); err != nil {
-		_ = a.engine.Remove(context.Background(), cid)
-		finish(err)
-		return
-	}
-	logCtx, logCancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		body, e := a.engine.Logs(logCtx, cid, "all", true)
-		if e != nil {
-			a.addJobLine(j, e.Error())
-			return
-		}
-		defer body.Close()
-		_ = docker.CopyLogs(&logLineWriter{job: j, secrets: secrets}, body)
-	}()
-	code, waitErr := a.engine.Wait(ctx, cid)
-	logCancel()
-	<-done
-	_ = a.engine.Remove(context.Background(), cid)
-	if waitErr != nil {
-		finish(waitErr)
-		return
-	}
-	if code != 0 {
-		finish(fmt.Errorf("installer exited with status %d; review the installation log and correct the template settings", code))
-		return
-	}
-	if err = a.fixOwnership(ctx, appDataDir); err != nil {
 		finish(err)
 		return
 	}
@@ -554,6 +495,134 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=? WHERE id=?`, j.err, s.ID)
 	}
 	a.dataMu.Unlock()
+}
+
+// runInstallData executes the template's data installer against the existing
+// server data directory. It deliberately does not change server state or start
+// the server, so scheduled updates can run it under the same lifecycle lock.
+func (a *App) runInstallData(ctx context.Context, s Server, gs rune.Rune, j *installJob) ([]string, error) {
+	secrets := []string{}
+	if gs.Install == nil || strings.TrimSpace(gs.Install.Script) == "" {
+		return secrets, nil
+	}
+	image := gs.Install.Image
+	if image == "" {
+		image = gs.Docker.Image
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		return secrets, err
+	}
+	image = rune.ApplyTemplate(image, env)
+	script := rune.ApplyTemplate(gs.Install.Script, env)
+	secrets = runeSecretValues(gs, env)
+	if err = a.pullImage(ctx, image); err != nil {
+		return secrets, err
+	}
+	appDataDir := serverAppDataDir(s, gs)
+	if err = os.MkdirAll(appDataDir, 0770); err != nil {
+		return secrets, fmt.Errorf("create app data directory: %w", err)
+	}
+	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: []string{appDataDir + ":/data"}}}
+	cid, err := a.engine.Create(ctx, "ygg-install-"+shortID(s.ID), cfg)
+	if err != nil {
+		return secrets, err
+	}
+	j.mu.Lock()
+	j.container = cid
+	j.mu.Unlock()
+	if err = a.engine.Start(ctx, cid); err != nil {
+		_ = a.engine.Remove(context.Background(), cid)
+		return secrets, err
+	}
+	logCtx, logCancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		body, logErr := a.engine.Logs(logCtx, cid, "all", true)
+		if logErr != nil {
+			a.addJobLine(j, logErr.Error())
+			return
+		}
+		defer body.Close()
+		_ = docker.CopyLogs(&logLineWriter{job: j, secrets: secrets}, body)
+	}()
+	code, waitErr := a.engine.Wait(ctx, cid)
+	logCancel()
+	<-done
+	_ = a.engine.Remove(context.Background(), cid)
+	if waitErr != nil {
+		return secrets, waitErr
+	}
+	if code != 0 {
+		return secrets, fmt.Errorf("installer exited with status %d; review the installation log and correct the template settings", code)
+	}
+	if err = a.fixOwnership(ctx, serverAppDataDir(s, gs)); err != nil {
+		return secrets, err
+	}
+	return secrets, nil
+}
+
+// executeScheduledUpdate refreshes the template image and reruns its installer
+// against the existing data directory before creating a fresh server container.
+func (a *App) executeScheduledUpdate(parent context.Context, serverID string) (string, error) {
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	ctx, cancel := context.WithTimeout(parent, 45*time.Minute)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	s, err := a.getServer(serverID)
+	if err != nil {
+		return "", errors.New("server no longer exists")
+	}
+	if !s.Installed {
+		return "", errors.New("install this server before scheduling an update")
+	}
+	if s.Status == "installing" || s.Status == "updating" {
+		return "", errors.New("server already has an install or update in progress")
+	}
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		return "", fmt.Errorf("load server template: %w", err)
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		return "", err
+	}
+	secrets := runeSecretValues(gs, env)
+	fail := func(cause error) (string, error) {
+		message := redactSecrets(cause.Error(), secrets)
+		_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`, message, serverID)
+		return "", errors.New(message)
+	}
+	if err = a.stop(s); err != nil {
+		return fail(fmt.Errorf("stop server before update: %w", err))
+	}
+	if _, err = a.db.Exec(`UPDATE servers SET status='updating',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, serverID); err != nil {
+		return fail(fmt.Errorf("record scheduled update state: %w", err))
+	}
+	job := &installJob{lines: []string{"Scheduled update started; existing server data will be retained."}, updated: time.Now()}
+	installSecrets, installErr := a.runInstallData(ctx, s, gs, job)
+	secrets = append(secrets, installSecrets...)
+	if installErr != nil {
+		return fail(fmt.Errorf("run template update: %w", installErr))
+	}
+	if _, err = a.db.Exec(`UPDATE servers SET installed=1,status='updating',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, serverID); err != nil {
+		return fail(fmt.Errorf("record completed template update: %w", err))
+	}
+	s.Installed = true
+	if err = a.startWithContext(s, ctx); err != nil {
+		return fail(fmt.Errorf("updated data but could not start a fresh server container: %w", err))
+	}
+	a.resetWatchdog(serverID)
+	job.mu.Lock()
+	job.done = true
+	job.updated = time.Now()
+	job.lines = append(job.lines, "Template update completed; fresh server container start initiated.")
+	job.mu.Unlock()
+	return "template update completed; fresh server container start initiated", nil
 }
 
 type logLineWriter struct {

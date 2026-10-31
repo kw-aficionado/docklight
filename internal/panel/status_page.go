@@ -275,7 +275,7 @@ func publicServerStatus(status string, installed bool) string {
 	switch status {
 	case "running":
 		return "online"
-	case "starting", "installing":
+	case "starting", "installing", "updating":
 		return "starting"
 	default:
 		return "offline"

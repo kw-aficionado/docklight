@@ -801,7 +801,7 @@ func (a *App) removeServerBackups(serverID string) error {
 }
 
 func (a *App) confirmServerStopped(s Server) error {
-	if s.Status == "starting" || s.Status == "installing" || s.Status == "running" {
+	if s.Status == "starting" || s.Status == "installing" || s.Status == "updating" || s.Status == "running" {
 		return errBackupServerRunning
 	}
 	if s.ContainerID == "" {

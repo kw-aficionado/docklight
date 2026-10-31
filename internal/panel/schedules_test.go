@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"example.com/yggdrasil-panel/internal/docker"
 	gameskill "example.com/yggdrasil-panel/internal/rune"
 	"example.com/yggdrasil-panel/internal/security"
 )
@@ -121,6 +122,10 @@ func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) 
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("restart schedule was created without server.control: %d %s", denied.Code, denied.Body.String())
 	}
+	deniedUpdate := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"update","cron":"0 3 * * *"}`, token)
+	if deniedUpdate.Code != http.StatusForbidden {
+		t.Fatalf("update schedule was created without server.control: %d %s", deniedUpdate.Code, deniedUpdate.Body.String())
+	}
 	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule,server.control' WHERE user_id='restart-schedule-user' AND scope_type='server' AND scope_id='restart-schedule-server'`); err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +143,20 @@ func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) 
 	}
 	if item.Action != "restart" || !item.WarnPlayers || item.WarningSeconds != 60 || !item.SkipIfPlayersOnline || !item.Enabled || item.NextRun == "" {
 		t.Fatalf("restart schedule was not persisted correctly: %#v", item)
+	}
+	update := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"update","cron":"0 4 * * *","skip_if_players_online":true}`, token)
+	if update.Code != http.StatusCreated || !strings.Contains(update.Body.String(), `"action":"update"`) || !strings.Contains(update.Body.String(), `"name":"Scheduled update"`) || !strings.Contains(update.Body.String(), `"skip_if_players_online":true`) {
+		t.Fatalf("create scheduled update with player guard: %d %s", update.Code, update.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE servers SET installed=0 WHERE id='restart-schedule-server'`); err != nil {
+		t.Fatal(err)
+	}
+	uninstalledUpdate := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"update","cron":"0 5 * * *"}`, token)
+	if uninstalledUpdate.Code != http.StatusConflict {
+		t.Fatalf("uninstalled server accepted an update schedule: %d %s", uninstalledUpdate.Code, uninstalledUpdate.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE servers SET installed=1 WHERE id='restart-schedule-server'`); err != nil {
+		t.Fatal(err)
 	}
 	invalid := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"restart","cron":"0 4 * * *","warning_seconds":600}`, token)
 	if invalid.Code != http.StatusBadRequest {
@@ -475,7 +494,7 @@ func TestLifecycleSchedulesRequireControlAndPersistAction(t *testing.T) {
 	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule,server.control' WHERE user_id='lifecycle-schedule-user' AND scope_type='server' AND scope_id='lifecycle-schedule-server'`); err != nil {
 		t.Fatal(err)
 	}
-	for _, action := range []string{"start", "stop"} {
+	for _, action := range []string{"start", "stop", "update"} {
 		created := testRequest(h, http.MethodPost, "/api/servers/lifecycle-schedule-server/schedules", `{"action":"`+action+`","cron":"0 3 * * *"}`, token)
 		if created.Code != http.StatusCreated {
 			t.Fatalf("create %s schedule: %d %s", action, created.Code, created.Body.String())
@@ -488,6 +507,135 @@ func TestLifecycleSchedulesRequireControlAndPersistAction(t *testing.T) {
 			t.Fatalf("%s schedule was not persisted correctly: %#v", action, item)
 		}
 	}
+}
+
+func TestScheduledUpdateSkipsOnlinePlayersAndContinuesWhenQueryFails(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "scheduled-update-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('scheduled-update-server','Update test','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	firstRun := scheduleTimestamp(time.Now().Add(-time.Second))
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('scheduled-update','scheduled-update-server','Nightly update','update','* * * * *',1,1,?)`, firstRun); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	a.schedulePlayers = func(context.Context, string) (int, error) { return 4, nil }
+	a.scheduleUpdate = func(context.Context, string) (string, error) {
+		calls++
+		if calls == 2 {
+			return "", errors.New("installer failed")
+		}
+		return "update completed", nil
+	}
+	if err := a.processDueBackupSchedules(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var status, detail string
+	if err := d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id='scheduled-update'`).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "skipped" || !strings.Contains(detail, "players are online (4 online)") || calls != 0 {
+		t.Fatalf("online players should skip update: status=%q detail=%q calls=%d", status, detail, calls)
+	}
+	if _, err := d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id='scheduled-update'`, scheduleTimestamp(time.Now().Add(-time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	a.schedulePlayers = func(context.Context, string) (int, error) { return 0, errors.New("query timeout") }
+	if err := a.processDueBackupSchedules(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id='scheduled-update' ORDER BY started_at DESC,id DESC LIMIT 1`).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "success" || calls != 1 || !strings.Contains(detail, "player count unavailable; proceeding with scheduled update") || !strings.Contains(detail, "update completed") {
+		t.Fatalf("update should proceed when player query fails: status=%q detail=%q calls=%d", status, detail, calls)
+	}
+	if _, err := d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id='scheduled-update'`, scheduleTimestamp(time.Now().Add(-time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	a.schedulePlayers = func(context.Context, string) (int, error) { return 0, nil }
+	if err := a.processDueBackupSchedules(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id='scheduled-update' ORDER BY started_at DESC,id DESC LIMIT 1`).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "error" || calls != 2 || !strings.Contains(detail, "installer failed") {
+		t.Fatalf("failed update was not recorded: status=%q detail=%q calls=%d", status, detail, calls)
+	}
+}
+
+func TestScheduledUpdatePullsAndRecreatesContainerWithoutDeletingData(t *testing.T) {
+	a, d, config := testApp(t)
+	fake := newFakeStackDocker("scheduled-update-live", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	fake.containers["old-container"] = fakeStackContainer{name: "old-server", state: "running", config: docker.CreateConfig{Image: "old-image"}}
+	fake.byName["old-server"] = "old-container"
+	var raw string
+	if err := d.QueryRow(`SELECT yaml_blob FROM gameskills WHERE id='minecraft-java'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var filtered []string
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "done_regex:") && !strings.HasPrefix(trimmed, "stop:") && !strings.HasPrefix(trimmed, "save_command:") {
+			filtered = append(filtered, line)
+		}
+	}
+	if _, err := d.Exec(`UPDATE gameskills SET yaml_blob=? WHERE id='minecraft-java'`, strings.Join(filtered, "\n")); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(filepath.Dir(config.Database.Path), "servers", "scheduled-update-live")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	worldPath := filepath.Join(dataDir, "world.dat")
+	if err := os.WriteFile(worldPath, []byte("keep this world"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id) VALUES('scheduled-update-live','Update lifecycle','minecraft-java','running',1,'{}','{}',?,'old-container')`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := a.executeScheduledUpdate(context.Background(), "scheduled-update-live")
+	if err != nil {
+		t.Fatalf("scheduled update failed: %v", err)
+	}
+	if !strings.Contains(detail, "fresh server container start initiated") {
+		t.Fatalf("unexpected update result: %q", detail)
+	}
+	var installed int
+	var status, containerID string
+	if err = d.QueryRow(`SELECT installed,status,container_id FROM servers WHERE id='scheduled-update-live'`).Scan(&installed, &status, &containerID); err != nil {
+		t.Fatal(err)
+	}
+	if installed != 1 || status != "starting" && status != "running" || containerID == "" || containerID == "old-container" {
+		t.Fatalf("update did not record a fresh container: installed=%d status=%q id=%q", installed, status, containerID)
+	}
+	data, err := os.ReadFile(worldPath)
+	if err != nil || string(data) != "keep this world" {
+		t.Fatalf("update changed or removed the existing data: data=%q err=%v", data, err)
+	}
+	fake.mu.Lock()
+	operations := append([]string(nil), fake.operations...)
+	fake.mu.Unlock()
+	joined := strings.Join(operations, "|")
+	if !strings.Contains(joined, "pull:itzg/minecraft-server:latest") || !strings.Contains(joined, "container:stop:old-server") || !strings.Contains(joined, "container:remove:old-server") || !strings.Contains(joined, "container:create:") || !strings.Contains(joined, "container:start:") {
+		t.Fatalf("update did not pull and recreate the server: %v", operations)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		current, getErr := a.getServer("scheduled-update-live")
+		if getErr == nil && current.Status == "running" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	current, _ := a.getServer("scheduled-update-live")
+	t.Fatalf("updated container did not pass startup monitoring: status=%q error=%q", current.Status, current.ErrorMessage)
 }
 
 func TestLifecycleScheduleRunsAndRecordsSkippedOutcomes(t *testing.T) {
