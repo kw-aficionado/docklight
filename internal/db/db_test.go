@@ -17,6 +17,9 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if _, err = legacy.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = legacy.Exec(`INSERT INTO gameskills(id,name,category,yaml_blob) VALUES('legacy-game','Legacy Game','Games','')`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = legacy.Exec(`CREATE TABLE server_backups (
 		id TEXT PRIMARY KEY,
 		server_id TEXT NOT NULL,
@@ -52,6 +55,12 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if _, err = legacy.Exec(`INSERT INTO servers(id,name,gameskill_id,status,data_dir) VALUES('legacy-public-server','Legacy server','minecraft-java','running','/legacy/server')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = legacy.Exec(`INSERT INTO servers(id,name,gameskill_id,status,data_dir) VALUES('legacy-public-server-two','Legacy server two','legacy-game','stopped','/legacy/server-two')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = legacy.Exec(`INSERT INTO servers(id,name,gameskill_id,status,data_dir) VALUES('legacy-public-server-three','Legacy server three','legacy-game','stopped','/legacy/server-three')`); err != nil {
+		t.Fatal(err)
+	}
 	if err = legacy.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 18 {
-		t.Fatalf("expected 18 migrations, got %d", count)
+	if count != 19 {
+		t.Fatalf("expected 19 migrations, got %d", count)
 	}
 	var sidecarTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='server_sidecars'`).Scan(&sidecarTable); err != nil || sidecarTable != "server_sidecars" {
@@ -91,6 +100,24 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var legacyPublic int
 	if err = d.QueryRow(`SELECT status_public FROM servers WHERE id='legacy-public-server'`).Scan(&legacyPublic); err != nil || legacyPublic != 0 {
 		t.Fatalf("legacy server status-page opt-in defaulted to %d, err=%v", legacyPublic, err)
+	}
+	var legacyRealmName string
+	if err = d.QueryRow(`SELECT r.name FROM servers s JOIN realms r ON r.id=s.realm_id WHERE s.id='legacy-public-server'`).Scan(&legacyRealmName); err != nil || legacyRealmName != "Default" {
+		t.Fatalf("legacy server without a template realm name=%q err=%v, want Default", legacyRealmName, err)
+	}
+	var firstRealmID, secondRealmID, thirdRealmID string
+	if err = d.QueryRow(`SELECT realm_id FROM servers WHERE id='legacy-public-server'`).Scan(&firstRealmID); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.QueryRow(`SELECT realm_id FROM servers WHERE id='legacy-public-server-two'`).Scan(&secondRealmID); err != nil || firstRealmID == secondRealmID {
+		t.Fatalf("servers from different categories shared realm %q: second=%q err=%v", firstRealmID, secondRealmID, err)
+	}
+	if err = d.QueryRow(`SELECT realm_id FROM servers WHERE id='legacy-public-server-three'`).Scan(&thirdRealmID); err != nil || secondRealmID != thirdRealmID {
+		t.Fatalf("servers from the same template category got realms %q and %q: err=%v", secondRealmID, thirdRealmID, err)
+	}
+	var legacyGameRealm string
+	if err = d.QueryRow(`SELECT name FROM realms WHERE id=?`, secondRealmID).Scan(&legacyGameRealm); err != nil || legacyGameRealm != "Games" {
+		t.Fatalf("legacy template category realm name=%q err=%v, want Games", legacyGameRealm, err)
 	}
 	var statusPageEnabled int
 	var statusPageTitle string

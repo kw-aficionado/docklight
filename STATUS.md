@@ -9,10 +9,10 @@ This checkout began empty on 2026-10-31. The product identity is now **Docklight
 | CLI and configuration | `serve`, `version`, `gen-config`, `reset-password`, `reset-2fa`; generated session key and one-time admin password; config is not overwritten | Unit and local process smoke checks |
 | SQLite | SQLite schema with numbered migrations; WAL mode; foreign keys; audit, users, grants, template definitions, servers, ports, and API tokens | Migration tests and panel API tests |
 | Authentication | Argon2id passwords, expiring HS256 sessions, rate limits, TOTP with replay rejection, password changes, hashed scoped API tokens | Security and panel tests |
-| Users and access | Admin/user roles; global, template, and server grants; API enforcement on listing, control, files, backups, console, and template creation | RBAC tests, including inaccessible-server checks |
+| Users and access | Admin/user roles; global, realm, template, and server grants; API enforcement on listing, control, files, backups, console, and template creation | RBAC tests, including inaccessible-server and realm-visibility checks |
 | Templates | Bounded YAML subset parser and validator; six embedded templates; private app-stack schema; protected mount, capability, reserved variable, and setting validation | Parser, secret interpolation, network alias, and built-in template tests |
 | Container lifecycle | Direct Docker Engine API client; install container, logs, start/readiness polling, stop, restart, deletion, port mappings, shared stack CPU/RAM limits, ownership repair, confirmed exit tracking, private per-server networks and sidecars | API/runtime-monitor tests plus fake Docker Engine lifecycle tests; no Docker Engine was available for live lifecycle tests |
-| Operations UI | Login, server list/detail, private sidecar state, install status, console, file manager, local/S3 encrypted backups and schedules, backup-target settings, public status-page controls, crash history, query-based automatic recovery, low-disk status, webhook notifications, templates, users, permissions, audit history, TOTP, password changes, and API tokens | Browser smoke covered login, local backups and schedules, webhook setup/test, crash history, disk status, watchdog settings persistence, and crash/disk/watchdog event controls. Public status and S3 behavior have API/integration coverage; browser and live-emulator acceptance remain pending |
+| Operations UI | Login, realm-grouped server list/detail, admin realm management, permission-scoped realm grants, private sidecar state, install status, console, file manager, local/S3 encrypted backups and schedules, backup-target settings, public status-page controls, crash history, query-based automatic recovery, low-disk status, webhook notifications, templates, users, permissions, audit history, TOTP, password changes, and API tokens | Browser smoke covered login, local backups and schedules, webhook setup/test, crash history, disk status, watchdog settings persistence, and crash/disk/watchdog event controls. Realm and public-status APIs have authorization coverage; browser and live-emulator acceptance remain pending |
 | File manager and protocols | Traversal/symlink protection; uploads and downloads; Minecraft Java/Bedrock status, A2S, and Source-compatible RCON | Unit tests; local TCP/UDP fixtures are opt-in because this sandbox denies local socket binds |
 | Install and automation | `install.sh`, systemd unit, amd64/arm64 build CI, annotated-tag release workflow with SHA-256 sums | Shell syntax checked; installer was not run on a fresh Debian/Ubuntu VM; GitHub workflows have not run here |
 
@@ -48,9 +48,15 @@ The administrator can configure a public Docklight status page with a master swi
 
 Tests cover default-off routing, admin-only settings, the two opt-in gates, title/selection validation and rollback, online/starting/uninstalled state mapping, stale-player omission, public-field redaction, cache headers and invalidation, and page/script serving. Removing the per-server opt-in filter made the test expose the private server; restoring the filter made it pass. Live-browser visual acceptance remains pending because this sandbox blocks the panel listener.
 
+## Phase 2 realm management
+
+Realm management is implemented with a numbered SQLite migration, template-category placement for existing and newly created servers, admin create/edit/delete/reorder, admin-only server moves, and per-user collapsed sections. Realm grants participate in server authorization alongside global, template, and server grants. The Users & access editor exposes each scope. Non-admin realm listings omit inaccessible realms and count only servers the caller can view.
+
+Realm tests cover migration assignment, realm-only and category-default server creation, hidden-server denial, realm metadata filtering, per-user collapse, admin move/reorder, and deletion cleanup. The complete unit suite, race detector, `go vet`, and JavaScript syntax/unit checks passed. Removing the realm visibility filter made the test expose the inaccessible **Staging** realm; restoring the filter made the targeted test pass again.
+
 ## Not implemented
 
-- Phase 2: remote SFTP/SMB backups; scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; Discord, Telegram, and SMTP; realms; Git template repositories; email resets; passkeys.
+- Phase 2: remote SFTP/SMB backups; scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; Discord, Telegram, and SMTP; Git template repositories; email resets; passkeys.
 - Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, cross-server ban automation, and importers.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.

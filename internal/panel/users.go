@@ -234,13 +234,20 @@ func (a *App) setPermissions(w http.ResponseWriter, r *http.Request) {
 	}
 	seen := map[string]bool{}
 	for _, g := range in.Grants {
-		if g.ScopeType != "global" && g.ScopeType != "gameskill" && g.ScopeType != "server" {
-			writeError(w, 400, "scope_type must be global, gameskill or server")
+		if g.ScopeType != "global" && g.ScopeType != "realm" && g.ScopeType != "gameskill" && g.ScopeType != "server" {
+			writeError(w, 400, "scope_type must be global, realm, gameskill or server")
 			return
 		}
 		if g.ScopeType == "global" && g.ScopeID != "" || g.ScopeType != "global" && g.ScopeID == "" {
 			writeError(w, 400, "permission scope needs a matching scope_id")
 			return
+		}
+		if g.ScopeType == "realm" {
+			var realmExists int
+			if e = tx.QueryRow(`SELECT count(*) FROM realms WHERE id=?`, g.ScopeID).Scan(&realmExists); e != nil || realmExists == 0 {
+				writeError(w, 400, "permission scope references an unknown realm")
+				return
+			}
 		}
 		perms := []string{}
 		for _, p := range g.Permissions {

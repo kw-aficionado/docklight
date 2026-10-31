@@ -8,7 +8,7 @@ Login attempts are rate limited by client IP and username. A TOTP code is requir
 
 ## Roles, grants, and API tokens
 
-Administrators can create users and grant permissions globally, per template, or per server. The API checks grants on list, control, file, backup, console, query, RCON, and server creation paths; hiding a button in the UI does not grant access.
+Administrators can create users and grant permissions globally, per realm, per template, or per server. The API checks grants on list, control, file, backup, console, query, RCON, and server creation paths; realm and template grants also cover servers created later in that scope; hiding a button in the UI does not grant access. See [realms and access](realms.md) for the complete scope behavior.
 
 An account can create opaque API tokens with explicit permission scopes. A token is shown only in the create response. The database stores a SHA-256 hash; the API never lists the token value. Token permissions are intersected with the account's current grants. Admin API tokens need the separate `admin` scope to use administrator endpoints. Revoke a token from the account menu or `DELETE /api/tokens/{id}`.
 

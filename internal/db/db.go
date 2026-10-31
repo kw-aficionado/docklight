@@ -540,6 +540,80 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 19 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "servers", "realm_id") {
+			if _, err = tx.Exec(`ALTER TABLE servers ADD COLUMN realm_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS realms (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			description TEXT NOT NULL DEFAULT '',
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS realm_user_state (
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			realm_id TEXT NOT NULL REFERENCES realms(id) ON DELETE CASCADE,
+			collapsed INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY(user_id, realm_id)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_servers_realm ON servers(realm_id)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		rows, err := tx.Query(`SELECT s.id,COALESCE(NULLIF(TRIM(g.category),''),'Default') FROM servers s LEFT JOIN gameskills g ON g.id=s.gameskill_id ORDER BY s.id`)
+		if err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		type legacyServerRealm struct{ serverID, name string }
+		legacy := []legacyServerRealm{}
+		for rows.Next() {
+			var x legacyServerRealm
+			if err = rows.Scan(&x.serverID, &x.name); err != nil {
+				_ = rows.Close()
+				_ = tx.Rollback()
+				return err
+			}
+			legacy = append(legacy, x)
+		}
+		if err = rows.Err(); err != nil {
+			_ = rows.Close()
+			_ = tx.Rollback()
+			return err
+		}
+		_ = rows.Close()
+		for _, x := range legacy {
+			if _, err = tx.Exec(`INSERT OR IGNORE INTO realms(id,name,sort_order) VALUES(lower(hex(randomblob(16))),?,(SELECT COALESCE(MAX(sort_order)+1,0) FROM realms))`, x.name); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			if _, err = tx.Exec(`UPDATE servers SET realm_id=(SELECT id FROM realms WHERE name=? COLLATE NOCASE LIMIT 1) WHERE id=?`, x.name, x.serverID); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(19)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

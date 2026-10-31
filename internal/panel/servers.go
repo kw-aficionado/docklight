@@ -29,6 +29,7 @@ type Server struct {
 	ID                  string               `json:"id"`
 	Name                string               `json:"name"`
 	GameskillID         string               `json:"gameskill_id"`
+	RealmID             string               `json:"realm_id"`
 	Status              string               `json:"status"`
 	Installed           bool                 `json:"installed"`
 	Env                 map[string]string    `json:"env"`
@@ -54,6 +55,7 @@ type StackServiceStatus struct {
 type createServerInput struct {
 	Name          string            `json:"name"`
 	GameskillID   string            `json:"gameskill_id"`
+	RealmID       string            `json:"realm_id"`
 	Env           map[string]string `json:"env"`
 	CPULimit      float64           `json:"cpu_limit"`
 	MemoryLimitMB int               `json:"memory_limit_mb"`
@@ -69,7 +71,7 @@ type installJob struct {
 
 func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 	u := principal(r)
-	rows, e := a.db.Query(`SELECT id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers ORDER BY created_at DESC`)
+	rows, e := a.db.Query(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers ORDER BY created_at DESC`)
 	if e != nil {
 		writeError(w, 500, "could not list servers")
 		return
@@ -79,7 +81,7 @@ func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 		var s Server
 		var in, ports string
 		var installed, watchdogEnabled, watchdogQuarantined int
-		if rows.Scan(&s.ID, &s.Name, &s.GameskillID, &s.Status, &installed, &in, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined) != nil {
+		if rows.Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &in, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined) != nil {
 			continue
 		}
 		s.Installed = installed != 0
@@ -92,7 +94,7 @@ func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 	_ = rows.Close()
 	visible := out[:0]
 	for _, s := range out {
-		if !a.allowedServer(u, "server.view", s.ID, s.GameskillID) {
+		if !a.allowedServer(u, "server.view", s.ID, s.GameskillID, s.RealmID) {
 			continue
 		}
 		visible = append(visible, a.decorateServer(u, maskServer(s, a.db)))
@@ -106,7 +108,7 @@ func (a *App) getServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.view", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.view", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "insufficient permissions")
 		return
 	}
@@ -124,12 +126,31 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 	}
 	u := principal(r)
 	if !a.allowedRune(u, "server.create", in.GameskillID) {
-		writeError(w, 403, "server.create permission is required for this template")
+		writeError(w, 403, "server.create permission is required for this template or one of your realms")
 		return
 	}
 	gs, err := a.loadRune(in.GameskillID)
 	if err != nil {
 		writeError(w, 404, "template not found")
+		return
+	}
+	realmID := strings.TrimSpace(in.RealmID)
+	if realmID == "" {
+		if !a.allowedRuneScope(u, "server.create", in.GameskillID) {
+			writeError(w, 400, "choose a realm where you have server.create permission")
+			return
+		}
+		realmID, err = a.ensureCategoryRealm(gs.Category)
+		if err != nil {
+			writeError(w, 500, "could not prepare the template realm")
+			return
+		}
+	} else if !a.realmExists(realmID) {
+		writeError(w, 404, "realm not found")
+		return
+	}
+	if !a.allowedRuneScope(u, "server.create", in.GameskillID) && !a.allowedRealmCreate(u, realmID) {
+		writeError(w, 403, "server.create permission is required for this realm or template")
 		return
 	}
 	env := gs.DefaultEnv()
@@ -185,14 +206,14 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "CPU limit must be 0–64 cores and memory must be 0–1048576 MB")
 		return
 	}
-	_, err = a.db.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,cpu_limit,memory_limit_mb) VALUES(?,?,?,'stopped',0,?,?,?,?,?)`, id, in.Name, gs.ID, string(envJSON), string(portsJSON), dataDir, in.CPULimit, in.MemoryLimitMB)
+	_, err = a.db.Exec(`INSERT INTO servers(id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,cpu_limit,memory_limit_mb) VALUES(?,?,?,?,'stopped',0,?,?,?,?,?)`, id, in.Name, gs.ID, realmID, string(envJSON), string(portsJSON), dataDir, in.CPULimit, in.MemoryLimitMB)
 	if err != nil {
 		a.releasePorts(id)
 		_ = os.RemoveAll(dataDir)
 		writeError(w, 500, "could not save the server; choose another name or check panel storage")
 		return
 	}
-	a.audit(u, "server.create", "server", id, "template="+gs.ID)
+	a.audit(u, "server.create", "server", id, "template="+gs.ID+" realm="+realmID)
 	s, _ := a.getServer(id)
 	writeJSON(w, 201, a.decorateServer(u, maskServer(s, a.db)))
 }
@@ -204,7 +225,7 @@ func (a *App) updateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
@@ -301,7 +322,7 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.delete", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.delete", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "server.delete permission is required")
 		return
 	}
@@ -371,7 +392,7 @@ func (a *App) installServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
@@ -422,7 +443,7 @@ func (a *App) installStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.view", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.view", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "insufficient permissions")
 		return
 	}
@@ -593,7 +614,7 @@ func (a *App) startServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
@@ -623,7 +644,7 @@ func (a *App) stopServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
@@ -649,7 +670,7 @@ func (a *App) restartServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "server.control permission is required")
 		return
 	}
@@ -895,7 +916,7 @@ func (a *App) serverStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.view", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.view", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, "insufficient permissions")
 		return
 	}
@@ -1208,7 +1229,7 @@ func (a *App) releasePorts(id string) {
 	_, _ = a.db.Exec(`DELETE FROM port_allocations WHERE server_id=?`, id)
 }
 func (a *App) requirePerm(w http.ResponseWriter, u User, s Server, p string) bool {
-	if !a.allowedServer(u, p, s.ID, s.GameskillID) {
+	if !a.allowedServer(u, p, s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, 403, p+" permission is required for this server")
 		return false
 	}
@@ -1233,7 +1254,7 @@ func maskServer(s Server, d *sql.DB) Server {
 func (a *App) decorateServer(u User, s Server) Server {
 	s.Permissions = []string{}
 	for _, permission := range []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.schedule", "server.delete"} {
-		if a.allowedServer(u, permission, s.ID, s.GameskillID) {
+		if a.allowedServer(u, permission, s.ID, s.GameskillID, s.RealmID) {
 			s.Permissions = append(s.Permissions, permission)
 		}
 	}

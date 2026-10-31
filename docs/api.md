@@ -36,9 +36,23 @@ Password and TOTP endpoints:
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). |
 | `DELETE /api/gameskills/{id}` | Admin only; custom template must be unused. |
+| `GET /api/realms` | List realms visible through `server.view` or `server.create`; includes caller-specific `collapsed`, visible `server_count`, and `can_create`. |
+| `POST /api/realms` | Admin only; create a realm with `name` and optional `description`. |
+| `POST /api/realms/reorder` | Admin only; set the complete order with `{"ids":["…"]}`. |
+| `PUT /api/realms/{id}` | Admin only; update `name` and `description`. |
+| `DELETE /api/realms/{id}` | Admin only; detach its servers and remove realm grants. |
+| `PUT /api/realms/{id}/collapsed` | Save the caller's `{"collapsed":true}` preference. |
+| `GET /api/realms` | List realms visible through `server.view` or `server.create`; includes caller-specific `collapsed`, visible `server_count`, and `can_create`. |
+| `POST /api/realms` | Admin only; create a realm with `name` and optional `description`. |
+| `POST /api/realms/reorder` | Admin only; set the complete order with `{"ids":["…"]}`. |
+| `PUT /api/realms/{id}` | Admin only; update `name` and `description`. |
+| `DELETE /api/realms/{id}` | Admin only; detach its servers and remove realm grants. |
+| `PUT /api/realms/{id}/collapsed` | Save the caller's `{"collapsed":true}` preference. |
 | `GET /api/servers` | List only servers with `server.view`. Secret environment values are masked. |
-| `POST /api/servers` | Create from a template. Body: `name`, `gameskill_id`, optional `env`, `cpu_limit`, `memory_limit_mb`. |
+| `POST /api/servers` | Create from a template. Body: `name`, `gameskill_id`, optional `realm_id`, `env`, `cpu_limit`, `memory_limit_mb`. Without `realm_id`, Docklight uses the template-category realm. |
 | `GET /api/servers/{id}` | Read one server; requires `server.view`. |
+| `PUT /api/servers/{id}/realm` | Admin only; move the server with `{"realm_id":"…"}` or detach it with an empty ID. |
+| `PUT /api/servers/{id}/realm` | Admin only; move the server with `{"realm_id":"…"}` or detach it with an empty ID. |
 | `PUT /api/servers/{id}` | Update name, settings, or resource limits; requires `server.control`. |
 | `DELETE /api/servers/{id}` | Stop/remove the app and sidecars, private network, server data, local and recorded S3 backups, ports, and grants; requires `server.delete`. |
 | `POST /api/servers/{id}/install` | Start installation; returns `202` and a log URL. Requires `server.control`. |
@@ -112,8 +126,8 @@ WebSocket connections are authenticated with the same-origin session cookie. The
 
 ## Users, grants, and audit
 
-Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `GET/PUT /api/users/{id}/permissions`, and `GET /api/permissions/catalog` (authenticated permission metadata). User profile changes invalidate that user's sessions; permission updates take effect on the next request without ending the session. `GET /api/audit` returns the most recent 200 audit records and is administrator-only.
+Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `GET/PUT /api/users/{id}/permissions`, and `GET /api/permissions/catalog` (authenticated permission metadata). User profile changes invalidate that user's sessions; permission updates take effect on the next request without ending the session. `GET /api/audit` returns the most recent 200 audit records and is administrator-only. Grants combine with OR logic across `global`, `realm`, `gameskill`, and `server` scopes. Editing permissions replaces the complete grant set. Realm grants apply to servers currently in that realm and future servers created there.
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, and external networking integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior, [app stacks](guides/stacks.md) for private sidecars, [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery, and [the status-page guide](guides/status-page.md) for public exposure and freshness rules.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, and external networking integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior, [app stacks](guides/stacks.md) for private sidecars, [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery, and [the status-page guide](guides/status-page.md) for public exposure and freshness rules. See [realms and access](guides/realms.md) for server grouping and scoped grants.

@@ -222,7 +222,7 @@ func (a *App) listServerCrashes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "server not found")
 		return
 	}
-	if !a.allowedServer(principal(r), "server.view", s.ID, s.GameskillID) {
+	if !a.allowedServer(principal(r), "server.view", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, "server.view permission is required")
 		return
 	}

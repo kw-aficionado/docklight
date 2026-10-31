@@ -326,7 +326,7 @@ func (a *App) updateWatchdogSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.control", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, "server.control permission is required")
 		return
 	}

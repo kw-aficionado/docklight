@@ -190,6 +190,12 @@ func (a *App) Router() http.Handler {
 			})
 			priv.Get("/gameskills", a.listRunes)
 			priv.Get("/gameskills/{id}", a.getRune)
+			priv.Get("/realms", a.listRealms)
+			priv.Post("/realms", a.admin(a.createRealm))
+			priv.Post("/realms/reorder", a.admin(a.reorderRealms))
+			priv.Put("/realms/{id}/collapsed", a.updateRealmCollapsed)
+			priv.Put("/realms/{id}", a.admin(a.updateRealm))
+			priv.Delete("/realms/{id}", a.admin(a.deleteRealm))
 			priv.Post("/gameskills", a.uploadRune)
 			priv.Delete("/gameskills/{id}", a.deleteRune)
 			priv.Get("/message-templates", a.listMessageTemplates)
@@ -198,6 +204,7 @@ func (a *App) Router() http.Handler {
 			priv.Delete("/message-templates/{id}", a.admin(a.deleteMessageTemplate))
 			priv.Get("/servers", a.listServers)
 			priv.Post("/servers", a.createServer)
+			priv.Put("/servers/{id}/realm", a.admin(a.moveServerRealm))
 			priv.Get("/servers/{id}", a.getServerHandler)
 			priv.Put("/servers/{id}", a.updateServer)
 			priv.Delete("/servers/{id}", a.deleteServer)
@@ -604,7 +611,7 @@ func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
 		}
 		rr, _ := rune.Parse(x.yaml)
 		rr = publicRune(rr)
-		out = append(out, map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "description": rr.Description, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query})
+		out = append(out, map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "can_create_default": a.allowedRuneScope(u, "server.create", x.id), "description": rr.Description, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query})
 	}
 	writeJSON(w, 200, out)
 }
@@ -726,28 +733,60 @@ func (a *App) visibleServerCount(u User) int {
 		_ = a.db.QueryRow(`SELECT count(*) FROM servers`).Scan(&n)
 		return n
 	}
-	rows, e := a.db.Query(`SELECT id,gameskill_id FROM servers`)
+	rows, e := a.db.Query(`SELECT id,gameskill_id,realm_id FROM servers`)
 	if e != nil {
 		return 0
 	}
-	type row struct{ id, runeID string }
+	type row struct{ id, runeID, realmID string }
 	all := []row{}
 	for rows.Next() {
 		var x row
-		if rows.Scan(&x.id, &x.runeID) == nil {
+		if rows.Scan(&x.id, &x.runeID, &x.realmID) == nil {
 			all = append(all, x)
 		}
 	}
 	_ = rows.Close()
 	n := 0
 	for _, x := range all {
-		if a.allowedServer(u, "server.view", x.id, x.runeID) {
+		if a.allowedServer(u, "server.view", x.id, x.runeID, x.realmID) {
 			n++
 		}
 	}
 	return n
 }
 func (a *App) allowedRune(u User, perm, runeID string) bool {
+	if a.allowedRuneScope(u, perm, runeID) {
+		return true
+	}
+	if u.IsAPIToken && !u.APIScopes[perm] {
+		return false
+	}
+	if u.Role == "admin" {
+		return true
+	}
+	if perm != "server.create" {
+		return false
+	}
+	rows, err := a.db.Query(`SELECT id FROM realms`)
+	if err != nil {
+		return false
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	_ = rows.Close()
+	for _, id := range ids {
+		if a.allowedRealmCreate(u, id) {
+			return true
+		}
+	}
+	return false
+}
+func (a *App) allowedRuneScope(u User, perm, runeID string) bool {
 	if u.IsAPIToken && !u.APIScopes[perm] {
 		return false
 	}
@@ -756,14 +795,30 @@ func (a *App) allowedRune(u User, perm, runeID string) bool {
 	}
 	return a.grant(u.ID, perm, "global", "") || a.grant(u.ID, perm, "gameskill", runeID)
 }
-func (a *App) allowedServer(u User, perm, serverID, runeID string) bool {
+func (a *App) allowedRealmCreate(u User, realmID string) bool {
+	if u.IsAPIToken && !u.APIScopes["server.create"] {
+		return false
+	}
+	if u.Role == "admin" {
+		return true
+	}
+	return a.grant(u.ID, "server.create", "global", "") || a.grant(u.ID, "server.create", "realm", realmID)
+}
+func (a *App) allowedServer(u User, perm, serverID, runeID string, realmIDs ...string) bool {
 	if u.IsAPIToken && !u.APIScopes[perm] {
 		return false
 	}
 	if u.Role == "admin" {
 		return true
 	}
-	return a.grant(u.ID, perm, "global", "") || a.grant(u.ID, perm, "gameskill", runeID) || a.grant(u.ID, perm, "server", serverID)
+	realmID := ""
+	if len(realmIDs) != 0 {
+		realmID = realmIDs[0]
+	}
+	return a.grant(u.ID, perm, "global", "") ||
+		(realmID != "" && a.grant(u.ID, perm, "realm", realmID)) ||
+		a.grant(u.ID, perm, "gameskill", runeID) ||
+		a.grant(u.ID, perm, "server", serverID)
 }
 func (a *App) grant(uid, perm, scope, id string) bool {
 	var raw string
@@ -783,7 +838,7 @@ func (a *App) getServer(id string) (Server, error) {
 	var env, ports string
 	var installed int
 	var watchdogEnabled, watchdogQuarantined int
-	err := a.db.QueryRow(`SELECT id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined)
+	err := a.db.QueryRow(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined)
 	if err != nil {
 		return s, err
 	}

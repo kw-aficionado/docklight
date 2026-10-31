@@ -55,3 +55,10 @@
 - The public payload contains only the selected server's display name, template name, normalized availability, and an optional recent player count. It omits IDs, ports, addresses, and configuration.
 - Player counts are sampled when an authenticated panel user successfully queries a server. Public requests never open game-protocol connections; counts older than 15 minutes are omitted.
 - The HTML and refresh script are embedded with the panel. The JSON cache lasts 15 seconds and is invalidated by title, selection, master-switch, and player-sample changes. The page is marked `noindex`, which requests that compliant crawlers skip it but does not act as access control.
+
+## 2026-10-31: realms and scoped access
+
+- Existing servers are assigned to realms during migration 19 using their template category; missing templates and blank categories fall back to `Default`. New servers without an explicit realm use the category realm, while realm-only `server.create` grants require the caller to choose their realm.
+- Realm names are unique without regard to ASCII letter case. Deleting a realm detaches servers, removes realm grants, and cascades per-user collapsed preferences; it does not alter server data or runtime state.
+- Server grants combine with OR logic across global, realm, template, and server scopes. Realm listings omit inaccessible metadata and calculate counts from the caller's visible servers. API-token scopes remain an additional upper bound.
+- Collapsed sections are stored per user. The admin realm manager owns CRUD, ordering, and server moves; the server overview groups authorized servers by realm.

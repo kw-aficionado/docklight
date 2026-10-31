@@ -140,7 +140,7 @@ func (a *App) authorizedScheduleServer(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusNotFound, "server not found")
 		return Server{}, false
 	}
-	if !a.allowedServer(principal(r), "server.schedule", s.ID, s.GameskillID) {
+	if !a.allowedServer(principal(r), "server.schedule", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, "server.schedule permission is required")
 		return Server{}, false
 	}
@@ -185,7 +185,7 @@ func (a *App) scheduleOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	warnings := []gameskill.RestartWarning{}
 	canSkipIfPlayersOnline := false
-	if a.allowedServer(principal(r), "server.control", s.ID, s.GameskillID) {
+	if a.allowedServer(principal(r), "server.control", s.ID, s.GameskillID, s.RealmID) {
 		gs, err := a.loadRune(s.GameskillID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read server template schedule options")
@@ -242,7 +242,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, stop, command, or message")
 		return
 	}
-	if permission != "" && !a.allowedServer(u, permission, s.ID, s.GameskillID) {
+	if permission != "" && !a.allowedServer(u, permission, s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
 		return
 	}
@@ -417,7 +417,7 @@ func (a *App) updateBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "stored schedule action is invalid")
 		return
 	}
-	if permission != "" && (in.Cron != nil || in.Enabled != nil && *in.Enabled) && !a.allowedServer(u, permission, s.ID, s.GameskillID) {
+	if permission != "" && (in.Cron != nil || in.Enabled != nil && *in.Enabled) && !a.allowedServer(u, permission, s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to enable or change this schedule")
 		return
 	}

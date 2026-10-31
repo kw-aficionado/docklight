@@ -40,7 +40,7 @@ func (a *App) authorizedBackupServer(w http.ResponseWriter, r *http.Request) (Se
 		return Server{}, false
 	}
 	u := principal(r)
-	if !a.allowedServer(u, "server.backup", s.ID, s.GameskillID) {
+	if !a.allowedServer(u, "server.backup", s.ID, s.GameskillID, s.RealmID) {
 		writeError(w, http.StatusForbidden, "server.backup permission is required")
 		return Server{}, false
 	}
