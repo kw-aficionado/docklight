@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -48,6 +49,9 @@ func (a *App) serverQuery(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		writeError(w, 502, e.Error())
 		return
+	}
+	if sampleErr := a.recordPlayerSample(s.ID, result.Online, result.Max); sampleErr != nil {
+		log.Printf("could not save player query sample for server %s: %v", s.ID, sampleErr)
 	}
 	writeJSON(w, 200, result)
 }

@@ -499,6 +499,47 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 18 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "servers", "status_public") {
+			if _, err = tx.Exec(`ALTER TABLE servers ADD COLUMN status_public INTEGER NOT NULL DEFAULT 0`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS status_page_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			title TEXT NOT NULL DEFAULT 'Server Status',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO status_page_settings(id,enabled,title) VALUES(1,0,'Server Status')`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_query_samples (
+			server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+			online INTEGER NOT NULL,
+			max_players INTEGER NOT NULL,
+			sampled_at INTEGER NOT NULL
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(18)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

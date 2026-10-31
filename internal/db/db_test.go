@@ -49,6 +49,9 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if _, err = legacy.Exec(`INSERT INTO backup_schedules(id,server_id,name,cron) VALUES('legacy-schedule','legacy-server','Legacy backup','0 3 * * *')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = legacy.Exec(`INSERT INTO servers(id,name,gameskill_id,status,data_dir) VALUES('legacy-public-server','Legacy server','minecraft-java','running','/legacy/server')`); err != nil {
+		t.Fatal(err)
+	}
 	if err = legacy.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +65,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 17 {
-		t.Fatalf("expected 17 migrations, got %d", count)
+	if count != 18 {
+		t.Fatalf("expected 18 migrations, got %d", count)
 	}
 	var sidecarTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='server_sidecars'`).Scan(&sidecarTable); err != nil || sidecarTable != "server_sidecars" {
@@ -80,6 +83,23 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var alertTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='system_alert_state'`).Scan(&alertTable); err != nil || alertTable != "system_alert_state" {
 		t.Fatalf("system alert state table missing: name=%q err=%v", alertTable, err)
+	}
+	var publicColumn int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='status_public'`).Scan(&publicColumn); err != nil || publicColumn != 1 {
+		t.Fatalf("version 18 did not add the per-server status-page opt-in: count=%d err=%v", publicColumn, err)
+	}
+	var legacyPublic int
+	if err = d.QueryRow(`SELECT status_public FROM servers WHERE id='legacy-public-server'`).Scan(&legacyPublic); err != nil || legacyPublic != 0 {
+		t.Fatalf("legacy server status-page opt-in defaulted to %d, err=%v", legacyPublic, err)
+	}
+	var statusPageEnabled int
+	var statusPageTitle string
+	if err = d.QueryRow(`SELECT enabled,title FROM status_page_settings WHERE id=1`).Scan(&statusPageEnabled, &statusPageTitle); err != nil || statusPageEnabled != 0 || statusPageTitle != "Server Status" {
+		t.Fatalf("status-page settings default enabled=%d title=%q err=%v", statusPageEnabled, statusPageTitle, err)
+	}
+	var querySampleTable int
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='server_query_samples'`).Scan(&querySampleTable); err != nil || querySampleTable != 1 {
+		t.Fatalf("version 18 query sample table missing: count=%d err=%v", querySampleTable, err)
 	}
 	var watchdogColumns int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name IN ('watchdog_enabled','watchdog_quarantined','watchdog_last_attempt')`).Scan(&watchdogColumns); err != nil || watchdogColumns != 3 {

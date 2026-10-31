@@ -2,6 +2,8 @@
 
 The API is served from the same origin as the browser UI under `/api`. JSON errors use `{"error":"..."}`. The UI calls these server templates; the API retains `/gameskills` and `gameskill_id` for compatibility. Mutating requests from a browser must send a same-origin `Origin` header; cross-origin browser API access is not enabled. Most server/template endpoints require a session or API token.
 
+The optional public status page is available without authentication only when an administrator enables it: `GET /status`, `GET /status.js`, and `GET /api/status`. The JSON response contains only opted-in server names, template names, online/starting/offline state, and a fresh player sample when available; it omits server IDs, ports, addresses, and settings. Responses are cached for 15 seconds.
+
 ## Authentication
 
 `POST /api/login` accepts `{"username":"admin","password":"…","totp":"123456"}`. `totp` is needed after two-factor authentication is enabled. A successful login sets the HttpOnly `ygg_token` cookie and returns a session token and user summary. Passwords, hashes, and stored secret values are not included.
@@ -27,6 +29,9 @@ Password and TOTP endpoints:
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/health`, `GET /api/version` | Unauthenticated health and version summaries. |
+| `GET /api/status` | Public summary for opted-in servers; returns `404` unless the public status page is enabled. |
+| `GET /api/settings/status-page` | Admin only; read the master switch, title, and per-server public opt-ins. |
+| `PUT /api/settings/status-page` | Admin only; save `enabled`, `title`, and `server_ids` together. The master switch and each server opt-in are both required for public display. |
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). |
@@ -40,7 +45,7 @@ Password and TOTP endpoints:
 | `GET /api/servers/{id}/install/status` | Poll install state and recent lines. Requires `server.view`. |
 | `POST /api/servers/{id}/start`, `/stop`, `/restart` | Control lifecycle; requires `server.control`. |
 | `GET /api/servers/{id}/stats` | Current Docker CPU and memory sample; requires `server.view`. |
-| `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. |
+| `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. Successful queries refresh the public status page's player sample. |
 | `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |
 | `GET /api/servers/{id}/backups` | List encrypted backups and their `storage` (`local` or `s3`) without exposing object keys; requires `server.backup`. |
 | `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; accepts optional `{"destination":"local"}` or `{"destination":"s3"}` and verifies the saved copy before recording it. Defaults to local. |
@@ -99,6 +104,7 @@ curl -sS http://127.0.0.1:8080/api/servers \
 | `GET /api/servers/{id}/files/download?path=…` | Download a file. |
 | `GET /api/servers/{id}/logs` | WebSocket with container log output; requires `server.view`. |
 | `GET /api/servers/{id}/stack-services/{service}/logs` | WebSocket with up to 2,000 recent lines and live private-service output; requires `server.view`. Template secret values are redacted. |
+| `POST /api/servers/{id}/stack-services/{service}/exec` | Run a one-line command in a private service; requires `server.console`. Waits up to 30 seconds and returns at most 64 KiB of redacted output. A timed-out command may continue in its container. |
 | `GET /api/servers/{id}/console` | WebSocket for log output and console commands; requires `server.console`. Send `{"type":"command","command":"list"}`. |
 | `GET /api/servers/{id}/install/log` | WebSocket for install output; requires `server.view`. |
 
@@ -110,4 +116,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, sidecar command input, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior, [app stacks](guides/stacks.md) for private sidecars, and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, and external networking integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior, [app stacks](guides/stacks.md) for private sidecars, [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery, and [the status-page guide](guides/status-page.md) for public exposure and freshness rules.

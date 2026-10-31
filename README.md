@@ -6,7 +6,7 @@ Docklight is a self-hosted control panel for Docker game servers and apps. It ru
 
 The browser and product identity use **Docklight**. The current binary, CLI, service, and default filesystem paths still use `yggdrasil` while the implementation transitions from its original internal name.
 
-The current checkout contains the Phase 1 core plus local and S3-compatible encrypted backups, per-server backup scheduling, signed webhook alerts, confirmed container crash history and alerts, low-disk monitoring, and a private WordPress + MariaDB app stack with permission-scoped sidecar logs and commands. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
+The current checkout contains the Phase 1 core plus local and S3-compatible encrypted backups, per-server backup scheduling, signed webhook alerts, confirmed container crash history and alerts, low-disk monitoring, a public status page with double opt-in, and a private WordPress + MariaDB app stack with permission-scoped sidecar logs and commands. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
 
 ## Install on Debian or Ubuntu
 
@@ -52,7 +52,7 @@ The CLI also provides:
 - `reset-password USER [--config PATH]` — root-only break-glass password reset; generates a password unless one is supplied.
 - `reset-2fa USER [--config PATH]` — root-only break-glass authenticator reset.
 
-See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [monitoring](docs/guides/monitoring.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
+See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [monitoring](docs/guides/monitoring.md), [public status page](docs/guides/status-page.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
 
 ## Network and security
 

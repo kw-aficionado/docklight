@@ -35,7 +35,7 @@
 - The first remote target is S3-compatible storage with a small in-repository REST client and Signature Version 4. Path-style requests work with Amazon S3 and common self-hosted implementations without adding an SDK dependency to the offline build.
 - Signed requests use HTTPS, except for loopback HTTP endpoints used by a local emulator. Redirects are rejected so signatures and credentials cannot be forwarded to another host. Administrators create buckets out of band; the connectivity check tests object upload and deletion only.
 - S3 uploads stream from the archive producer through a bounded multipart uploader; they do not spool the finished archive to local disk. Docklight downloads the just-written object and validates its checksum, encryption, and archive contents before adding the retention record.
-- Endpoint and access credentials are encrypted with `auth.secret_key` and omitted from API responses. Existing object identity (endpoint, bucket, region, prefix) is fixed while S3 backup rows exist; key rotation stays allowed. Scheduled backup actions continue to use local storage until schedules expose a destination choice.
+- Endpoint and access credentials are encrypted with `auth.secret_key` and omitted from API responses. Existing object identity (endpoint, bucket, region, prefix) is fixed while S3 backup rows exist; key rotation stays allowed. Scheduled backups persist either `local` or `s3`, require an enabled S3 target when created, and record a failed run if that target is disabled later.
 - The API and lifecycle use an injected object store for deterministic tests. A gated test performs real Put/Get/Delete against a user-provided S3-compatible emulator; it remains pending until an emulator is available.
 
 ## 2026-10-31: private per-server app stacks
@@ -47,4 +47,11 @@
 - Sidecars may omit `data_path` when they are stateless and may use a templated `enabled` boolean. An unresolved enabled placeholder evaluates false to avoid unexpectedly starting a newly added optional service on servers created from an older template version.
 - Sidecar logs use the existing WebSocket log channel with the same secret redaction. The handler checks `server.view`, verifies the service name against the template, and confirms Docker ownership labels before streaming. It does not accept commands.
 - Sidecar images with a Docker healthcheck must report healthy within one two-minute window before the main app starts. Services without a declared healthcheck do not delay startup; health failure rolls back the stack before the app container is created.
-- A deterministic fake Docker Engine test covers the lifecycle and rollback path. Live image compatibility, networking, and app readiness still require a Docker-host acceptance run. Sidecar command input remains separate work.
+- A deterministic fake Docker Engine test covers the lifecycle and rollback path. The private-services overview supports permission-scoped logs and one-shot commands. Live image compatibility, networking, app readiness, and the browser review still require a Docker-host acceptance run.
+
+## 2026-10-31: public Docklight status page
+
+- The public page is disabled on fresh installs and requires both an administrator's panel-wide switch and a per-server opt-in. This prevents a public route from revealing server names by default.
+- The public payload contains only the selected server's display name, template name, normalized availability, and an optional recent player count. It omits IDs, ports, addresses, and configuration.
+- Player counts are sampled when an authenticated panel user successfully queries a server. Public requests never open game-protocol connections; counts older than 15 minutes are omitted.
+- The HTML and refresh script are embedded with the panel. The JSON cache lasts 15 seconds and is invalidated by title, selection, master-switch, and player-sample changes. The page is marked `noindex`, which requests that compliant crawlers skip it but does not act as access control.

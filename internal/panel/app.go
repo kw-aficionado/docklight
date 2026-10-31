@@ -55,6 +55,9 @@ type App struct {
 	watchdogHeal       func(context.Context, Server) error
 	watchdogStart      func(context.Context, Server) error
 	watchdogWait       func(context.Context, time.Duration) error
+	statusMu           sync.Mutex
+	statusCache        []byte
+	statusCacheUntil   time.Time
 	rateMu             sync.Mutex
 	loginIPs           map[string][]time.Time
 	loginUsers         map[string][]time.Time
@@ -154,11 +157,14 @@ func (a *App) Router() http.Handler {
 	r.Get("/app.js", a.static("web/app.js", "text/javascript; charset=utf-8"))
 	r.Get("/ui-utils.mjs", a.static("web/ui-utils.mjs", "text/javascript; charset=utf-8"))
 	r.Get("/style.css", a.static("web/style.css", "text/css; charset=utf-8"))
+	r.Get("/status", a.publicStatusPage)
+	r.Get("/status.js", a.publicStatusScript)
 	r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"name": "Docklight", "short_name": "Docklight", "start_url": "/", "display": "standalone", "background_color": "#0d1417", "theme_color": "#0d1417", "icons": []map[string]string{{"src": "/brand.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}}})
 	})
 	r.Get("/brand.svg", a.static("web/brand.svg", "image/svg+xml"))
 	r.Route("/api", func(api chi.Router) {
+		api.Get("/status", a.publicStatusJSON)
 		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]string{"status": "ok", "version": "dev"})
 		})
@@ -212,6 +218,8 @@ func (a *App) Router() http.Handler {
 			priv.Get("/notifications", a.admin(a.getNotificationSettings))
 			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
 			priv.Post("/notifications/test", a.admin(a.testNotification))
+			priv.Get("/settings/status-page", a.admin(a.getStatusPageSettings))
+			priv.Put("/settings/status-page", a.admin(a.updateStatusPageSettings))
 			priv.Get("/backups/target/status", a.backupTargetStatus)
 			priv.Get("/backups/target", a.admin(a.getBackupTarget))
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))
