@@ -39,6 +39,7 @@ type App struct {
 	scheduleRestart       func(context.Context, string, bool, int) (string, error)
 	scheduleControl       func(context.Context, string, string) (string, string, error)
 	scheduleUpdate        func(context.Context, string) (string, error)
+	scheduleReady         func(context.Context, string, time.Duration) error
 	schedulePlayers       func(context.Context, string) (int, error)
 	scheduleWait          func(context.Context, time.Duration) error
 	scheduleCommand       func(context.Context, Server, string) error
@@ -236,6 +237,12 @@ func (a *App) Router() http.Handler {
 			priv.Post("/message-templates", a.admin(a.createMessageTemplate))
 			priv.Put("/message-templates/{id}", a.admin(a.updateMessageTemplate))
 			priv.Delete("/message-templates/{id}", a.admin(a.deleteMessageTemplate))
+			priv.Get("/schedules", a.admin(a.listScopedSchedules))
+			priv.Post("/schedules", a.admin(a.createScopedSchedule))
+			priv.Put("/schedules/{scheduleID}", a.admin(a.updateScopedSchedule))
+			priv.Delete("/schedules/{scheduleID}", a.admin(a.deleteScopedSchedule))
+			priv.Get("/schedules/{scheduleID}/runs", a.admin(a.listScopedScheduleRuns))
+			priv.Post("/schedules/{scheduleID}/run-now", a.admin(a.runScheduleNow))
 			priv.Get("/servers", a.listServers)
 			priv.Post("/servers", a.createServer)
 			priv.Put("/servers/{id}/realm", a.admin(a.moveServerRealm))

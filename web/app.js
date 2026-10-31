@@ -106,8 +106,8 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
   function render() {
     if (!state.user) return renderLogin();
     const active = state.selected;
-    app.innerHTML = `<div class="layout"><aside class="sidebar"><a href="#" class="brand-lockup" data-action="home"><img class="brand-logo" src="/brand.svg" alt=""><span>Docklight</span></a><div class="side-label">PANEL</div><button class="nav-item ${!active&&state.route==='servers'?'active':''}" data-action="home"><span>${icon('grid')}</span><span>Servers</span><b>${state.servers.length}</b></button><button class="nav-item ${!active&&state.route==='runes'?'active':''}" data-action="runes"><span>${icon('rune')}</span><span>Templates</span></button>${state.user.role==='admin'?`<div class="side-label side-spacer">MANAGE</div><button class="nav-item ${!active&&state.route==='realms'?'active':''}" data-action="realms"><span>${icon('server')}</span><span>Realms</span></button><button class="nav-item ${!active&&state.route==='storage'?'active':''}" data-action="storage"><span>${icon('storage')}</span><span>Backup storage</span></button><button class="nav-item ${!active&&state.route==='status'?'active':''}" data-action="status"><span>${icon('status')}</span><span>Public status</span></button><button class="nav-item ${state.route==='users'?'active':''}" data-action="users"><span>${icon('user')}</span><span>Users & access</span></button><button class="nav-item ${state.route==='audit'?'active':''}" data-action="audit"><span>${icon('log')}</span><span>Audit history</span></button><button class="nav-item ${state.route==='notifications'?'active':''}" data-action="notifications"><span>${icon('notify')}</span><span>Notifications</span></button>`:''}<div class="sidebar-bottom"><div class="instance-card"><span class="dot green"></span><span><b>Panel online</b><small>Single host</small></span><span class="instance-menu">···</span></div><button class="profile" data-action="profile"><span class="avatar">${esc(state.user.username[0]?.toUpperCase())}</span><span><b>${esc(state.user.username)}</b><small>${state.user.role==='admin'?'Administrator':'Panel user'}</small></span><span class="more">⌄</span></button></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs"><span>Panel</span><span class="crumb-sep">/</span><b>${active?esc(active.name):esc(state.route==='users'?'Users & access':state.route==='audit'?'Audit history':state.route==='notifications'?'Notifications':state.route==='storage'?'Backup storage':state.route==='status'?'Public status':state.route==='realms'?'Realms':state.route==='runes'?'Templates':'Servers')}</b></div><div class="top-actions"><button class="icon-button theme-toggle" title="Toggle light or dark theme" data-action="theme">${icon('moon')}</button><span class="top-divider"></span><button class="user-chip" data-action="profile"><span class="avatar small">${esc(state.user.username[0]?.toUpperCase())}</span><span>${esc(state.user.username)}</span><span class="chevron">⌄</span></button></div></header><div class="content" id="view"></div></main></div>`;
-    if (active) renderDetail(active); else if (state.route==='users') renderUsers(); else if (state.route==='audit') renderAudit(); else if (state.route==='notifications') renderNotifications(); else if (state.route==='storage'&&state.user.role==='admin') renderBackupStorage(); else if (state.route==='status'&&state.user.role==='admin') renderPublicStatusSettings(); else if (state.route==='realms'&&state.user.role==='admin') renderRealms(); else if (state.route==='runes') renderRunes(); else renderServers();
+    app.innerHTML = `<div class="layout"><aside class="sidebar"><a href="#" class="brand-lockup" data-action="home"><img class="brand-logo" src="/brand.svg" alt=""><span>Docklight</span></a><div class="side-label">PANEL</div><button class="nav-item ${!active&&state.route==='servers'?'active':''}" data-action="home"><span>${icon('grid')}</span><span>Servers</span><b>${state.servers.length}</b></button><button class="nav-item ${!active&&state.route==='runes'?'active':''}" data-action="runes"><span>${icon('rune')}</span><span>Templates</span></button>${state.user.role==='admin'?`<div class="side-label side-spacer">MANAGE</div><button class="nav-item ${!active&&state.route==='realms'?'active':''}" data-action="realms"><span>${icon('server')}</span><span>Realms</span></button><button class="nav-item ${!active&&state.route==='schedules'?'active':''}" data-action="schedules"><span>${icon('rotate')}</span><span>Schedules</span></button><button class="nav-item ${!active&&state.route==='storage'?'active':''}" data-action="storage"><span>${icon('storage')}</span><span>Backup storage</span></button><button class="nav-item ${!active&&state.route==='status'?'active':''}" data-action="status"><span>${icon('status')}</span><span>Public status</span></button><button class="nav-item ${state.route==='users'?'active':''}" data-action="users"><span>${icon('user')}</span><span>Users & access</span></button><button class="nav-item ${state.route==='audit'?'active':''}" data-action="audit"><span>${icon('log')}</span><span>Audit history</span></button><button class="nav-item ${state.route==='notifications'?'active':''}" data-action="notifications"><span>${icon('notify')}</span><span>Notifications</span></button>`:''}<div class="sidebar-bottom"><div class="instance-card"><span class="dot green"></span><span><b>Panel online</b><small>Single host</small></span><span class="instance-menu">···</span></div><button class="profile" data-action="profile"><span class="avatar">${esc(state.user.username[0]?.toUpperCase())}</span><span><b>${esc(state.user.username)}</b><small>${state.user.role==='admin'?'Administrator':'Panel user'}</small></span><span class="more">⌄</span></button></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs"><span>Panel</span><span class="crumb-sep">/</span><b>${active?esc(active.name):esc(state.route==='users'?'Users & access':state.route==='audit'?'Audit history':state.route==='notifications'?'Notifications':state.route==='storage'?'Backup storage':state.route==='status'?'Public status':state.route==='realms'?'Realms':state.route==='schedules'?'Schedules':state.route==='runes'?'Templates':'Servers')}</b></div><div class="top-actions"><button class="icon-button theme-toggle" title="Toggle light or dark theme" data-action="theme">${icon('moon')}</button><span class="top-divider"></span><button class="user-chip" data-action="profile"><span class="avatar small">${esc(state.user.username[0]?.toUpperCase())}</span><span>${esc(state.user.username)}</span><span class="chevron">⌄</span></button></div></header><div class="content" id="view"></div></main></div>`;
+    if (active) renderDetail(active); else if (state.route==='users') renderUsers(); else if (state.route==='audit') renderAudit(); else if (state.route==='notifications') renderNotifications(); else if (state.route==='storage'&&state.user.role==='admin') renderBackupStorage(); else if (state.route==='status'&&state.user.role==='admin') renderPublicStatusSettings(); else if (state.route==='realms'&&state.user.role==='admin') renderRealms(); else if (state.route==='schedules'&&state.user.role==='admin') renderAdminSchedules(); else if (state.route==='runes') renderRunes(); else renderServers();
     bindShell();
   }
   function bindShell() {
@@ -120,6 +120,7 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
       if(action==='storage'&&state.user.role==='admin'){state.selected=null;state.route='storage';render();}
       if(action==='status'&&state.user.role==='admin'){state.selected=null;state.route='status';render();}
       if(action==='realms'&&state.user.role==='admin'){state.selected=null;state.route='realms';render();}
+      if(action==='schedules'&&state.user.role==='admin'){state.selected=null;state.route='schedules';render();}
       if(action==='profile') showProfile();
       if(action==='theme'){document.documentElement.classList.toggle('light');localStorage.setItem('ygg-theme',document.documentElement.classList.contains('light')?'light':'dark');}
     }));
@@ -352,12 +353,13 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
       try{
         const items=await api(`/api/servers/${s.id}/schedules`);
         if(!items.length){host.innerHTML='<div class="files-empty">No schedules yet.</div>';return}
-        host.innerHTML=items.map(item=>{const when=value=>value?new Date(value).toLocaleString():'Not run yet';const labels={backup:'Backup',restart:'Restart',start:'Start',stop:'Stop',update:'Update',command:'Console command',message:'Message'};const action=labels[item.action]||'Unknown action';const canChange=item.action==='backup'?canBackup:item.action==='command'?canConsole:item.action==='message'?canSchedule:canControl;return `<article class="schedule-row" data-schedule="${esc(item.id)}"><div class="schedule-summary"><b>${esc(item.name)}</b><small>${action}${item.action==='backup'?` · ${({s3:'S3-compatible',sftp:'SFTP',smb:'SMB'}[item.destination]||'Panel storage')}`:''}${item.action==='restart'&&item.warn_players?` · ${warningLabel(item.warning_seconds)} warning`:''}${['restart','update'].includes(item.action)&&item.skip_if_players_online?' · skip if players are online':''}</small><code>${esc(item.cron)}</code><span>${item.enabled?`Enabled · next ${esc(when(item.next_run))}`:'Disabled'}</span>${item.last_status?`<small>Last run · ${esc(when(item.last_run))} · ${esc(item.last_status)}${item.last_error?` · ${esc(item.last_error)}`:''}</small>`:'<small>No run recorded yet</small>'}</div><div class="schedule-actions"><button class="button subtle" data-schedule-op="runs">Run history</button><button class="button subtle" data-schedule-op="toggle" ${!item.enabled&&!canChange?'disabled':''}>${item.enabled?'Disable':'Enable'}</button><button class="button danger" data-schedule-op="delete">Delete</button></div><div class="schedule-runs" hidden></div></article>`}).join('');
+        host.innerHTML=items.map(item=>{const when=value=>value?new Date(value).toLocaleString():'Not run yet';const labels={backup:'Backup',restart:'Restart',start:'Start',stop:'Stop',update:'Update',command:'Console command',message:'Message'};const action=labels[item.action]||'Unknown action';const canChange=item.action==='backup'?canBackup:item.action==='command'?canConsole:item.action==='message'?canSchedule:canControl;return `<article class="schedule-row" data-schedule="${esc(item.id)}"><div class="schedule-summary"><b>${esc(item.name)}</b><small>${action}${item.action==='backup'?` · ${({s3:'S3-compatible',sftp:'SFTP',smb:'SMB'}[item.destination]||'Panel storage')}`:''}${item.action==='restart'&&item.warn_players?` · ${warningLabel(item.warning_seconds)} warning`:''}${['restart','update'].includes(item.action)&&item.skip_if_players_online?' · skip if players are online':''}</small><code>${esc(item.cron)}</code><span>${item.enabled?`Enabled · next ${esc(when(item.next_run))}`:'Disabled'}</span>${item.last_status?`<small>Last run · ${esc(when(item.last_run))} · ${esc(item.last_status)}${item.last_error?` · ${esc(item.last_error)}`:''}</small>`:'<small>No run recorded yet</small>'}</div><div class="schedule-actions">${state.user.role==='admin'?'<button class="button subtle" data-schedule-op="run-now">Run now</button>':''}<button class="button subtle" data-schedule-op="runs">Run history</button><button class="button subtle" data-schedule-op="toggle" ${!item.enabled&&!canChange?'disabled':''}>${item.enabled?'Disable':'Enable'}</button><button class="button danger" data-schedule-op="delete">Delete</button></div><div class="schedule-runs" hidden></div></article>`}).join('');
         host.querySelectorAll('[data-schedule-op]').forEach(button=>button.onclick=async()=>{
           const row=button.closest('.schedule-row'),id=row.dataset.schedule,op=button.dataset.scheduleOp,item=items.find(x=>x.id===id);
           if(op==='delete'&&!confirm(`Delete the schedule “${item.name}”?`))return;
           button.disabled=true;
           try{
+            if(op==='run-now'){await api(`/api/schedules/${encodeURIComponent(id)}/run-now`,{method:'POST',body:'{}'});toast('Schedule queued to run now','success');await load();return}
             if(op==='toggle')await api(`/api/servers/${s.id}/schedules/${id}`,{method:'PUT',body:JSON.stringify({enabled:!item.enabled})});
             if(op==='delete')await api(`/api/servers/${s.id}/schedules/${id}`,{method:'DELETE'});
             if(op==='runs'){const runs=await api(`/api/servers/${s.id}/schedules/${id}/runs`),box=row.querySelector('.schedule-runs');box.hidden=false;box.innerHTML=runs.length?runs.map(run=>`<div><b>${esc(when(run.started_at))} · ${esc(run.status)}</b><small>${esc(run.detail||'No details')}</small></div>`).join(''):'<div class="muted-copy">No runs recorded yet.</div>';button.disabled=false;return}
@@ -367,6 +369,109 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
       }catch(e){host.innerHTML=`<div class="files-empty error-text">${esc(e.message)}</div>`}
     }
     const when=value=>value?new Date(value).toLocaleString():'Not run yet';
+    await load();
+  }
+
+  async function renderAdminSchedules(){
+    const view=document.querySelector('#view');
+    if(state.user.role!=='admin'){view.innerHTML='<div class="page-heading"><h1>Not available</h1></div>';return;}
+    view.innerHTML='<div class="page-heading"><div><div class="eyebrow">AUTOMATION</div><h1>Schedules</h1><p>Loading realm and global schedules…</p></div></div>';
+    let templates=[],backupTarget={enabled:false,type:'s3'};
+    try{[templates,backupTarget]=await Promise.all([api('/api/message-templates'),api('/api/backups/target/status')])}catch{}
+    const destinationLabel={s3:'S3-compatible bucket',sftp:'SFTP server',smb:'SMB share'};
+    const actionLabel={backup:'Backup',start:'Start server',stop:'Stop server',restart:'Restart server',update:'Update server',command:'Console command',message:'Message'};
+    const nameFor=action=>({backup:'Scheduled backup',start:'Scheduled start',stop:'Scheduled stop',restart:'Scheduled restart',update:'Scheduled update',command:'Scheduled command',message:'Scheduled message'}[action]||'Scheduled action');
+    const warningSeconds=value=>{const units={h:3600,m:60,s:1,ms:.001,us:.000001,'µs':.000001,ns:.000000001};const parts=[...String(value||'').matchAll(/(\d+(?:\.\d+)?)(ms|us|µs|ns|h|m|s)/g)];if(!parts.length||parts.map(x=>x[0]).join('')!==String(value))return 0;const total=parts.reduce((sum,part)=>sum+Number(part[1])*units[part[2]],0);return Number.isInteger(total)&&total>0&&total<=86400?total:0};
+    const warningLabel=value=>value%3600===0?`${value/3600} hour${value===3600?'':'s'}`:value%60===0?`${value/60} minute${value===60?'':'s'}`:`${value} seconds`;
+    const scopeTargets=(type,id)=>type==='global'?state.servers:state.servers.filter(server=>(server.realm_id||'')===id);
+    view.innerHTML=`<div class="page-heading"><div><div class="eyebrow">AUTOMATION</div><h1>Schedules</h1><p>Apply recurring actions to a realm or every server on this Docklight host.</p></div><button class="button primary" id="add-scoped-schedule">+ Add schedule</button></div><section class="panel-card schedule-panel"><div class="panel-head"><div><h2>Realm and global schedules</h2><p>Realm membership is checked again every time a schedule runs.</p></div><button class="button subtle" id="refresh-scoped-schedules">${icon('refresh')} Refresh</button></div><div class="schedule-list" id="scoped-schedule-list"><div class="files-empty">Loading schedules…</div></div></section>`;
+    const host=view.querySelector('#scoped-schedule-list');
+    const load=async()=>{
+      try{
+        const items=await api('/api/schedules');
+        if(!items.length){host.innerHTML='<div class="files-empty">No realm or global schedules yet.</div>';return;}
+        host.innerHTML=items.map(item=>{const scope=item.scope_type==='global'?'All servers':state.realms.find(realm=>realm.id===item.scope_id)?.name||'Deleted realm';const when=value=>value?new Date(value).toLocaleString():'Not run yet';return `<article class="schedule-row" data-scoped-schedule="${esc(item.id)}"><div class="schedule-summary"><b>${esc(item.name)}</b><small>${esc(scope)} · ${esc(actionLabel[item.action]||item.action)}${item.action==='backup'?` · ${({s3:'S3-compatible',sftp:'SFTP',smb:'SMB'}[item.destination]||'Panel storage')}`:''}${item.action==='restart'&&item.warn_players?` · ${warningLabel(item.warning_seconds)} warning`:''}${['restart','update'].includes(item.action)&&item.skip_if_players_online?' · skip if players are online':''}</small><code>${esc(item.cron)}</code><span>${item.enabled?`Enabled · next ${esc(when(item.next_run))}`:'Disabled'}</span>${item.last_status?`<small>Last run · ${esc(when(item.last_run))} · ${esc(item.last_status)}${item.last_error?` · ${esc(item.last_error)}`:''}</small>`:'<small>No run recorded yet</small>'}</div><div class="schedule-actions"><button class="button subtle" data-scoped-op="run-now" ${item.last_status==='running'?'disabled':''}>Run now</button><button class="button subtle" data-scoped-op="runs">Run history</button><button class="button subtle" data-scoped-op="toggle">${item.enabled?'Disable':'Enable'}</button><button class="button danger" data-scoped-op="delete">Delete</button></div><div class="schedule-runs" hidden></div></article>`}).join('');
+        host.querySelectorAll('[data-scoped-op]').forEach(button=>button.onclick=async()=>{
+          const row=button.closest('.schedule-row'),id=row.dataset.scopedSchedule,op=button.dataset.scopedOp,item=items.find(value=>value.id===id);
+          if(op==='delete'&&!confirm(`Delete the schedule “${item.name}” and its run history?`))return;
+          button.disabled=true;
+          try{
+            if(op==='run-now'){await api(`/api/schedules/${encodeURIComponent(id)}/run-now`,{method:'POST',body:'{}'});toast('Schedule queued to run now','success');await load();return;}
+            if(op==='toggle'){await api(`/api/schedules/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify({enabled:!item.enabled})});await load();return;}
+            if(op==='delete'){await api(`/api/schedules/${encodeURIComponent(id)}`,{method:'DELETE'});await load();return;}
+            const runs=await api(`/api/schedules/${encodeURIComponent(id)}/runs`),box=row.querySelector('.schedule-runs');box.hidden=false;box.innerHTML=runs.length?runs.map(run=>`<div><b>${esc(run.server_name||'Scope')} · ${esc(when(run.started_at))} · ${esc(run.status)}</b><small>${esc(run.detail||'No details')}</small></div>`).join(''):'<div class="muted-copy">No runs recorded yet.</div>';button.disabled=false;
+          }catch(error){toast(error.message,'error');button.disabled=false;}
+        });
+      }catch(error){host.innerHTML=`<div class="files-empty error-text">${esc(error.message)}</div>`;}
+    };
+    view.querySelector('#refresh-scoped-schedules').onclick=load;
+    view.querySelector('#add-scoped-schedule').onclick=()=>{
+      const realmChoices=state.realms.map(realm=>`<option value="${esc(realm.id)}">${esc(realm.name)}</option>`).join('');
+      const initialScope=state.realms.length?'realm':'global';
+      modal(`<div class="modal-heading"><div><div class="eyebrow">AUTOMATION</div><h2>New scoped schedule</h2></div><button class="icon-button" data-close>×</button></div><form id="create-scoped-schedule"><div class="two-fields"><label>Apply to<select name="scope_type"><option value="realm" ${initialScope==='realm'?'selected':''} ${state.realms.length?'':'disabled'}>One realm</option><option value="global" ${initialScope==='global'?'selected':''}>All servers</option></select></label><label id="scoped-realm-wrap">Realm<select name="scope_id">${realmChoices}</select></label></div><label>Action<select name="action"></select></label><div id="scoped-backup-fields"><label>Backup destination<select name="destination"><option value="local">Panel storage</option>${backupTarget.enabled?`<option value="${esc(backupTarget.type)}">${esc(destinationLabel[backupTarget.type]||'Remote destination')}</option>`:''}</select></label></div><label>Schedule name<input name="name" maxlength="80" required></label><label>Cron expression<input name="cron" value="0 3 * * *" required><small>Panel host local time · five fields, or six with leading seconds</small></label><div id="scoped-restart-fields"><label class="checkline"><input name="warn_players" type="checkbox" disabled> Warn players before restart</label><label>Warning countdown<select name="warning_seconds" disabled></select></label><small id="scoped-warning-note">Select a realm or all servers to check available restart warnings.</small><label class="checkline" id="scoped-player-skip"><input name="skip_if_players_online" type="checkbox"> Skip if players are online</label></div><div id="scoped-command-fields"><label>Console command<input name="command" maxlength="4096" placeholder="say Scheduled maintenance"></label><small>Stored encrypted and sent only while a server is running.</small></div><div id="scoped-message-fields"><label>Message template<select name="message_template_id">${templates.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select></label><div id="scoped-message-values"></div><small>Message templates are stored encrypted with the schedule.</small></div><label class="checkline"><input name="enabled" type="checkbox" checked> Enable schedule</label><div id="scoped-schedule-error" class="form-error" role="alert"></div><div class="modal-actions"><button type="button" class="button subtle" data-close>Cancel</button><button class="button primary" type="submit">Save schedule</button></div></form>`);
+      document.querySelectorAll('[data-close]').forEach(element=>element.onclick=closeModal);
+      const form=document.querySelector('#create-scoped-schedule'),scopeType=form.elements.scope_type,scopeID=form.elements.scope_id,action=form.elements.action,realmWrap=form.querySelector('#scoped-realm-wrap'),backupFields=form.querySelector('#scoped-backup-fields'),restartFields=form.querySelector('#scoped-restart-fields'),commandFields=form.querySelector('#scoped-command-fields'),messageFields=form.querySelector('#scoped-message-fields'),warn=form.elements.warn_players,warnSeconds=form.elements.warning_seconds,skip=form.elements.skip_if_players_online,command=form.elements.command,messageTemplate=form.elements.message_template_id;
+      let optionRequest=0,sharedWarningOptions=[],scopeCanQuery=false;
+      const refreshTargetOptions=async()=>{
+        const request=++optionRequest,targets=scopeTargets(scopeType.value,scopeID.value);
+        let warnings=[],allCanQuery=targets.length>0;
+        if(targets.length){
+          const responses=await Promise.allSettled(targets.map(server=>api(`/api/servers/${encodeURIComponent(server.id)}/schedule-options`)));
+          if(request!==optionRequest)return;
+          const options=responses.map(result=>result.status==='fulfilled'?result.value:null);
+          allCanQuery=options.every(value=>value?.can_skip_if_players_online===true);
+          const lists=options.map(value=>new Set((value?.restart_warnings||[]).map(entry=>warningSeconds(entry.at)).filter(Boolean)));
+          warnings=lists.length&&options.every(Boolean)?[...lists[0]].filter(value=>lists.every(list=>list.has(value))).sort((a,b)=>a-b):[];
+        }
+        if(request!==optionRequest)return;
+        sharedWarningOptions=warnings;scopeCanQuery=allCanQuery;
+        warn.disabled=!warnings.length;warn.checked=warnings.length>0;
+        if(!allCanQuery)skip.checked=false;
+        warnSeconds.innerHTML=warnings.map(value=>`<option value="${value}">${warningLabel(value)}</option>`).join('');
+        if(warnings.length)warnSeconds.value=String(warnings.includes(60)?60:warnings[0]);
+        warnSeconds.disabled=!warnings.length;
+        form.querySelector('#scoped-warning-note').textContent=warnings.length?'Only countdowns supported by every current server in scope are available.':targets.length?'The current servers do not share a configured restart warning.':'No current servers are in scope, so restart warnings cannot be validated yet.';
+        updateFields();
+      };
+      const availableActions=()=>{
+        const targets=scopeTargets(scopeType.value,scopeID.value),actions=['backup','start','stop','restart','command'];
+        if(targets.length&&targets.every(server=>server.installed))actions.splice(4,0,'update');
+        if(targets.length&&targets.every(server=>server.gameskill_id==='minecraft-java'||server.gameskill_id==='minecraft-bedrock')&&templates.length)actions.push('message');
+        return actions;
+      };
+      const drawMessageValues=()=>{const selected=templates.find(item=>item.id===messageTemplate.value);form.querySelector('#scoped-message-values').innerHTML=(selected?.parameters||[]).filter(parameter=>parameter!=='server_name').map(parameter=>`<label>${parameter==='minutes'?'Minutes':'Seconds'}<input name="message_${esc(parameter)}" type="number" min="0" max="${parameter==='minutes'?10080:86400}" value="${parameter==='minutes'?5:60}" required></label>`).join('');};
+      function updateFields(){
+        const actions=availableActions(),previous=action.value;
+        action.innerHTML=actions.map(value=>`<option value="${value}">${esc(actionLabel[value])}</option>`).join('');
+        action.value=actions.includes(previous)?previous:(actions[0]||'backup');
+        const selected=action.value;backupFields.hidden=selected!=='backup';restartFields.hidden=!['restart','update'].includes(selected);commandFields.hidden=selected!=='command';messageFields.hidden=selected!=='message';
+        form.elements.destination.disabled=selected!=='backup';command.disabled=selected!=='command';command.required=selected==='command';messageTemplate.disabled=selected!=='message';warn.closest('label').hidden=selected!=='restart';warnSeconds.closest('label').hidden=selected!=='restart';
+        form.querySelectorAll('#scoped-message-values input').forEach(input=>{input.disabled=selected!=='message'});
+        form.querySelector('#scoped-warning-note').hidden=selected!=='restart';
+        if(selected==='restart'&&!sharedWarningOptions.length)warn.disabled=true;
+        form.querySelector('#scoped-player-skip').hidden=!['restart','update'].includes(selected)||!scopeCanQuery;
+        form.elements.name.value=nameFor(selected);
+      }
+      const setActions=async()=>{
+        realmWrap.hidden=scopeType.value!=='realm';
+        await refreshTargetOptions();
+      };
+      scopeType.onchange=setActions;scopeID.onchange=setActions;action.onchange=updateFields;messageTemplate.onchange=drawMessageValues;warn.onchange=()=>{warnSeconds.disabled=!warn.checked};
+      drawMessageValues();updateFields();setActions();
+      form.onsubmit=async event=>{
+        event.preventDefault();
+        const data=new FormData(form),selected=data.get('action');
+        const body={scope_type:data.get('scope_type'),scope_id:data.get('scope_type')==='realm'?data.get('scope_id'):'',name:data.get('name'),action:selected,cron:data.get('cron'),enabled:form.elements.enabled.checked};
+        if(selected==='backup')body.destination=data.get('destination')||'local';
+        if(['restart','update'].includes(selected))body.skip_if_players_online=form.elements.skip_if_players_online.checked;
+        if(selected==='restart'){body.warn_players=form.elements.warn_players.checked;if(body.warn_players)body.warning_seconds=Number(data.get('warning_seconds'))}
+        if(selected==='command')body.command=data.get('command');
+        if(selected==='message'){body.message_template_id=messageTemplate.value;body.values={};const template=templates.find(item=>item.id===messageTemplate.value);for(const parameter of template?.parameters||[])if(parameter!=='server_name')body.values[parameter]=Number(data.get(`message_${parameter}`));}
+        const error=form.querySelector('#scoped-schedule-error');error.textContent='';
+        try{await api('/api/schedules',{method:'POST',body:JSON.stringify(body)});closeModal();toast('Schedule saved','success');await load();}
+        catch(exception){error.textContent=exception.message;}
+      };
+    };
     await load();
   }
 

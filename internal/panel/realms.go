@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -193,6 +194,25 @@ func (a *App) deleteRealm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "realm not found")
 		return
 	}
+	var scheduleCount int
+	if err = tx.QueryRow(`SELECT count(*) FROM backup_schedules WHERE scope_type='realm' AND scope_id=?`, id).Scan(&scheduleCount); err != nil {
+		writeError(w, 500, "could not read realm schedules")
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id IN (SELECT id FROM backup_schedules WHERE scope_type='realm' AND scope_id=?)`, id); err != nil {
+		writeError(w, 500, "could not remove realm schedule history")
+		return
+	}
+	deletedSchedules, deleteErr := tx.Exec(`DELETE FROM backup_schedules WHERE scope_type='realm' AND scope_id=? AND last_status<>'running'`, id)
+	if deleteErr != nil {
+		writeError(w, 500, "could not remove realm schedules")
+		return
+	}
+	deletedScheduleCount, _ := deletedSchedules.RowsAffected()
+	if int(deletedScheduleCount) != scheduleCount {
+		writeError(w, http.StatusConflict, "wait for running realm schedules to finish before deleting this realm")
+		return
+	}
 	if _, err = tx.Exec(`UPDATE servers SET realm_id='' WHERE realm_id=?`, id); err != nil {
 		writeError(w, 500, "could not detach realm servers")
 		return
@@ -209,7 +229,7 @@ func (a *App) deleteRealm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "could not delete realm")
 		return
 	}
-	a.audit(principal(r), "realm.delete", "realm", id, "servers detached")
+	a.audit(principal(r), "realm.delete", "realm", id, fmt.Sprintf("servers detached; schedules removed=%d", scheduleCount))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

@@ -824,6 +824,39 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 26 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct{ name, ddl string }{
+			{"scope_type", `ALTER TABLE backup_schedules ADD COLUMN scope_type TEXT NOT NULL DEFAULT 'server'`},
+			{"scope_id", `ALTER TABLE backup_schedules ADD COLUMN scope_id TEXT NOT NULL DEFAULT ''`},
+			{"run_now", `ALTER TABLE backup_schedules ADD COLUMN run_now INTEGER NOT NULL DEFAULT 0`},
+		} {
+			if !hasColumn(tx, "backup_schedules", column.name) {
+				if _, err = tx.Exec(column.ddl); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+		}
+		if _, err = tx.Exec(`UPDATE backup_schedules SET scope_id=server_id WHERE scope_type='server' AND scope_id=''`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_backup_schedules_scope ON backup_schedules(scope_type,scope_id,created_at DESC)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(26)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -14,7 +14,7 @@ Access grants are combined with OR logic across global, realm, template (`gamesk
 
 `server.create` is checked against the selected realm and template. A user with a realm-only create grant must choose that realm; automatic template-category placement requires a global or matching template create grant. Realm-level `server.view`, control, console, file, backup, schedule, and delete grants apply to the servers currently in that realm.
 
-The admin **Users & access** editor can set global, realm, template, and server grants. Saving replaces the selected user's complete grant set. Deleting a realm detaches its servers and removes grants and per-user collapse preferences associated with it.
+The admin **Users & access** editor can set global, realm, template, and server grants. Saving replaces the selected user's complete grant set. Deleting a realm detaches its servers and removes grants, per-user collapse preferences, and schedules with their history. A realm cannot be deleted while one of its schedules is running.
 
 ## Per-user grouping
 

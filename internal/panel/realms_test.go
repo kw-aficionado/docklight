@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"example.com/yggdrasil-panel/internal/security"
 )
@@ -129,11 +130,32 @@ func TestRealmPermissionsCollapseReorderAndDelete(t *testing.T) {
 	if _, err := d.Exec(`INSERT INTO realm_user_state(user_id,realm_id,collapsed) VALUES('realm-viewer-two',?,1)`, first.ID); err != nil {
 		t.Fatal(err)
 	}
+	scopedSchedule := testRequest(h, http.MethodPost, "/api/schedules", `{"scope_type":"realm","scope_id":"`+first.ID+`","action":"start","cron":"0 3 * * *"}`, admin)
+	if scopedSchedule.Code != http.StatusCreated {
+		t.Fatalf("create realm schedule before deletion: %d %s", scopedSchedule.Code, scopedSchedule.Body.String())
+	}
+	var scheduled backupSchedule
+	if err := json.Unmarshal(scopedSchedule.Body.Bytes(), &scheduled); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO backup_schedule_runs(id,schedule_id,server_id,started_at,status) VALUES('realm-delete-run',?,?,?,'running')`, scheduled.ID, "realm-server-a", scheduleTimestamp(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`UPDATE backup_schedules SET last_status='running' WHERE id=?`, scheduled.ID); err != nil {
+		t.Fatal(err)
+	}
+	blockedDelete := testRequest(h, http.MethodDelete, "/api/realms/"+first.ID, `{}`, admin)
+	if blockedDelete.Code != http.StatusConflict {
+		t.Fatalf("deleted realm during its scoped schedule: %d %s", blockedDelete.Code, blockedDelete.Body.String())
+	}
+	if _, err := d.Exec(`UPDATE backup_schedules SET last_status='success' WHERE id=?`, scheduled.ID); err != nil {
+		t.Fatal(err)
+	}
 	deleted := testRequest(h, http.MethodDelete, "/api/realms/"+first.ID, `{}`, admin)
 	if deleted.Code != http.StatusOK {
 		t.Fatalf("delete realm: %d %s", deleted.Code, deleted.Body.String())
 	}
-	var attached, grants, preferences int
+	var attached, grants, preferences, schedules, scheduleRuns int
 	if err := d.QueryRow(`SELECT count(*) FROM servers WHERE realm_id=?`, first.ID).Scan(&attached); err != nil {
 		t.Fatal(err)
 	}
@@ -143,8 +165,14 @@ func TestRealmPermissionsCollapseReorderAndDelete(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*) FROM realm_user_state WHERE realm_id=?`, first.ID).Scan(&preferences); err != nil {
 		t.Fatal(err)
 	}
-	if attached != 0 || grants != 0 || preferences != 0 {
-		t.Fatalf("realm delete cleanup attached=%d grants=%d preferences=%d", attached, grants, preferences)
+	if err := d.QueryRow(`SELECT count(*) FROM backup_schedules WHERE id=?`, scheduled.ID).Scan(&schedules); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRow(`SELECT count(*) FROM backup_schedule_runs WHERE schedule_id=?`, scheduled.ID).Scan(&scheduleRuns); err != nil {
+		t.Fatal(err)
+	}
+	if attached != 0 || grants != 0 || preferences != 0 || schedules != 0 || scheduleRuns != 0 {
+		t.Fatalf("realm delete cleanup attached=%d grants=%d preferences=%d schedules=%d runs=%d", attached, grants, preferences, schedules, scheduleRuns)
 	}
 	var detached string
 	if err := d.QueryRow(`SELECT realm_id FROM servers WHERE id='realm-server-a'`).Scan(&detached); err != nil || detached != "" {

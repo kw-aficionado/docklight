@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 25 {
-		t.Fatalf("expected 25 migrations, got %d", count)
+	if count != 26 {
+		t.Fatalf("expected 26 migrations, got %d", count)
 	}
 	for _, column := range []string{"protocol", "port"} {
 		var found int
@@ -209,6 +209,14 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	}
 	if action != "backup" || warnPlayers != 0 || warningSeconds != 60 || skipIfPlayersOnline != 0 || commandEnc != "" || messagePayloadEnc != "" || destination != "local" {
 		t.Fatalf("legacy backup schedule migrated as action=%q warn=%d seconds=%d skip=%d command_enc=%q message_payload_enc=%q destination=%q", action, warnPlayers, warningSeconds, skipIfPlayersOnline, commandEnc, messagePayloadEnc, destination)
+	}
+	var scopeType, scopeID string
+	var runNow int
+	if err = d.QueryRow(`SELECT scope_type,scope_id,run_now FROM backup_schedules WHERE id='legacy-schedule'`).Scan(&scopeType, &scopeID, &runNow); err != nil {
+		t.Fatal(err)
+	}
+	if scopeType != "server" || scopeID != "legacy-server" || runNow != 0 {
+		t.Fatalf("legacy schedule scope migrated incorrectly: type=%q id=%q run_now=%d", scopeType, scopeID, runNow)
 	}
 	var templates int
 	if err = d.QueryRow(`SELECT count(*) FROM message_templates WHERE builtin=1`).Scan(&templates); err != nil || templates != 5 {

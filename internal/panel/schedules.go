@@ -25,6 +25,8 @@ const scheduleTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 type backupSchedule struct {
 	ID                  string `json:"id"`
 	ServerID            string `json:"server_id"`
+	ScopeType           string `json:"scope_type"`
+	ScopeID             string `json:"scope_id"`
 	Name                string `json:"name"`
 	Action              string `json:"action"`
 	Destination         string `json:"destination"`
@@ -44,6 +46,7 @@ type backupScheduleRun struct {
 	ID         string `json:"id"`
 	ScheduleID string `json:"schedule_id"`
 	ServerID   string `json:"server_id"`
+	ServerName string `json:"server_name,omitempty"`
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at"`
 	Status     string `json:"status"`
@@ -152,7 +155,7 @@ func (a *App) listBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := a.db.Query(`SELECT id,server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE server_id=? ORDER BY created_at DESC,id DESC`, s.ID)
+	rows, err := a.db.Query(`SELECT id,server_id,scope_type,scope_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE scope_type='server' AND scope_id=? ORDER BY created_at DESC,id DESC`, s.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list backup schedules")
 		return
@@ -162,7 +165,7 @@ func (a *App) listBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item backupSchedule
 		var enabled, warnPlayers, skipIfPlayersOnline int
-		if err = rows.Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Destination, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt); err != nil {
+		if err = rows.Scan(&item.ID, &item.ServerID, &item.ScopeType, &item.ScopeID, &item.Name, &item.Action, &item.Destination, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read backup schedule metadata")
 			return
 		}
@@ -385,7 +388,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, destination, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), commandEnc, messagePayloadEnc, nextRun); err != nil {
+	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run) VALUES(?,?,'server',?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.ID, s.ID, in.Name, in.Action, destination, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), commandEnc, messagePayloadEnc, nextRun); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save backup schedule")
 		return
 	}
@@ -411,6 +414,10 @@ func (a *App) updateBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read backup schedule")
+		return
+	}
+	if item.LastStatus == "running" {
+		writeError(w, http.StatusConflict, "a running schedule cannot be edited")
 		return
 	}
 	var in struct {
@@ -466,8 +473,13 @@ func (a *App) updateBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		item.NextRun = scheduleTimestamp(next)
 	}
-	if _, err = a.db.Exec(`UPDATE backup_schedules SET name=?,cron=?,enabled=?,next_run=? WHERE id=? AND server_id=?`, item.Name, item.Cron, boolInt(item.Enabled), item.NextRun, id, s.ID); err != nil {
+	result, err := a.db.Exec(`UPDATE backup_schedules SET name=?,cron=?,enabled=?,next_run=?,run_now=0 WHERE id=? AND scope_type='server' AND scope_id=? AND last_status<>'running'`, item.Name, item.Cron, boolInt(item.Enabled), item.NextRun, id, s.ID)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update backup schedule")
+		return
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		writeError(w, http.StatusConflict, "schedule started while it was being edited")
 		return
 	}
 	a.audit(u, "server.schedule.update", "backup_schedule", id, fmt.Sprintf("server=%s enabled=%t", s.ID, item.Enabled))
@@ -490,12 +502,7 @@ func (a *App) deleteBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not start schedule deletion")
 		return
 	}
-	if _, err = tx.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id=? AND server_id=?`, id, s.ID); err != nil {
-		_ = tx.Rollback()
-		writeError(w, http.StatusInternalServerError, "could not remove backup schedule history")
-		return
-	}
-	result, err := tx.Exec(`DELETE FROM backup_schedules WHERE id=? AND server_id=?`, id, s.ID)
+	result, err := tx.Exec(`DELETE FROM backup_schedules WHERE id=? AND scope_type='server' AND scope_id=? AND last_status<>'running'`, id, s.ID)
 	if err != nil {
 		_ = tx.Rollback()
 		writeError(w, http.StatusInternalServerError, "could not delete backup schedule")
@@ -503,8 +510,21 @@ func (a *App) deleteBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	changed, _ := result.RowsAffected()
 	if changed == 0 {
+		var status string
+		lookupErr := tx.QueryRow(`SELECT last_status FROM backup_schedules WHERE id=? AND scope_type='server' AND scope_id=?`, id, s.ID).Scan(&status)
 		_ = tx.Rollback()
-		writeError(w, http.StatusNotFound, "backup schedule not found")
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "backup schedule not found")
+		} else if lookupErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not read schedule status")
+		} else {
+			writeError(w, http.StatusConflict, "a running schedule cannot be deleted")
+		}
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id=? AND server_id=?`, id, s.ID); err != nil {
+		_ = tx.Rollback()
+		writeError(w, http.StatusInternalServerError, "could not remove backup schedule history")
 		return
 	}
 	if err = tx.Commit(); err != nil {
@@ -528,7 +548,7 @@ func (a *App) listBackupScheduleRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not read backup schedule")
 		return
 	}
-	rows, err := a.db.Query(`SELECT id,schedule_id,server_id,started_at,finished_at,status,detail FROM backup_schedule_runs WHERE schedule_id=? AND server_id=? ORDER BY started_at DESC,id DESC LIMIT 50`, id, s.ID)
+	rows, err := a.db.Query(`SELECT r.id,r.schedule_id,r.server_id,COALESCE(s.name,''),r.started_at,r.finished_at,r.status,r.detail FROM backup_schedule_runs r LEFT JOIN servers s ON s.id=r.server_id WHERE r.schedule_id=? AND r.server_id=? ORDER BY r.started_at DESC,r.id DESC LIMIT 50`, id, s.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list schedule runs")
 		return
@@ -537,7 +557,7 @@ func (a *App) listBackupScheduleRuns(w http.ResponseWriter, r *http.Request) {
 	out := []backupScheduleRun{}
 	for rows.Next() {
 		var item backupScheduleRun
-		if err = rows.Scan(&item.ID, &item.ScheduleID, &item.ServerID, &item.StartedAt, &item.FinishedAt, &item.Status, &item.Detail); err != nil {
+		if err = rows.Scan(&item.ID, &item.ScheduleID, &item.ServerID, &item.ServerName, &item.StartedAt, &item.FinishedAt, &item.Status, &item.Detail); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read schedule run history")
 			return
 		}
@@ -555,7 +575,7 @@ func (a *App) getBackupSchedule(serverID, id string) (backupSchedule, error) {
 	var enabled int
 	var warnPlayers int
 	var skipIfPlayersOnline int
-	err := a.db.QueryRow(`SELECT id,server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE id=? AND server_id=?`, id, serverID).Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Destination, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt)
+	err := a.db.QueryRow(`SELECT id,server_id,scope_type,scope_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE id=? AND scope_type='server' AND scope_id=?`, id, serverID).Scan(&item.ID, &item.ServerID, &item.ScopeType, &item.ScopeID, &item.Name, &item.Action, &item.Destination, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt)
 	item.Enabled = enabled != 0
 	item.WarnPlayers = warnPlayers != 0
 	item.SkipIfPlayersOnline = skipIfPlayersOnline != 0
@@ -595,7 +615,7 @@ func (a *App) processDueBackupSchedules(ctx context.Context, now time.Time) erro
 		return err
 	}
 	nowStamp := scheduleTimestamp(now)
-	rows, err := a.db.Query(`SELECT id FROM backup_schedules WHERE enabled=1 AND next_run<>'' AND next_run<=? ORDER BY next_run,id`, nowStamp)
+	rows, err := a.db.Query(`SELECT id FROM backup_schedules WHERE (enabled=1 OR run_now=1) AND next_run<>'' AND next_run<=? ORDER BY next_run,id`, nowStamp)
 	if err != nil {
 		return err
 	}
@@ -625,12 +645,25 @@ func (a *App) processDueBackupSchedules(ctx context.Context, now time.Time) erro
 }
 
 func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time) error {
-	var serverID, name, action, destination, expression, commandEnc, messagePayloadEnc, nextRun string
-	var enabled, warnPlayers, warningSeconds, skipIfPlayersOnline int
-	if err := a.db.QueryRow(`SELECT server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &destination, &expression, &enabled, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc, &nextRun); err != nil {
+	var scopeType, serverID, lastStatus string
+	if err := a.db.QueryRow(`SELECT scope_type,server_id,last_status FROM backup_schedules WHERE id=?`, id).Scan(&scopeType, &serverID, &lastStatus); err != nil {
 		return err
 	}
-	if enabled == 0 || nextRun == "" || nextRun > scheduleTimestamp(now) {
+	if lastStatus == "running" {
+		skipped, err := a.skipOverlappingScheduleOccurrence(id, serverID, scopeType, now)
+		if err != nil || skipped {
+			return err
+		}
+	}
+	if scopeType != "server" {
+		return a.runDueScopedSchedule(ctx, id, now)
+	}
+	var name, action, destination, expression, commandEnc, messagePayloadEnc, nextRun string
+	var enabled, runNow, warnPlayers, warningSeconds, skipIfPlayersOnline int
+	if err := a.db.QueryRow(`SELECT server_id,name,action,destination,cron,enabled,run_now,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &destination, &expression, &enabled, &runNow, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc, &nextRun); err != nil {
+		return err
+	}
+	if enabled == 0 && runNow == 0 || nextRun == "" || nextRun > scheduleTimestamp(now) {
 		return nil
 	}
 	cron, err := schedule.Parse(expression)
@@ -653,7 +686,11 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 	if err != nil {
 		return err
 	}
-	result, err := tx.Exec(`UPDATE backup_schedules SET next_run=?,last_run=?,last_status='running',last_error='' WHERE id=? AND enabled=1 AND next_run<>'' AND next_run<=?`, scheduleTimestamp(next), started, id, started)
+	nextStamp := ""
+	if enabled != 0 {
+		nextStamp = scheduleTimestamp(next)
+	}
+	result, err := tx.Exec(`UPDATE backup_schedules SET next_run=?,run_now=0,last_run=?,last_status='running',last_error='' WHERE id=? AND (enabled=1 OR run_now=1) AND next_run<>'' AND next_run<=?`, nextStamp, started, id, started)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -767,6 +804,58 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 	return a.finishScheduleRun(id, serverID, action, runID, status, detail)
 }
 
+func (a *App) skipOverlappingScheduleOccurrence(id, serverID, scopeType string, now time.Time) (bool, error) {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var expression, nextRun string
+	var enabled int
+	if err = tx.QueryRow(`SELECT cron,next_run,enabled FROM backup_schedules WHERE id=? AND last_status='running'`, id).Scan(&expression, &nextRun, &enabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if enabled == 0 || nextRun == "" || nextRun > scheduleTimestamp(now) {
+		return false, nil
+	}
+	parsed, err := schedule.Parse(expression)
+	if err != nil {
+		return false, err
+	}
+	next, err := parsed.Next(now)
+	if err != nil {
+		return false, err
+	}
+	nextRunStamp := scheduleTimestamp(next)
+	started := scheduleTimestamp(now)
+	result, err := tx.Exec(`UPDATE backup_schedules SET next_run=? WHERE id=? AND last_status='running' AND enabled=1 AND next_run=? AND next_run<=?`, nextRunStamp, id, nextRun, started)
+	if err != nil {
+		return false, err
+	}
+	changed, _ := result.RowsAffected()
+	if changed == 0 {
+		return false, nil
+	}
+	runID, err := newID()
+	if err != nil {
+		return false, err
+	}
+	if scopeType != "server" {
+		serverID = ""
+	}
+	detail := "previous schedule run is still active; this cron occurrence was skipped"
+	if _, err = tx.Exec(`INSERT INTO backup_schedule_runs(id,schedule_id,server_id,started_at,finished_at,status,detail) VALUES(?,?,?,?,?,'skipped',?)`, runID, id, serverID, started, started, detail); err != nil {
+		return false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (a *App) finishScheduledRestart(ctx context.Context, serverID, scheduleID, name string, warn bool, warningSeconds int, playerCheckDetail, runID string) {
 	var detail string
 	var err error
@@ -847,7 +936,7 @@ func (a *App) finishScheduleRun(id, serverID, action, runID, status, detail stri
 		}
 	}
 	a.dispatchScheduledRunNotification(id, serverID, action, status)
-	if _, pruneErr := a.db.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id=? AND id NOT IN (SELECT id FROM backup_schedule_runs WHERE schedule_id=? ORDER BY started_at DESC,id DESC LIMIT 50)`, id, id); pruneErr != nil {
+	if _, pruneErr := a.db.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id=? AND id NOT IN (SELECT id FROM backup_schedule_runs WHERE schedule_id=? ORDER BY started_at DESC,id DESC LIMIT 100)`, id, id); pruneErr != nil {
 		log.Printf("could not prune run history for schedule %s", id)
 	}
 	return nil

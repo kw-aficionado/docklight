@@ -29,3 +29,5 @@
 @media(max-width:700px){.page-heading .detail-actions{width:100%;max-width:none;justify-content:flex-start}}
 .notification-channels{margin-top:16px;padding:20px}.notification-channels .panel-head p{font-size:11px;color:var(--muted);margin:5px 0 0}.notification-channels .catalog-repo-list{max-height:360px}.notification-channel-form section{border:1px solid var(--border-soft);border-radius:8px;padding:12px}.notification-channel-form section[hidden]{display:none}
 .login-link{display:block;margin:13px auto 0;padding:3px 8px;background:none;border:0;color:var(--green);font:inherit;font-size:11px;cursor:pointer}.login-link:hover{text-decoration:underline}.login-card .profile-box{margin:12px 0;color:var(--text);font-size:11px;line-height:1.6}
+
+.sidebar{overflow-y:auto}

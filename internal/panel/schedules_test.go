@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -189,7 +190,7 @@ func TestScheduledRestartSkipsWhenPlayersAreOnline(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('players-online-restart','players-online-schedule-server','Do not interrupt players','restart','* * * * *',1,1,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('players-online-restart','players-online-schedule-server','server','players-online-schedule-server','Do not interrupt players','restart','* * * * *',1,1,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	a.schedulePlayers = func(context.Context, string) (int, error) { return 4, nil }
@@ -232,7 +233,7 @@ func TestScheduledRestartContinuesWhenPlayerCountIsUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('unknown-player-count-restart','unknown-player-count-schedule-server','Proceed on query failure','restart','* * * * *',1,1,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('unknown-player-count-restart','unknown-player-count-schedule-server','server','unknown-player-count-schedule-server','Proceed on query failure','restart','* * * * *',1,1,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	a.schedulePlayers = func(context.Context, string) (int, error) { return 0, errors.New("query unavailable") }
@@ -327,7 +328,7 @@ func TestScheduledCommandDispatchesAndKeepsCommandOutOfRunHistory(t *testing.T) 
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if _, err = d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,command_enc,next_run) VALUES('command-run','command-run-server','Maintenance note','command','* * * * *',1,?,?)`, commandEnc, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+	if _, err = d.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,cron,enabled,command_enc,next_run) VALUES('command-run','command-run-server','server','command-run-server','Maintenance note','command','* * * * *',1,?,?)`, commandEnc, scheduleTimestamp(now.Add(-time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	var sent string
@@ -507,6 +508,64 @@ func TestLifecycleSchedulesRequireControlAndPersistAction(t *testing.T) {
 			t.Fatalf("%s schedule was not persisted correctly: %#v", action, item)
 		}
 	}
+	var scheduleID string
+	if err = d.QueryRow(`SELECT id FROM backup_schedules WHERE scope_id='lifecycle-schedule-server' AND action='start'`).Scan(&scheduleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`UPDATE backup_schedules SET last_status='running' WHERE id=?`, scheduleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO backup_schedule_runs(id,schedule_id,server_id,started_at,status) VALUES('running-schedule-history',?,?,?,'running')`, scheduleID, "lifecycle-schedule-server", scheduleTimestamp(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if response := testRequest(h, http.MethodPut, "/api/servers/lifecycle-schedule-server/schedules/"+scheduleID, `{"enabled":false}`, token); response.Code != http.StatusConflict {
+		t.Fatalf("edited a running server schedule: %d %s", response.Code, response.Body.String())
+	}
+	if response := testRequest(h, http.MethodDelete, "/api/servers/lifecycle-schedule-server/schedules/"+scheduleID, `{}`, token); response.Code != http.StatusConflict {
+		t.Fatalf("deleted a running server schedule: %d %s", response.Code, response.Body.String())
+	}
+	var retained int
+	if err = d.QueryRow(`SELECT count(*) FROM backup_schedule_runs WHERE id='running-schedule-history'`).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("rejected deletion removed live run history: count=%d err=%v", retained, err)
+	}
+}
+
+func TestScheduleRunHistoryRetainsOneHundredRows(t *testing.T) {
+	a, d, _ := testApp(t)
+	for _, scope := range []struct {
+		id     string
+		typeID string
+	}{
+		{id: "server-retention", typeID: "server"},
+		{id: "scoped-retention", typeID: "global"},
+	} {
+		for index := 0; index < 105; index++ {
+			runID := fmt.Sprintf("%s-run-%03d", scope.id, index)
+			started := scheduleTimestamp(time.Now().Add(time.Duration(index-105) * time.Minute))
+			if _, err := d.Exec(`INSERT INTO backup_schedule_runs(id,schedule_id,server_id,started_at,status) VALUES(?,?, 'retention-target',?,'success')`, runID, scope.id, started); err != nil {
+				t.Fatal(err)
+			}
+		}
+		latestID := scope.id + "-latest"
+		if _, err := d.Exec(`INSERT INTO backup_schedule_runs(id,schedule_id,server_id,started_at,status) VALUES(?,?, 'retention-target',?,'running')`, latestID, scope.id, scheduleTimestamp(time.Now().Add(time.Second))); err != nil {
+			t.Fatal(err)
+		}
+		if scope.typeID == "server" {
+			if err := a.finishScheduleRun(scope.id, "retention-target", "start", latestID, "success", "started"); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			a.finishScopedSchedule(scope.id, backupSchedule{ID: scope.id, ScopeType: "global", Action: "start"}, 1, 0, 0, "completed")
+		}
+		var retained int
+		if err := d.QueryRow(`SELECT count(*) FROM backup_schedule_runs WHERE schedule_id=?`, scope.id).Scan(&retained); err != nil || retained != 100 {
+			t.Fatalf("%s schedule retained %d rows, err=%v; want 100", scope.typeID, retained, err)
+		}
+		var latest int
+		if err := d.QueryRow(`SELECT count(*) FROM backup_schedule_runs WHERE schedule_id=? AND id=?`, scope.id, latestID).Scan(&latest); err != nil || latest != 1 {
+			t.Fatalf("%s schedule pruned the latest run: count=%d err=%v", scope.typeID, latest, err)
+		}
+	}
 }
 
 func TestScheduledUpdateSkipsOnlinePlayersAndContinuesWhenQueryFails(t *testing.T) {
@@ -519,7 +578,7 @@ func TestScheduledUpdateSkipsOnlinePlayersAndContinuesWhenQueryFails(t *testing.
 		t.Fatal(err)
 	}
 	firstRun := scheduleTimestamp(time.Now().Add(-time.Second))
-	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('scheduled-update','scheduled-update-server','Nightly update','update','* * * * *',1,1,?)`, firstRun); err != nil {
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('scheduled-update','scheduled-update-server','server','scheduled-update-server','Nightly update','update','* * * * *',1,1,?)`, firstRun); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
@@ -650,7 +709,7 @@ func TestLifecycleScheduleRunsAndRecordsSkippedOutcomes(t *testing.T) {
 	now := time.Now()
 	for _, action := range []string{"start", "stop"} {
 		id := "lifecycle-" + action
-		if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,next_run) VALUES(?,?,?,?,'* * * * *',1,?)`, id, "lifecycle-run-server", "Test "+action, action, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+		if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,cron,enabled,next_run) VALUES(?,?,'server',?,?,?,'* * * * *',1,?)`, id, "lifecycle-run-server", "lifecycle-run-server", "Test "+action, action, scheduleTimestamp(now.Add(-time.Second))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -790,7 +849,7 @@ func TestRestartScheduleRunsInBackgroundAndPersistsResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,warn_players,warning_seconds,next_run) VALUES('background-restart','background-restart-server','Test restart','restart','* * * * *',1,1,60,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,scope_type,scope_id,name,action,cron,enabled,warn_players,warning_seconds,next_run) VALUES('background-restart','background-restart-server','server','background-restart-server','Test restart','restart','* * * * *',1,1,60,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	started := make(chan struct{})
