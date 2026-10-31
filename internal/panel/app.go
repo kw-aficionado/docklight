@@ -43,6 +43,12 @@ type App struct {
 	runtimePing        func(context.Context) error
 	diskAlertMu        sync.Mutex
 	diskProbe          func(string) (diskUsage, error)
+	watchdogMu         sync.Mutex
+	watchdogStates     map[string]*watchdogRuntimeState
+	watchdogQuery      func(context.Context, Server, rune.Rune) error
+	watchdogHeal       func(context.Context, Server) error
+	watchdogStart      func(context.Context, Server) error
+	watchdogWait       func(context.Context, time.Duration) error
 	rateMu             sync.Mutex
 	loginIPs           map[string][]time.Time
 	loginUsers         map[string][]time.Time
@@ -79,7 +85,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}}
 }
 
 func EnsureAdmin(d *sql.DB, username, password string) (string, error) {
@@ -191,6 +197,7 @@ func (a *App) Router() http.Handler {
 			priv.Delete("/servers/{id}/schedules/{scheduleID}", a.deleteBackupSchedule)
 			priv.Get("/servers/{id}/schedules/{scheduleID}/runs", a.listBackupScheduleRuns)
 			priv.Get("/servers/{id}/crashes", a.listServerCrashes)
+			priv.Put("/servers/{id}/watchdog", a.updateWatchdogSettings)
 			priv.Get("/notifications", a.admin(a.getNotificationSettings))
 			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
 			priv.Post("/notifications/test", a.admin(a.testNotification))
@@ -750,11 +757,14 @@ func (a *App) getServer(id string) (Server, error) {
 	var s Server
 	var env, ports string
 	var installed int
-	err := a.db.QueryRow(`SELECT id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage)
+	var watchdogEnabled, watchdogQuarantined int
+	err := a.db.QueryRow(`SELECT id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined)
 	if err != nil {
 		return s, err
 	}
 	s.Installed = installed != 0
+	s.WatchdogEnabled = watchdogEnabled != 0
+	s.WatchdogQuarantined = watchdogQuarantined != 0
 	if json.Unmarshal([]byte(env), &s.Env) != nil {
 		s.Env = map[string]string{}
 	}

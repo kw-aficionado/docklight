@@ -30,4 +30,4 @@ CPU limits are configured in cores, memory limits in MiB; zero means unlimited. 
 
 ## Current boundaries
 
-There is no automatic update/reinstall path, remote backup target, scheduler, sidecar network, watchdog, external reachability probe, or history of resource metrics in this release. The container can still be inspected with Docker on the host, and server files remain under the configured database directory.
+There is no automatic update/reinstall path, remote backup target, realm or global scheduler, sidecar network, external reachability probe, or history of resource metrics in this release. Query-based automatic recovery is an opt-in setting documented in [runtime monitoring](monitoring.md). The container can still be inspected with Docker on the host, and server files remain under the configured database directory.

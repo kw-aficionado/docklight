@@ -30,8 +30,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 7 {
-		t.Fatalf("expected 7 migrations, got %d", count)
+	if count != 9 {
+		t.Fatalf("expected 9 migrations, got %d", count)
 	}
 	var notificationTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_settings'`).Scan(&notificationTable); err != nil || notificationTable != "notification_settings" {
@@ -44,6 +44,14 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var alertTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='system_alert_state'`).Scan(&alertTable); err != nil || alertTable != "system_alert_state" {
 		t.Fatalf("system alert state table missing: name=%q err=%v", alertTable, err)
+	}
+	var watchdogColumns int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name IN ('watchdog_enabled','watchdog_quarantined','watchdog_last_attempt')`).Scan(&watchdogColumns); err != nil || watchdogColumns != 3 {
+		t.Fatalf("watchdog columns missing: count=%d err=%v", watchdogColumns, err)
+	}
+	var watchdogHealsTable int
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='server_watchdog_heals'`).Scan(&watchdogHealsTable); err != nil || watchdogHealsTable != 1 {
+		t.Fatalf("watchdog heal history table missing: count=%d err=%v", watchdogHealsTable, err)
 	}
 	rows, err := d.Query(`PRAGMA table_info(servers)`)
 	if err != nil {

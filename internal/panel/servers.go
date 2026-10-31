@@ -25,20 +25,22 @@ import (
 )
 
 type Server struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	GameskillID   string            `json:"gameskill_id"`
-	Status        string            `json:"status"`
-	Installed     bool              `json:"installed"`
-	Env           map[string]string `json:"env"`
-	Ports         map[string]int    `json:"ports"`
-	DataDir       string            `json:"-"`
-	ContainerID   string            `json:"-"`
-	CPULimit      float64           `json:"cpu_limit"`
-	MemoryLimitMB int               `json:"memory_limit_mb"`
-	ErrorMessage  string            `json:"error_message,omitempty"`
-	Permissions   []string          `json:"permissions,omitempty"`
-	CreatedAt     string            `json:"created_at"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	GameskillID         string            `json:"gameskill_id"`
+	Status              string            `json:"status"`
+	Installed           bool              `json:"installed"`
+	Env                 map[string]string `json:"env"`
+	Ports               map[string]int    `json:"ports"`
+	DataDir             string            `json:"-"`
+	ContainerID         string            `json:"-"`
+	CPULimit            float64           `json:"cpu_limit"`
+	MemoryLimitMB       int               `json:"memory_limit_mb"`
+	WatchdogEnabled     bool              `json:"watchdog_enabled"`
+	WatchdogQuarantined bool              `json:"watchdog_quarantined"`
+	ErrorMessage        string            `json:"error_message,omitempty"`
+	Permissions         []string          `json:"permissions,omitempty"`
+	CreatedAt           string            `json:"created_at"`
 }
 type createServerInput struct {
 	Name          string            `json:"name"`
@@ -58,7 +60,7 @@ type installJob struct {
 
 func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 	u := principal(r)
-	rows, e := a.db.Query(`SELECT id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message FROM servers ORDER BY created_at DESC`)
+	rows, e := a.db.Query(`SELECT id,name,gameskill_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers ORDER BY created_at DESC`)
 	if e != nil {
 		writeError(w, 500, "could not list servers")
 		return
@@ -67,11 +69,13 @@ func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s Server
 		var in, ports string
-		var installed int
-		if rows.Scan(&s.ID, &s.Name, &s.GameskillID, &s.Status, &installed, &in, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage) != nil {
+		var installed, watchdogEnabled, watchdogQuarantined int
+		if rows.Scan(&s.ID, &s.Name, &s.GameskillID, &s.Status, &installed, &in, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined) != nil {
 			continue
 		}
 		s.Installed = installed != 0
+		s.WatchdogEnabled = watchdogEnabled != 0
+		s.WatchdogQuarantined = watchdogQuarantined != 0
 		_ = json.Unmarshal([]byte(in), &s.Env)
 		_ = json.Unmarshal([]byte(ports), &s.Ports)
 		out = append(out, s)
@@ -333,6 +337,7 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.clearRuntimePending(s.ID)
+	a.resetWatchdog(s.ID)
 	a.releasePorts(s.ID)
 	_, _ = a.db.Exec(`DELETE FROM permissions WHERE scope_type='server' AND scope_id=?`, s.ID)
 	_, _ = a.db.Exec(`DELETE FROM servers WHERE id=?`, s.ID)
@@ -583,6 +588,7 @@ func (a *App) startServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, e.Error())
 		return
 	}
+	a.resetWatchdog(s.ID)
 	a.audit(u, "server.start", "server", s.ID, "")
 	writeJSON(w, 202, map[string]string{"status": "starting"})
 }
@@ -608,6 +614,7 @@ func (a *App) stopServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, e.Error())
 		return
 	}
+	a.resetWatchdog(s.ID)
 	a.audit(u, "server.stop", "server", s.ID, "")
 	writeJSON(w, 200, map[string]string{"status": "stopped"})
 }
@@ -637,10 +644,15 @@ func (a *App) restartServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, e.Error())
 		return
 	}
+	a.resetWatchdog(s.ID)
 	a.audit(u, "server.restart", "server", s.ID, "")
 	writeJSON(w, 202, map[string]string{"status": "starting"})
 }
 func (a *App) start(s Server) error {
+	return a.startWithContext(s, context.Background())
+}
+
+func (a *App) startWithContext(s Server, parent context.Context) error {
 	if !s.Installed {
 		return errors.New("install this server before starting it")
 	}
@@ -648,7 +660,7 @@ func (a *App) start(s Server) error {
 	if err != nil {
 		return fmt.Errorf("load server template %q: %w", s.GameskillID, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, 15*time.Minute)
 	defer cancel()
 	env, err := a.runtimeEnv(s, gs)
 	if err != nil {
@@ -703,7 +715,7 @@ func (a *App) recreateAndStart(ctx context.Context, s Server) error {
 	_, _ = a.db.Exec(`UPDATE servers SET container_id='',status='stopped' WHERE id=?`, s.ID)
 	a.clearRuntimePending(s.ID)
 	s.ContainerID = ""
-	return a.start(s)
+	return a.startWithContext(s, ctx)
 }
 func (a *App) stop(s Server) error {
 	if s.ContainerID == "" {

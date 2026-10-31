@@ -14,6 +14,12 @@ A confirmed incident sets the server to **Needs attention** and records the dete
 
 Docklight checks the filesystem that contains its data directory every five minutes. If available space falls below 10%, it marks the alert active and sends `host.disk_low` to the configured webhook when that event is enabled. The alert rearms when free space reaches 15%, so a continuing low-space condition does not send a message every five minutes. The Notifications page shows current capacity and alert state. The message identifies the server-data and local-backup paths to inspect. Only the Docklight data filesystem is measured; other mounted volumes are not enumerated, and Docklight never deletes files automatically.
 
+## Automatic recovery
+
+Automatic recovery is an opt-in server setting. It is available only for templates with a player-query protocol and requires `server.control`. Docklight probes the local published query port every 20 seconds with a 3-second timeout. Three consecutive failed probes trigger a container recreate and start; another attempt is held back for four minutes. A successful recovery is recorded in audit history and can send the `server.watchdog` webhook event.
+
+After five successful automatic recoveries in a rolling 30-minute window, Docklight pauses automatic recovery and marks the server as quarantined. The server is left running if the last start is still progressing. Manually starting or stopping the server clears the quarantine and recovery counters. A failed start is retried up to three times with 15 seconds between attempts; a final failure is recorded and sent through the watchdog webhook event when enabled.
+
 ## Current limits
 
-The runtime monitor does not restart containers automatically or retain Docker logs as crash artifacts. Review the Console and host Docker logs, then restart a server after addressing the cause. Enable `server.crash` under Notifications to receive confirmed incident events.
+The confirmed-exit monitor does not restart a stopped or missing container, and Docklight does not retain Docker logs as crash artifacts. Automatic recovery only checks query-capable servers that an operator enabled. Review the Console and host Docker logs after an incident. Enable `server.crash` under Notifications to receive confirmed exit events. Docker Engine acceptance for automatic recovery requires a Docker-enabled host.

@@ -22,14 +22,22 @@ type Result struct {
 	Version string   `json:"version,omitempty"`
 }
 
+func queryDeadline(ctx context.Context, max time.Duration) time.Time {
+	deadline := time.Now().Add(max)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		return ctxDeadline
+	}
+	return deadline
+}
+
 func Minecraft(ctx context.Context, host string, port int) (Result, error) {
 	var out Result
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 3*time.Second)
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		return out, fmt.Errorf("Minecraft status query could not connect to port %d", port)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(4 * time.Second))
+	_ = conn.SetDeadline(queryDeadline(ctx, 4*time.Second))
 	addr := []byte(host)
 	var handshake bytes.Buffer
 	writeVarInt(&handshake, 0)
@@ -87,12 +95,12 @@ func Minecraft(ctx context.Context, host string, port int) (Result, error) {
 
 func Bedrock(ctx context.Context, host string, port int) (Result, error) {
 	var out Result
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(host, strconv.Itoa(port)), 2*time.Second)
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "udp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
 		return out, fmt.Errorf("Bedrock status query could not connect to UDP port %d", port)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetDeadline(queryDeadline(ctx, 3*time.Second))
 	var ping bytes.Buffer
 	ping.WriteByte(0x01)
 	_ = binary.Write(&ping, binary.BigEndian, time.Now().UnixMilli())
@@ -130,12 +138,12 @@ var raknetMagic = []byte{0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0
 func A2S(ctx context.Context, host string, port int) (Result, error) {
 	var out Result
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	conn, err := net.DialTimeout("udp", addr, 2*time.Second)
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "udp", addr)
 	if err != nil {
 		return out, fmt.Errorf("A2S query could not connect to UDP port %d", port)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetDeadline(queryDeadline(ctx, 3*time.Second))
 	packet := append([]byte{0xff, 0xff, 0xff, 0xff, 0x54}, []byte("Source Engine Query")...)
 	packet = append(packet, 0)
 	if _, err = conn.Write(packet); err != nil {

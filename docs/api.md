@@ -54,6 +54,7 @@ Password and TOTP endpoints:
 | `DELETE /api/servers/{id}/schedules/{scheduleID}` | Delete a schedule and its run history. |
 | `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
 | `GET /api/servers/{id}/crashes` | Read the 50 most recent confirmed container exits or missing-container incidents; requires `server.view`. |
+| `PUT /api/servers/{id}/watchdog` | Set `{"enabled":true}` or `false` for query-capable templates; requires `server.control`. |
 | `GET /api/notifications` | Read admin-only webhook notification state; secrets and endpoint are never returned. |
 | `PUT /api/notifications` | Save admin-only webhook settings and event filters for backups, container crashes, and host disk alerts. |
 | `POST /api/notifications/test` | Send a signed test event to the configured webhook; admin only. |
@@ -63,7 +64,7 @@ Create a schedule with `{"name":"Nightly","cron":"0 3 * * *","enabled":true}`. T
 
 Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires `server.backup`; schedule management requires `server.schedule`, and creating a backup schedule also requires `server.backup`. API token permissions are intersected with the account's grants.
 
-Webhook notification settings accept `enabled`, `endpoint`, `signing_secret`, `events`, `clear_endpoint`, and `clear_signing_secret`. Supported events are `backup.success` and `backup.failure`. Blank endpoint or signing secret fields preserve the saved value; use the `clear_*` flags to remove them. Endpoint and signing secret are encrypted at rest and omitted from every response. See [notifications](guides/notifications.md) for delivery and signature details.
+Webhook notification settings accept `enabled`, `endpoint`, `signing_secret`, `events`, `clear_endpoint`, and `clear_signing_secret`. Supported events are `backup.success`, `backup.failure`, `server.crash`, `server.watchdog`, and `host.disk_low`. Blank endpoint or signing secret fields preserve the saved value; use the `clear_*` flags to remove them. Endpoint and signing secret are encrypted at rest and omitted from every response. See [notifications](guides/notifications.md) for delivery and signature details.
 
 Example server creation:
 
@@ -99,4 +100,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, crash auto-restart/watchdog, Discord, Telegram, SMTP, non-backup notifications, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior and [monitoring](guides/monitoring.md) for confirmed exit history.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, Discord, Telegram, SMTP, sidecars, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.

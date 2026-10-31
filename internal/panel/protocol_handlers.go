@@ -33,25 +33,15 @@ func (a *App) serverQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "this template does not define a player query protocol")
 		return
 	}
-	port := s.Ports["game"]
-	if (gs.Query.Type == "a2s" || gs.Query.Type == "source") && s.Ports["query"] != 0 {
-		port = s.Ports["query"]
-	}
-	if port == 0 {
+	port, err := queryPort(s, gs)
+	if err != nil {
 		writeError(w, 409, "this server has no allocated query or game port")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	var result gameproto.Result
-	switch gs.Query.Type {
-	case "minecraft", "minecraft-java":
-		result, e = gameproto.Minecraft(ctx, "127.0.0.1", port)
-	case "minecraft-bedrock":
-		result, e = gameproto.Bedrock(ctx, "127.0.0.1", port)
-	case "a2s", "source":
-		result, e = gameproto.A2S(ctx, "127.0.0.1", port)
-	default:
+	result, e := queryAtPort(ctx, gs, port)
+	if e != nil && strings.Contains(e.Error(), "unsupported query protocol") {
 		writeError(w, 400, "the template uses an unsupported query protocol")
 		return
 	}
@@ -60,6 +50,33 @@ func (a *App) serverQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, result)
+}
+
+func queryPort(s Server, gs gameskill.Rune) (int, error) {
+	if gs.Query == nil {
+		return 0, errors.New("this template does not define a player query protocol")
+	}
+	port := s.Ports["game"]
+	if (gs.Query.Type == "a2s" || gs.Query.Type == "source") && s.Ports["query"] != 0 {
+		port = s.Ports["query"]
+	}
+	if port == 0 {
+		return 0, errors.New("this server has no allocated query or game port")
+	}
+	return port, nil
+}
+
+func queryAtPort(ctx context.Context, gs gameskill.Rune, port int) (gameproto.Result, error) {
+	switch gs.Query.Type {
+	case "minecraft", "minecraft-java":
+		return gameproto.Minecraft(ctx, "127.0.0.1", port)
+	case "minecraft-bedrock":
+		return gameproto.Bedrock(ctx, "127.0.0.1", port)
+	case "a2s", "source":
+		return gameproto.A2S(ctx, "127.0.0.1", port)
+	default:
+		return gameproto.Result{}, errors.New("template uses an unsupported query protocol")
+	}
 }
 
 func (a *App) serverRCON(w http.ResponseWriter, r *http.Request) {

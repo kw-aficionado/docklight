@@ -24,6 +24,7 @@ const (
 	notificationBackupSuccess = "backup.success"
 	notificationBackupFailure = "backup.failure"
 	notificationServerCrash   = "server.crash"
+	notificationWatchdog      = "server.watchdog"
 	notificationHostDiskLow   = "host.disk_low"
 )
 
@@ -144,8 +145,8 @@ func (a *App) updateNotificationSettings(w http.ResponseWriter, r *http.Request)
 		current.Events = make([]string, 0, len(in.Events))
 		for _, event := range in.Events {
 			event = strings.TrimSpace(event)
-			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationServerCrash && event != notificationHostDiskLow {
-				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, server.crash, or host.disk_low")
+			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationServerCrash && event != notificationWatchdog && event != notificationHostDiskLow {
+				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, server.crash, server.watchdog, or host.disk_low")
 				return
 			}
 			if !seen[event] {

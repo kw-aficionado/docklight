@@ -12,7 +12,7 @@ Endpoints must use HTTPS. Plain HTTP is allowed only for `localhost` or a loopba
 
 ## Events and request format
 
-Supported event types are `backup.success`, `backup.failure`, `server.crash`, and `host.disk_low`. Both manual and scheduled backup attempts are included. A confirmed container exit or missing container sends `server.crash` with the server name and recorded incident message. The low-disk event fires when the filesystem containing Docklight's panel data drops below 10% free; it rearms after free space reaches 15%. Its message includes available and total capacity plus the server-data and backup paths to inspect. Delivery runs asynchronously after the panel records the state change. A failed delivery does not change the backup or alert state; check the Docklight process log and endpoint availability.
+Supported event types are `backup.success`, `backup.failure`, `server.crash`, `server.watchdog`, and `host.disk_low`. Both manual and scheduled backup attempts are included. A confirmed container exit or missing container sends `server.crash` with the server name and recorded incident message. Automatic recovery sends `server.watchdog` when it starts a recovery, cannot restart the server, or pauses after repeated heals. The low-disk event fires when the filesystem containing Docklight's panel data drops below 10% free; it rearms after free space reaches 15%. Its message includes available and total capacity plus the server-data and backup paths to inspect. Delivery runs asynchronously after the panel records the state change. A failed delivery does not change the backup or alert state; check the Docklight process log and endpoint availability.
 
 Each request is a JSON `POST` with this shape:
 
