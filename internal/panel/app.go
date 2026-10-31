@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +64,9 @@ type App struct {
 	loginIPs              map[string][]time.Time
 	loginUsers            map[string][]time.Time
 	forgotAttempts        map[string][]time.Time
+	passkeyMu             sync.Mutex
+	passkeyCeremonies     map[string]passkeyCeremony
+	passkeyIPs            map[string][]time.Time
 	passwordResetSender   func(context.Context, notificationChannelConfig, string, string) error
 	passwordResetWG       sync.WaitGroup
 	jobsMu                sync.RWMutex
@@ -101,7 +103,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}}
 }
 
 func EnsureAdmin(d *sql.DB, username, password string) (string, error) {
@@ -182,6 +184,8 @@ func (a *App) Router() http.Handler {
 		api.Post("/auth/login", a.login)
 		api.Post("/auth/forgot", a.forgotPassword)
 		api.Post("/auth/reset", a.resetPassword)
+		api.Post("/auth/passkey/login/begin", a.passkeyLoginBegin)
+		api.Post("/auth/passkey/login/finish", a.passkeyLoginFinish)
 		api.Post("/logout", a.auth(a.logout))
 		api.Post("/password", a.auth(a.changePassword))
 		api.Get("/me", a.auth(a.me))
@@ -193,6 +197,11 @@ func (a *App) Router() http.Handler {
 		api.Get("/tokens", a.auth(a.listAPITokens))
 		api.Post("/tokens", a.auth(a.createAPIToken))
 		api.Delete("/tokens/{id}", a.auth(a.deleteAPIToken))
+		api.Get("/passkeys", a.auth(a.listPasskeys))
+		api.Post("/passkeys/register/begin", a.auth(a.passkeyRegistrationBegin))
+		api.Post("/passkeys/register/finish", a.auth(a.passkeyRegistrationFinish))
+		api.Put("/passkeys/{id}", a.auth(a.renamePasskey))
+		api.Delete("/passkeys/{id}", a.auth(a.deletePasskey))
 		api.Group(func(priv chi.Router) {
 			priv.Use(func(next http.Handler) http.Handler {
 				return a.auth(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, r) })
@@ -482,11 +491,12 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func sameOrigin(r *http.Request, origin string) bool {
-	u, err := url.Parse(origin)
-	if err != nil || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+	actual, err := canonicalWebOrigin(origin)
+	if err != nil {
 		return false
 	}
-	return strings.EqualFold(u.Scheme, requestScheme(r)) && strings.EqualFold(u.Host, r.Host)
+	expected, err := canonicalWebOrigin(requestScheme(r) + "://" + r.Host)
+	return err == nil && actual == expected
 }
 
 func requestScheme(r *http.Request) string {

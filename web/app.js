@@ -14,6 +14,29 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
     if (!res.ok) throw new Error(body?.error || body || `Request failed (${res.status})`);
     return body;
   };
+  const decodeBase64URL = value => {
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4));
+    return Uint8Array.from(binary, char => char.charCodeAt(0)).buffer;
+  };
+  const encodeBase64URL = value => {
+    const bytes = new Uint8Array(value);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  };
+  const credentialJSON = credential => {
+    const response = credential.response;
+    const data = { clientDataJSON: encodeBase64URL(response.clientDataJSON) };
+    if (response.attestationObject) data.attestationObject = encodeBase64URL(response.attestationObject);
+    if (response.authenticatorData) data.authenticatorData = encodeBase64URL(response.authenticatorData);
+    if (response.signature) data.signature = encodeBase64URL(response.signature);
+    if (response.userHandle) data.userHandle = encodeBase64URL(response.userHandle);
+    if (response.getTransports) data.transports = response.getTransports();
+    return { id: credential.id, rawId: encodeBase64URL(credential.rawId), type: credential.type, response: data, clientExtensionResults: credential.getClientExtensionResults?.() || {} };
+  };
+  const credentialRequestOptions = options => ({ ...options, challenge: decodeBase64URL(options.challenge), allowCredentials: (options.allowCredentials || []).map(item => ({ ...item, id: decodeBase64URL(item.id) })) });
+  const credentialCreationOptions = options => ({ ...options, challenge: decodeBase64URL(options.challenge), user: { ...options.user, id: decodeBase64URL(options.user.id) }, excludeCredentials: (options.excludeCredentials || []).map(item => ({ ...item, id: decodeBase64URL(item.id) })) });
   const toast = (message, kind = 'info') => {
     const el = document.createElement('div'); el.className = `toast ${kind}`; el.textContent = message; toastRegion.append(el);
     setTimeout(() => { el.classList.add('leaving'); setTimeout(() => el.remove(), 250); }, 4200);
@@ -41,6 +64,11 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
     const loginForm = document.querySelector('#login-form');
     const forgotForm = document.querySelector('#forgot-form');
     const resetForm = document.querySelector('#reset-form');
+    const passkeyButton = document.createElement('button');
+    passkeyButton.className = 'button subtle wide'; passkeyButton.type = 'button'; passkeyButton.textContent = 'Sign in with a passkey';
+    passkeyButton.disabled = !(window.isSecureContext && window.PublicKeyCredential && navigator.credentials?.get);
+    if (passkeyButton.disabled) passkeyButton.title = 'Passkeys need HTTPS or localhost and a compatible browser.';
+    loginForm.querySelector('button[type="submit"]').after(passkeyButton);
     const showLogin = () => { loginForm.classList.remove('hidden'); forgotForm.classList.add('hidden'); resetForm.classList.add('hidden'); loginForm.elements.username.focus(); };
     const showForgot = () => { loginForm.classList.add('hidden'); forgotForm.classList.remove('hidden'); resetForm.classList.add('hidden'); forgotForm.reset(); document.querySelector('#forgot-fields').classList.remove('hidden'); document.querySelector('#forgot-confirmation').classList.add('hidden'); document.querySelector('#forgot-error').textContent=''; forgotForm.elements.identifier.focus(); };
     const showReset = () => { loginForm.classList.add('hidden'); forgotForm.classList.add('hidden'); resetForm.classList.remove('hidden'); resetForm.elements.password.focus(); };
@@ -51,6 +79,16 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
       e.preventDefault(); const data = Object.fromEntries(new FormData(e.currentTarget)); const error = document.querySelector('#login-error'); error.textContent = '';
       try { const out = await api('/api/login', {method:'POST',body:JSON.stringify(data)}); state.user = out.user; await refresh(); render(); }
       catch (err) { error.textContent = err.message; if (/authenticator|six-digit|code/i.test(err.message)) { document.querySelector('#totp-row').classList.remove('hidden'); document.querySelector('[name="totp"]').focus(); } }
+    });
+    passkeyButton.addEventListener('click', async () => {
+      const error = document.querySelector('#login-error'); error.textContent = '';
+      try {
+        const begin = await api('/api/auth/passkey/login/begin', {method:'POST',body:'{}'});
+        const assertion = await navigator.credentials.get({publicKey:credentialRequestOptions(begin.options)});
+        if (!assertion) throw new Error('Passkey sign-in was canceled.');
+        const out = await api('/api/auth/passkey/login/finish', {method:'POST',body:JSON.stringify({session_id:begin.session_id,credential:credentialJSON(assertion)})});
+        state.user = out.user; await refresh(); render();
+      } catch (err) { error.textContent = err.name === 'NotAllowedError' ? 'Passkey sign-in was canceled or did not finish.' : err.message; }
     });
     forgotForm.addEventListener('submit', async event => {
       event.preventDefault(); const error = document.querySelector('#forgot-error'); error.textContent = '';
@@ -602,7 +640,36 @@ import { escapeHTML as esc, formatNumber as fmt } from './ui-utils.mjs';
     form.elements.type.onchange=updateFields;updateFields();
     form.onsubmit=async event=>{event.preventDefault();const data=new FormData(form),kind=data.get('type');let config={};if(kind==='discord')config={url:data.get('discord_url')};else if(kind==='telegram')config={bot_token:data.get('bot_token'),chat_id:data.get('chat_id')};else if(kind==='webhook')config={url:data.get('webhook_url'),signing_secret:data.get('channel_signing_secret')};else config={smtp_host:data.get('smtp_host'),smtp_port:Number(data.get('smtp_port')||587),smtp_username:data.get('smtp_username'),smtp_password:data.get('smtp_password'),from:data.get('from'),to:data.get('to')};const body=JSON.stringify({type:kind,server_id:data.get('server_id'),enabled:form.elements.enabled.checked,config});try{await api(existing?`/api/notifications/${existing.id}`:'/api/notifications',{method:existing?'PUT':'POST',body});closeModal();toast(existing?'Notification channel replaced':'Notification channel saved','success');await renderNotifications()}catch(e){form.querySelector('#notification-channel-error').textContent=e.message}};
   }
-  function showProfile(){modal(`<div class="modal-heading"><div><div class="eyebrow">ACCOUNT</div><h2>${esc(state.user.username)}</h2></div><button class="icon-button" data-close>×</button></div><div class="profile-box"><span class="avatar large-avatar">${esc(state.user.username[0].toUpperCase())}</span><div><b>${esc(state.user.username)}</b><small>${state.user.role==='admin'?'Administrator':'Panel user'}</small></div></div><div class="profile-section"><h3>Two-factor authentication</h3><p class="muted-copy">Add an authenticator code to protect your account.</p><div id="twofactor-area"><span class="muted-copy">Loading…</span></div></div><div class="profile-section"><h3>API tokens</h3><p class="muted-copy">Tokens are shown once when created. Use them as a Bearer token and revoke any token you no longer need.</p><div id="api-token-area"><span class="muted-copy">Loading…</span></div></div><div class="profile-section"><h3>Change password</h3><form id="change-password-form" class="user-manage"><label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label><label>New password<input name="new_password" type="password" minlength="12" autocomplete="new-password" required><small>Use at least 12 characters. You will need to sign in again.</small></label><div id="password-error" class="form-error" role="alert"></div><button class="button subtle" type="submit">Change password</button></form></div><div class="modal-actions"><button class="button danger" id="sign-out">Sign out</button></div>`);document.querySelectorAll('[data-close]').forEach(x=>x.onclick=closeModal);const area=document.querySelector('#twofactor-area');api('/api/2fa/status').then(x=>{area.innerHTML=x.enabled?'<form id="disable-2fa-form" class="user-manage"><span class="status-badge good"><i></i> Enabled</span><label>Account password<input name="password" type="password" autocomplete="current-password" required></label><label>Authenticator code<input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label><button class="button subtle" type="submit">Disable authenticator</button></form>':'<button class="button subtle" id="start-2fa">Set up authenticator</button>';document.querySelector('#start-2fa')?.addEventListener('click',setup2FA);}).catch(e=>area.textContent=e.message);loadAPITokens();document.querySelector('#sign-out').onclick=async()=>{await api('/api/logout',{method:'POST',body:'{}'});closeModal();renderLogin()};}
+  function showProfile(){modal(`<div class="modal-heading"><div><div class="eyebrow">ACCOUNT</div><h2>${esc(state.user.username)}</h2></div><button class="icon-button" data-close>×</button></div><div class="profile-box"><span class="avatar large-avatar">${esc(state.user.username[0].toUpperCase())}</span><div><b>${esc(state.user.username)}</b><small>${state.user.role==='admin'?'Administrator':'Panel user'}</small></div></div><div class="profile-section"><h3>Two-factor authentication</h3><p class="muted-copy">Add an authenticator code to protect your account.</p><div id="twofactor-area"><span class="muted-copy">Loading…</span></div></div><div class="profile-section"><h3>Passkeys</h3><p class="muted-copy">Sign in without a password using a device credential. User verification is required.</p><div id="passkey-area"><span class="muted-copy">Loading…</span></div></div><div class="profile-section"><h3>API tokens</h3><p class="muted-copy">Tokens are shown once when created. Use them as a Bearer token and revoke any token you no longer need.</p><div id="api-token-area"><span class="muted-copy">Loading…</span></div></div><div class="profile-section"><h3>Change password</h3><form id="change-password-form" class="user-manage"><label>Current password<input name="current_password" type="password" autocomplete="current-password" required></label><label>New password<input name="new_password" type="password" minlength="12" autocomplete="new-password" required><small>Use at least 12 characters. You will need to sign in again.</small></label><div id="password-error" class="form-error" role="alert"></div><button class="button subtle" type="submit">Change password</button></form></div><div class="modal-actions"><button class="button danger" id="sign-out">Sign out</button></div>`);document.querySelectorAll('[data-close]').forEach(x=>x.onclick=closeModal);const area=document.querySelector('#twofactor-area');api('/api/2fa/status').then(x=>{area.innerHTML=x.enabled?'<form id="disable-2fa-form" class="user-manage"><span class="status-badge good"><i></i> Enabled</span><label>Account password<input name="password" type="password" autocomplete="current-password" required></label><label>Authenticator code<input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label><button class="button subtle" type="submit">Disable authenticator</button></form>':'<button class="button subtle" id="start-2fa">Set up authenticator</button>';document.querySelector('#start-2fa')?.addEventListener('click',setup2FA);}).catch(e=>area.textContent=e.message);loadPasskeys();loadAPITokens();document.querySelector('#sign-out').onclick=async()=>{await api('/api/logout',{method:'POST',body:'{}'});closeModal();renderLogin()};}
+  async function loadPasskeys(){
+    const area=document.querySelector('#passkey-area');if(!area)return;
+    try{
+      const passkeys=await api('/api/passkeys');
+      area.innerHTML=`<div class="grant-list">${passkeys.map(key=>`<div class="grant-row"><div><b>${esc(key.name)}</b><span><button class="button link" data-rename-passkey="${esc(key.id)}" data-passkey-name="${esc(key.name)}">Rename</button><button class="button link" data-delete-passkey="${esc(key.id)}">Remove</button></span></div><small>Added ${esc(key.created_at)}${key.last_used_at?` · last used ${esc(key.last_used_at)}`:' · never used'}</small></div>`).join('')||'<div class="files-empty">No passkeys registered.</div>'}</div><form id="new-passkey" class="user-manage" style="margin-top:12px"><label>Passkey name<input name="name" maxlength="80" required placeholder="MacBook Touch ID"></label><button class="button subtle" type="submit">Add passkey</button><small id="passkey-support-note" class="muted-copy"></small></form>`;
+      const form=area.querySelector('#new-passkey');
+      const supported=!!(window.isSecureContext&&window.PublicKeyCredential&&navigator.credentials?.create);
+      const submit=form.querySelector('button[type="submit"]');submit.disabled=!supported;
+      if(!supported)area.querySelector('#passkey-support-note').textContent='Passkeys need HTTPS or localhost and a compatible browser.';
+      area.querySelectorAll('[data-rename-passkey]').forEach(button=>button.onclick=async()=>{
+        const name=prompt('Name this passkey',button.dataset.passkeyName);if(name===null)return;
+        try{await api(`/api/passkeys/${button.dataset.renamePasskey}`,{method:'PUT',body:JSON.stringify({name})});toast('Passkey renamed','success');loadPasskeys()}catch(err){toast(err.message,'error')}
+      });
+      area.querySelectorAll('[data-delete-passkey]').forEach(button=>button.onclick=async()=>{
+        if(!confirm('Remove this passkey from your account?'))return;
+        try{await api(`/api/passkeys/${button.dataset.deletePasskey}`,{method:'DELETE'});toast('Passkey removed','success');loadPasskeys()}catch(err){toast(err.message,'error')}
+      });
+      form.onsubmit=async event=>{
+        event.preventDefault();const name=new FormData(form).get('name');
+        try{
+          const begin=await api('/api/passkeys/register/begin',{method:'POST',body:JSON.stringify({name})});
+          const attestation=await navigator.credentials.create({publicKey:credentialCreationOptions(begin.options)});
+          if(!attestation)throw new Error('Passkey registration was canceled.');
+          await api('/api/passkeys/register/finish',{method:'POST',body:JSON.stringify({session_id:begin.session_id,credential:credentialJSON(attestation)})});
+          toast('Passkey added','success');loadPasskeys();
+        }catch(err){toast(err.name==='NotAllowedError'?'Passkey registration was canceled or did not finish.':err.message,'error')}
+      };
+    }catch(err){area.textContent=err.message}
+  }
   async function loadAPITokens(){const area=document.querySelector('#api-token-area');if(!area)return;try{const tokens=await api('/api/tokens');area.innerHTML=`<div class="grant-list">${tokens.map(t=>`<div class="grant-row"><div><b>${esc(t.name)}</b><button class="button link" data-revoke-token="${esc(t.id)}">Revoke</button></div><small>${esc((t.scopes||[]).join(', '))} · created ${esc(t.created_at)}${t.last_used_at?` · used ${esc(t.last_used_at)}`:''}</small></div>`).join('')||'<div class="files-empty">No API tokens yet.</div>'}</div><form id="new-api-token" class="user-manage" style="margin-top:12px"><label>Token name<input name="name" maxlength="80" required placeholder="Deploy script"></label><div class="grant-heading"><h3>Scopes</h3><span>Always limited by your account grants</span></div><div class="grant-checks">${['server.view','server.control','server.console','server.files','server.backup','server.schedule','server.create','server.delete',...(state.user.role==='admin'?['admin']:[])].map(p=>`<label><input type="checkbox" name="scope" value="${p}"><span>${p}</span></label>`).join('')}</div><button class="button subtle" type="submit">Create API token</button></form>`;area.querySelectorAll('[data-revoke-token]').forEach(b=>b.onclick=async()=>{if(!confirm('Revoke this API token?'))return;try{await api(`/api/tokens/${b.dataset.revokeToken}`,{method:'DELETE'});toast('API token revoked','success');loadAPITokens()}catch(e){toast(e.message,'error')}});area.querySelector('#new-api-token').onsubmit=async e=>{e.preventDefault();const form=new FormData(e.currentTarget);try{const created=await api('/api/tokens',{method:'POST',body:JSON.stringify({name:form.get('name'),scopes:form.getAll('scope')})});await loadAPITokens();const current=document.querySelector('#api-token-area');if(current){const reveal=document.createElement('div');reveal.className='totp-secret';reveal.innerHTML=`<small>Copy this token now. It will not be shown again.</small><code>${esc(created.token)}</code><button class="button subtle" type="button" id="copy-api-token">Copy token</button>`;current.prepend(reveal);current.querySelector('#copy-api-token').onclick=()=>navigator.clipboard.writeText(created.token).then(()=>toast('API token copied','success'));}toast('API token created','success')}catch(err){toast(err.message,'error')}};}catch(e){area.textContent=e.message}}
   async function setup2FA(){try{const x=await api('/api/2fa/setup',{method:'POST',body:'{}'});const area=document.querySelector('#twofactor-area');area.innerHTML=`<div class="totp-secret"><small>Enter this key in your authenticator app:</small><code>${esc(x.secret)}</code><small>Provisioning URI</small><code class="uri-code">${esc(x.otpauth_url)}</code></div><form id="verify-2fa"><label>Six-digit code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label><button class="button primary">Verify & enable</button></form>`;document.querySelector('#verify-2fa').onsubmit=async e=>{e.preventDefault();try{await api('/api/2fa/enable',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});toast('Two-factor authentication enabled','success');showProfile()}catch(err){toast(err.message,'error')}};}catch(e){toast(e.message,'error')}}
   function modal(content){closeModal();const layer=document.createElement('div');layer.className='modal-layer';layer.innerHTML=`<div class="modal-backdrop" data-backdrop></div><section class="modal-card" role="dialog" aria-modal="true">${content}</section>`;document.body.append(layer);layer.querySelector('[data-backdrop]').addEventListener('click',closeModal);const first=layer.querySelector('input,select,textarea,button');first?.focus();}

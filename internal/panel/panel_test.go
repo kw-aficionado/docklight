@@ -68,6 +68,10 @@ func TestSameOriginChecksSchemeAndHost(t *testing.T) {
 	if !sameOrigin(r, "https://panel.example") {
 		t.Fatal("same-origin request behind HTTPS reverse proxy was rejected")
 	}
+	r.Host = "panel.example:443"
+	if !sameOrigin(r, "https://panel.example") {
+		t.Fatal("same-origin request with the explicit default HTTPS port was rejected")
+	}
 }
 
 func TestEmbeddedUIAndHealthRoutes(t *testing.T) {

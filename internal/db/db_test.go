@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 24 {
-		t.Fatalf("expected 24 migrations, got %d", count)
+	if count != 25 {
+		t.Fatalf("expected 25 migrations, got %d", count)
 	}
 	for _, column := range []string{"protocol", "port"} {
 		var found int
@@ -89,13 +89,13 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 			t.Fatalf("catalog source migration is missing %q: count=%d err=%v", column, found, err)
 		}
 	}
-	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens"} {
+	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens", "passkey_credentials"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("catalog migration is missing table %q: count=%d err=%v", table, found, err)
 		}
 	}
-	for _, column := range []string{"email"} {
+	for _, column := range []string{"email", "webauthn_user_handle"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('users') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("password reset migration is missing users.%q: count=%d err=%v", column, found, err)

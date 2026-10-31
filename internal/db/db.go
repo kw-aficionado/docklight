@@ -785,6 +785,45 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 25 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "users", "webauthn_user_handle") {
+			if _, err = tx.Exec(`ALTER TABLE users ADD COLUMN webauthn_user_handle TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_webauthn_handle ON users(webauthn_user_handle) WHERE webauthn_user_handle<>''`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS passkey_credentials (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			credential_id BLOB NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			credential_enc TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_used_at TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_passkey_credentials_user ON passkey_credentials(user_id,created_at)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(25)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

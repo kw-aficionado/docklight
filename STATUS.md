@@ -8,7 +8,7 @@ This checkout began empty on 2026-10-31. The product identity is **Docklight** w
 | --- | --- | --- |
 | CLI and configuration | `serve`, `version`, `gen-config`, `reset-password`, `reset-2fa`; generated session key and one-time admin password; config is not overwritten | Unit and local process smoke checks |
 | SQLite | SQLite schema with numbered migrations; WAL mode; foreign keys; audit, users, grants, template definitions, servers, ports, and API tokens | Migration tests and panel API tests |
-| Authentication | Argon2id passwords, expiring HS256 sessions, sign-in and reset rate limits, TOTP with replay rejection, password changes and email recovery, hashed scoped API tokens | Security and panel tests |
+| Authentication | Argon2id passwords, expiring HS256 sessions, sign-in and reset rate limits, TOTP with replay rejection, discoverable WebAuthn passkeys, password changes and email recovery, hashed scoped API tokens | Security and panel tests |
 | Users and access | Admin/user roles; global, realm, template, and server grants; API enforcement on listing, control, files, backups, console, and template creation | RBAC tests, including inaccessible-server and realm-visibility checks |
 | Templates | Bounded YAML subset parser and validator; six embedded templates; private app-stack schema; protected mount, capability, reserved variable, and setting validation | Parser, secret interpolation, network alias, and built-in template tests |
 | Container lifecycle | Direct Docker Engine API client; install container, logs, start/readiness polling, stop, restart, deletion, port mappings, shared stack CPU/RAM limits, ownership repair, confirmed exit tracking, private per-server networks and sidecars | API/runtime-monitor tests plus fake Docker Engine lifecycle tests; no Docker Engine was available for live lifecycle tests |
@@ -74,9 +74,13 @@ Administrators can set a unique account email. Public forgot-password requests a
 
 Tests cover identical responses for unknown accounts, accounts without email, and missing SMTP setup; recipient routing; configured-origin links; hash-only storage; token expiry and replay; session invalidation; audit history; and unique validated emails. Migration 24 adds the account email and reset-token table. SMTP transport is tested independently with an in-process protocol fixture; external mail delivery and live browser review remain pending.
 
+## Phase 2 passkeys
+
+Users can add, rename, and remove their own passkeys from Account. Passkey sign-in is discoverable and usernameless; registration and sign-in require user verification and a resident credential. Ceremony state stays server-side, is single-use, and expires after five minutes. The RP ID follows the request hostname, the origin honors `X-Forwarded-Proto`, and the browser must use HTTPS or localhost. Credential records are encrypted with the panel secret; names, added time, and last-used time are shown in the account panel. API, origin, timeout, storage, and rate-limit tests cover the server paths. A live authenticator/browser ceremony still needs device-level acceptance.
+
 ## Not implemented
 
-- Phase 2: scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; passkeys.
+- Phase 2: scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes.
 - Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, cross-server ban automation, and importers.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.

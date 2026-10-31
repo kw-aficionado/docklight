@@ -5,7 +5,7 @@
 - The workspace was empty, so this is a new implementation rather than an extension of an existing checkout.
 - The local environment has no Docker executable or daemon, and DNS lookup for `proxy.golang.org` fails. Docker-dependent acceptance checks cannot run here, and dependencies are limited to modules already present in the Go cache.
 - The Docker Engine is accessed through its versioned HTTP API over the configured Unix socket instead of the Docker SDK. This keeps builds reproducible offline and CGO-free while retaining the same Engine behavior.
-- JWT HS256, WebSocket framing, and the small YAML subset needed by the template schema are implemented in this repository because their upstream modules are not available locally. These boundaries are documented and covered by local tests; broader YAML 1.2 compatibility and browser passkeys are not claimed.
+- JWT HS256, WebSocket framing, and the small YAML subset needed by the template schema are implemented in this repository because their upstream modules were unavailable during the first slice. These boundaries are documented and covered by local tests; browser passkeys were postponed from that slice and are now implemented with the vetted WebAuthn module below.
 - The web interface is a self-contained embedded HTML/CSS/JavaScript app rather than Svelte/Tailwind. No frontend packages are cached and the machine has no package-registry DNS. The shipped interface has no CDN or runtime network dependency.
 - The initial release targets the functional Phase 1 core. Phase 2-4 features remain out of scope and will be listed in STATUS.md rather than shown as working controls.
 
@@ -63,6 +63,13 @@
 - Realm names are unique without regard to ASCII letter case. Deleting a realm detaches servers, removes realm grants, and cascades per-user collapsed preferences; it does not alter server data or runtime state.
 - Server grants combine with OR logic across global, realm, template, and server scopes. Realm listings omit inaccessible metadata and calculate counts from the caller's visible servers. API-token scopes remain an additional upper bound.
 - Collapsed sections are stored per user. The admin realm manager owns CRUD, ordering, and server moves; the server overview groups authorized servers by realm.
+
+## 2026-10-31: WebAuthn passkeys
+
+- Passkeys use `github.com/go-webauthn/webauthn` for ceremony and signature verification rather than custom cryptography. Discoverable credentials and required user verification support username-free sign-in and account recovery when TOTP is enabled.
+- Each account gets an opaque random 64-byte WebAuthn user handle on first passkey registration; usernames and email addresses are not used as handles. Credential records are encrypted with the existing panel secret, while the credential ID remains indexed for credential lookup.
+- Challenges and library session state live in server memory, are one-use, and expire within five minutes. The RP ID is derived from the request hostname; the origin is bound to the matching host and HTTPS (or localhost). `X-Forwarded-Proto` supplies the external scheme behind TLS termination.
+- Browser flows are implemented with the existing embedded JavaScript app. A physical authenticator and a live HTTPS deployment are still required for full device-level acceptance.
 
 ## 2026-10-31: SFTP and SMB backup protocols
 

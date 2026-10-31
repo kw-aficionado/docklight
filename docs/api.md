@@ -28,6 +28,20 @@ Password and TOTP endpoints:
 | `POST /api/2fa/disable` | Disable TOTP with `{"password":"…","code":"123456"}`. |
 | `GET /api/me` | Current user summary and visible server count. |
 
+Passkey endpoints:
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /api/auth/passkey/login/begin` | Public; begin a usernameless passkey sign-in. |
+| `POST /api/auth/passkey/login/finish` | Public; verify `{ "session_id": "…", "credential": {…} }`, then issue the normal session cookie and token. |
+| `GET /api/passkeys` | List the signed-in user's passkey names, added times, and last-used times. |
+| `POST /api/passkeys/register/begin` | Start self-service registration with `{ "name": "MacBook Touch ID" }`. |
+| `POST /api/passkeys/register/finish` | Verify `{ "session_id": "…", "credential": {…} }` and save the passkey. |
+| `PUT /api/passkeys/{id}` | Rename one of the signed-in user's passkeys with `{ "name": "…" }`. |
+| `DELETE /api/passkeys/{id}` | Remove one of the signed-in user's passkeys. |
+
+Registration and sign-in require user verification and discoverable credentials. Each begin response contains WebAuthn `options` and an opaque `session_id`; the server keeps that ceremony state, accepts it once, and expires it after five minutes. Passkeys require HTTPS, with localhost allowed for local setup. The RP ID uses the request hostname and the origin scheme honors `X-Forwarded-Proto`; a reverse proxy should preserve `Host` and set that header. Credential state is encrypted at rest with the panel secret. A passkey sign-in also satisfies account recovery for users who have TOTP enabled.
+
 ## Templates and servers
 
 | Method and path | Purpose |

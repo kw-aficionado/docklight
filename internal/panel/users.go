@@ -237,6 +237,7 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 	_, _ = a.db.Exec(`DELETE FROM permissions WHERE user_id=?`, id)
 	_, _ = a.db.Exec(`DELETE FROM api_tokens WHERE user_id=?`, id)
 	_, _ = a.db.Exec(`DELETE FROM password_reset_tokens WHERE user_id=?`, id)
+	_, _ = a.db.Exec(`DELETE FROM passkey_credentials WHERE user_id=?`, id)
 	if _, e := a.db.Exec(`DELETE FROM users WHERE id=?`, id); e != nil {
 		writeError(w, 500, "could not delete user")
 		return
