@@ -6,7 +6,7 @@ Docklight is a self-hosted control panel for Docker game servers and apps. It ru
 
 The browser and product identity use **Docklight**. The current binary, CLI, service, and default filesystem paths still use `yggdrasil` while the implementation transitions from its original internal name.
 
-The current checkout contains the Phase 1 core and a local encrypted backup slice. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
+The current checkout contains the Phase 1 core plus local encrypted backups and per-server backup scheduling. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
 
 ## Install on Debian or Ubuntu
 
@@ -34,7 +34,7 @@ A release repository is not configured in this source checkout. Until binaries a
 2. Create the server, fill its declared settings, and set optional CPU and memory limits.
 3. Select **Install**. The Console shows install output while the installer runs.
 4. The status changes to **Running** only after the server is ready; web apps must also answer on their published web port.
-5. Use **Console**, **Files**, **Backups**, and **Settings** on the server page. Stop a server before creating or restoring a backup.
+5. Use **Console**, **Files**, **Backups**, **Schedules**, and **Settings** on the server page. Stop a server before creating, restoring, or scheduling a backup.
 
 The built-in templates are Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, and Cloudflare Tunnel. Minecraft Java RCON is bound to loopback on the host. The panel allocates ports from `ports.range_min` through `ports.range_max`.
 

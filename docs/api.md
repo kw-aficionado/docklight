@@ -39,17 +39,24 @@ Password and TOTP endpoints:
 | `POST /api/servers/{id}/install` | Start installation; returns `202` and a log URL. Requires `server.control`. |
 | `GET /api/servers/{id}/install/status` | Poll install state and recent lines. Requires `server.view`. |
 | `POST /api/servers/{id}/start`, `/stop`, `/restart` | Control lifecycle; requires `server.control`. |
+| `GET /api/servers/{id}/stats` | Current Docker CPU and memory sample; requires `server.view`. |
+| `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. |
+| `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |
 | `GET /api/servers/{id}/backups` | List encrypted local backups; requires `server.backup`. |
 | `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; verifies it before saving. |
 | `POST /api/servers/{id}/backups/prune` | Apply configured retention or a JSON `keep` count from 1 to 100. |
 | `POST /api/servers/{id}/backups/{backupID}/verify` | Verify the checksum, encryption, and archive structure. |
 | `POST /api/servers/{id}/backups/{backupID}/restore` | Restore after verifying; server must be stopped. |
 | `DELETE /api/servers/{id}/backups/{backupID}` | Delete a local backup. |
-| `GET /api/servers/{id}/stats` | Current Docker CPU and memory sample; requires `server.view`. |
-| `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. |
-| `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |
+| `GET /api/servers/{id}/schedules` | List per-server backup schedules; requires `server.schedule`. |
+| `POST /api/servers/{id}/schedules` | Create an enabled backup schedule from a five- or six-field cron expression; requires `server.schedule` and `server.backup`. |
+| `PUT /api/servers/{id}/schedules/{scheduleID}` | Change the name, cron expression, or enabled state. |
+| `DELETE /api/servers/{id}/schedules/{scheduleID}` | Delete a schedule and its run history. |
+| `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
 
-Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires the separate `server.backup` permission. API token permissions are intersected with the account's grants.
+Create a schedule with `{"name":"Nightly","cron":"0 3 * * *","enabled":true}`. The enabled field may be omitted; new schedules are enabled by default. Five-field cron uses minute, hour, day of month, month, and weekday. Six-field cron adds seconds first. Times are interpreted in the panel host local timezone. A scheduled backup runs only when the server is stopped; otherwise the failed attempt is recorded and the next cron time remains scheduled.
+
+Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires `server.backup`; schedule management requires `server.schedule`, and creating a backup schedule also requires `server.backup`. API token permissions are intersected with the account's grants.
 
 Example server creation:
 
@@ -60,7 +67,7 @@ curl -sS http://127.0.0.1:8080/api/servers \
   -d '{"name":"Survival","gameskill_id":"minecraft-java","env":{"EULA":"true","RCON_PASSWORD":"a-generated-password"},"cpu_limit":2,"memory_limit_mb":4096}'
 ```
 
-`POST /api/tokens` accepts a name and a list of scopes from the permission catalog (`server.view`, `server.control`, `server.console`, `server.files`, `server.backup`, `server.create`, `server.delete`). Administrators may also select `admin`. A token's permissions never exceed its account grants.
+`POST /api/tokens` accepts a name and a list of scopes from the permission catalog (`server.view`, `server.control`, `server.console`, `server.files`, `server.backup`, `server.schedule`, `server.create`, `server.delete`). Administrators may also select `admin`. A token's permissions never exceed its account grants.
 
 ## Files and live streams
 
@@ -85,4 +92,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedules, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior.

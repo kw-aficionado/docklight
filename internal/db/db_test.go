@@ -30,8 +30,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 {
-		t.Fatalf("expected 3 migrations, got %d", count)
+	if count != 4 {
+		t.Fatalf("expected 4 migrations, got %d", count)
 	}
 	rows, err := d.Query(`PRAGMA table_info(servers)`)
 	if err != nil {
@@ -59,5 +59,15 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	}
 	if backupsTable != 1 {
 		t.Fatalf("version 3 did not create server_backups, found %d tables", backupsTable)
+	}
+	var schedulesTable, runsTable int
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='backup_schedules'`).Scan(&schedulesTable); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='backup_schedule_runs'`).Scan(&runsTable); err != nil {
+		t.Fatal(err)
+	}
+	if schedulesTable != 1 || runsTable != 1 {
+		t.Fatalf("version 4 did not create schedule tables: schedules=%d runs=%d", schedulesTable, runsTable)
 	}
 }

@@ -92,46 +92,67 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if pathsOverlap(s.DataDir, a.backupRoot) {
-		writeError(w, http.StatusConflict, "backup directory overlaps this server's data directory; set backups.path outside the servers directory")
+	item, pruned, warning, err := a.createBackupSnapshot(s)
+	if err != nil {
+		var operationErr *backupOperationError
+		if errors.As(err, &operationErr) {
+			writeError(w, operationErr.status, operationErr.message)
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
+	}
+	u := principal(r)
+	a.audit(u, "server.backup.create", "backup", item.ID, fmt.Sprintf("server=%s files=%d bytes=%d", s.ID, item.Files, item.DataBytes))
+	response := map[string]any{"backup": item, "pruned": pruned}
+	if warning != "" {
+		response["warning"] = warning
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
+type backupOperationError struct {
+	status  int
+	message string
+}
+
+func (e *backupOperationError) Error() string { return e.message }
+
+func (a *App) createBackupSnapshot(s Server) (backupRecord, int, string, error) {
+	fail := func(status int, message string) (backupRecord, int, string, error) {
+		return backupRecord{}, 0, "", &backupOperationError{status: status, message: message}
+	}
+	if pathsOverlap(s.DataDir, a.backupRoot) {
+		return fail(http.StatusConflict, "backup directory overlaps this server's data directory; set backups.path outside the servers directory")
 	}
 	if err := os.MkdirAll(a.backupRoot, 0700); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create the backup directory; check backups.path and panel storage permissions")
-		return
+		return fail(http.StatusInternalServerError, "could not create the backup directory; check backups.path and panel storage permissions")
 	}
 	if err := ensureBackupDirectory(a.backupRoot); err != nil {
-		writeError(w, http.StatusConflict, "backup path must be a real directory without a symbolic link")
-		return
+		return fail(http.StatusConflict, "backup path must be a real directory without a symbolic link")
 	}
 	folder := filepath.Join(a.backupRoot, s.ID)
 	if err := os.MkdirAll(folder, 0700); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create the server backup directory; check panel storage permissions")
-		return
+		return fail(http.StatusInternalServerError, "could not create the server backup directory; check panel storage permissions")
 	}
 	if err := ensureBackupDirectory(folder); err != nil {
-		writeError(w, http.StatusConflict, "server backup path must be a real directory without a symbolic link")
-		return
+		return fail(http.StatusConflict, "server backup path must be a real directory without a symbolic link")
 	}
 	if err := os.Chmod(a.backupRoot, 0700); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not secure the backup directory; check its owner and permissions")
-		return
+		return fail(http.StatusInternalServerError, "could not secure the backup directory; check its owner and permissions")
 	}
 	if err := os.Chmod(folder, 0700); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not secure the server backup directory; check its owner and permissions")
-		return
+		return fail(http.StatusInternalServerError, "could not secure the server backup directory; check its owner and permissions")
 	}
 	id, err := newID()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not generate a backup ID")
-		return
+		return fail(http.StatusInternalServerError, "could not generate a backup ID")
 	}
 	temporary := filepath.Join(folder, "."+id+".tmp")
 	final := filepath.Join(folder, id+backupExtension)
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create the backup file; check free disk space and directory permissions")
-		return
+		return fail(http.StatusInternalServerError, "could not create the backup file; check free disk space and directory permissions")
 	}
 	summary, createErr := backup.Create(file, s.DataDir, []byte(a.cfg.Auth.SecretKey))
 	if createErr == nil {
@@ -143,8 +164,7 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	if createErr != nil {
 		_ = os.Remove(temporary)
-		writeError(w, http.StatusInternalServerError, "backup failed: "+createErr.Error())
-		return
+		return fail(http.StatusInternalServerError, "backup failed: "+createErr.Error())
 	}
 	checksum, size, err := checksumFile(temporary)
 	if err == nil {
@@ -157,34 +177,28 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		_ = os.Remove(temporary)
-		writeError(w, http.StatusInternalServerError, "new backup did not pass integrity verification: "+err.Error())
-		return
+		return fail(http.StatusInternalServerError, "new backup did not pass integrity verification: "+err.Error())
 	}
 	if err = os.Rename(temporary, final); err != nil {
 		_ = os.Remove(temporary)
-		writeError(w, http.StatusInternalServerError, "could not finalize the backup file; check free disk space and directory permissions")
-		return
+		return fail(http.StatusInternalServerError, "could not finalize the backup file; check free disk space and directory permissions")
 	}
 	// Keep fixed-width fractional seconds so SQLite text ordering matches time ordering.
 	createdAt := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
 	if _, err = a.db.Exec(`INSERT INTO server_backups(id,server_id,size_bytes,sha256,files,directories,data_bytes,created_at) VALUES(?,?,?,?,?,?,?,?)`, id, s.ID, size, checksum, summary.Files, summary.Directories, summary.Bytes, createdAt); err != nil {
 		_ = os.Remove(final)
-		writeError(w, http.StatusInternalServerError, "backup file was created but its metadata could not be saved; check panel storage and restart the operation")
-		return
+		return fail(http.StatusInternalServerError, "backup file was created but its metadata could not be saved; check panel storage and restart the operation")
 	}
-	u := principal(r)
-	a.audit(u, "server.backup.create", "backup", id, fmt.Sprintf("server=%s files=%d bytes=%d", s.ID, summary.Files, summary.Bytes))
 	item, err := a.getBackup(s.ID, id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "backup was saved but its metadata could not be read")
-		return
+		return fail(http.StatusInternalServerError, "backup was saved but its metadata could not be read")
 	}
 	pruned, _, pruneErr := a.pruneServerBackups(s.ID, a.backupRetention())
-	response := map[string]any{"backup": item, "pruned": pruned}
+	warning := ""
 	if pruneErr != nil {
-		response["warning"] = "backup was saved, but automatic retention cleanup failed; use Prune backups after fixing backup directory permissions"
+		warning = "backup was saved, but automatic retention cleanup failed; use Prune backups after fixing backup directory permissions"
 	}
-	writeJSON(w, http.StatusCreated, response)
+	return item, pruned, warning, nil
 }
 
 func (a *App) verifyBackup(w http.ResponseWriter, r *http.Request) {

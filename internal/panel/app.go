@@ -35,6 +35,7 @@ type App struct {
 	backupRoot string
 	booted     time.Time
 	dataMu     sync.Mutex
+	scheduleMu sync.Mutex
 	rateMu     sync.Mutex
 	loginIPs   map[string][]time.Time
 	loginUsers map[string][]time.Time
@@ -177,6 +178,11 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/backups/{backupID}/verify", a.verifyBackup)
 			priv.Post("/servers/{id}/backups/{backupID}/restore", a.restoreBackup)
 			priv.Delete("/servers/{id}/backups/{backupID}", a.deleteBackup)
+			priv.Get("/servers/{id}/schedules", a.listBackupSchedules)
+			priv.Post("/servers/{id}/schedules", a.createBackupSchedule)
+			priv.Put("/servers/{id}/schedules/{scheduleID}", a.updateBackupSchedule)
+			priv.Delete("/servers/{id}/schedules/{scheduleID}", a.deleteBackupSchedule)
+			priv.Get("/servers/{id}/schedules/{scheduleID}/runs", a.listBackupScheduleRuns)
 			priv.Post("/servers/{id}/install", a.installServer)
 			priv.Get("/servers/{id}/install/status", a.installStatus)
 			priv.Post("/servers/{id}/start", a.startServer)
@@ -667,7 +673,7 @@ func (a *App) auditList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-var permissionCatalog = []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.create", "server.delete"}
+var permissionCatalog = []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.schedule", "server.create", "server.delete"}
 
 func (a *App) visibleServerCount(u User) int {
 	if u.Role == "admin" && (!u.IsAPIToken || u.APIScopes["server.view"]) {

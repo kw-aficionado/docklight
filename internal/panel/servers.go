@@ -319,6 +319,10 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	if err := a.removeServerBackupSchedules(s.ID); err != nil {
+		writeError(w, 500, "local backups were removed but their schedules could not be deleted")
+		return
+	}
 	if err := os.RemoveAll(s.DataDir); err != nil {
 		writeError(w, 500, "Docker removed the container but panel data cleanup failed; fix storage permissions and retry cleanup")
 		return
@@ -1114,7 +1118,7 @@ func maskServer(s Server, d *sql.DB) Server {
 
 func (a *App) decorateServer(u User, s Server) Server {
 	s.Permissions = []string{}
-	for _, permission := range []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.delete"} {
+	for _, permission := range []string{"server.view", "server.control", "server.console", "server.files", "server.backup", "server.schedule", "server.delete"} {
 		if a.allowedServer(u, permission, s.ID, s.GameskillID) {
 			s.Permissions = append(s.Permissions, permission)
 		}

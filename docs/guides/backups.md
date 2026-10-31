@@ -20,6 +20,12 @@ The default policy keeps the 10 most recent backups per server. Set `backups.ret
 
 Deleting a server also removes its local backups. Export or copy the backup directory before deleting a server if those snapshots must be retained.
 
+## Scheduled backups
+
+Open a server's **Schedules** tab and add a backup schedule. Cron expressions accept five fields (`minute hour day month weekday`) or six fields with seconds first. Times use the panel host's local timezone. Schedules are enabled when created; they retain their history until deleted. The latest 50 runs are shown per schedule. A run records success or failure, and retention applies after a successful backup. The server must be stopped when the schedule fires; a running server produces a recorded failure and the next cron occurrence remains scheduled.
+
+Schedule management needs `server.schedule`. Creating a backup schedule also needs `server.backup`. Deleting the server removes its schedules and run history.
+
 ## Current limits
 
-Backups are local only. SFTP, SMB, S3-compatible storage, scheduled jobs, and backup notifications are not implemented yet. Restore replaces the entire server data directory, not only selected files.
+Backups are local only. SFTP, SMB, S3-compatible storage, notifications, and scheduler actions other than backup are not implemented yet. Schedules are per-server; realm and global schedules are not available. Restore replaces the entire server data directory, not only selected files.

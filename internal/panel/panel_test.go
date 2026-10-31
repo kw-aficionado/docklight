@@ -2,6 +2,7 @@ package panel
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -449,6 +450,134 @@ func TestServerBackupCleanupRejectsSymlinkedServerDirectory(t *testing.T) {
 	}
 	if content, err := os.ReadFile(sentinel); err != nil || string(content) != "preserve" {
 		t.Fatalf("symlink target was changed: content=%q err=%v", content, err)
+	}
+}
+
+func TestBackupSchedulesRequirePermissionsAndRunFromWorker(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "scheduled-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "world.dat"), []byte("scheduled world"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('scheduled-server','Scheduled test','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('schedule-user','schedule-user','unused-hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	session, err := a.issue(User{ID: "schedule-user", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	noSchedule := testRequest(h, http.MethodGet, "/api/servers/scheduled-server/schedules", "", session)
+	if noSchedule.Code != http.StatusForbidden {
+		t.Fatalf("user without server.schedule listed schedules: %d %s", noSchedule.Code, noSchedule.Body.String())
+	}
+	if _, err = d.Exec(`INSERT INTO permissions(user_id,scope_type,scope_id,perms) VALUES('schedule-user','server','scheduled-server','server.schedule')`); err != nil {
+		t.Fatal(err)
+	}
+	listed := testRequest(h, http.MethodGet, "/api/servers/scheduled-server/schedules", "", session)
+	if listed.Code != http.StatusOK || listed.Body.String() != "[]\n" {
+		t.Fatalf("schedule permission could not list schedules: %d %s", listed.Code, listed.Body.String())
+	}
+	createdToken := testRequest(h, http.MethodPost, "/api/tokens", `{"name":"schedule token","scopes":["server.schedule","server.backup"]}`, session)
+	if createdToken.Code != http.StatusCreated {
+		t.Fatalf("create schedule token: %d %s", createdToken.Code, createdToken.Body.String())
+	}
+	var token struct {
+		Value string `json:"token"`
+	}
+	if err = json.Unmarshal(createdToken.Body.Bytes(), &token); err != nil || token.Value == "" {
+		t.Fatalf("decode schedule token: %v %s", err, createdToken.Body.String())
+	}
+	tokenDenied := testRequest(h, http.MethodPost, "/api/servers/scheduled-server/schedules", `{"cron":"* * * * *"}`, token.Value)
+	if tokenDenied.Code != http.StatusForbidden {
+		t.Fatalf("API token scope bypassed the server.backup grant: %d %s", tokenDenied.Code, tokenDenied.Body.String())
+	}
+	denied := testRequest(h, http.MethodPost, "/api/servers/scheduled-server/schedules", `{"cron":"* * * * *"}`, session)
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("schedule was created without server.backup: %d %s", denied.Code, denied.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule,server.backup' WHERE user_id='schedule-user' AND scope_type='server' AND scope_id='scheduled-server'`); err != nil {
+		t.Fatal(err)
+	}
+	invalid := testRequest(h, http.MethodPost, "/api/servers/scheduled-server/schedules", `{"cron":"90 * * * *"}`, session)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid cron was accepted: %d %s", invalid.Code, invalid.Body.String())
+	}
+	created := testRequest(h, http.MethodPost, "/api/servers/scheduled-server/schedules", `{"name":"Nightly","cron":"* * * * *"}`, session)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create backup schedule: %d %s", created.Code, created.Body.String())
+	}
+	var item backupSchedule
+	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil || item.ID == "" || !item.Enabled || item.NextRun == "" {
+		t.Fatalf("invalid created schedule: %#v err=%v body=%s", item, err, created.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule' WHERE user_id='schedule-user' AND scope_type='server' AND scope_id='scheduled-server'`); err != nil {
+		t.Fatal(err)
+	}
+	deniedEnable := testRequest(h, http.MethodPut, "/api/servers/scheduled-server/schedules/"+item.ID, `{"enabled":true}`, session)
+	if deniedEnable.Code != http.StatusForbidden {
+		t.Fatalf("schedule was enabled without server.backup: %d %s", deniedEnable.Code, deniedEnable.Body.String())
+	}
+	disabled := testRequest(h, http.MethodPut, "/api/servers/scheduled-server/schedules/"+item.ID, `{"enabled":false}`, session)
+	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"enabled":false`) || !strings.Contains(disabled.Body.String(), `"next_run":""`) {
+		t.Fatalf("disable schedule: %d %s", disabled.Code, disabled.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule,server.backup' WHERE user_id='schedule-user' AND scope_type='server' AND scope_id='scheduled-server'`); err != nil {
+		t.Fatal(err)
+	}
+	enabled := testRequest(h, http.MethodPut, "/api/servers/scheduled-server/schedules/"+item.ID, `{"enabled":true}`, session)
+	if enabled.Code != http.StatusOK || !strings.Contains(enabled.Body.String(), `"enabled":true`) {
+		t.Fatalf("re-enable schedule: %d %s", enabled.Code, enabled.Body.String())
+	}
+	now := time.Now()
+	if _, err = d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id=?`, scheduleTimestamp(now.Add(-time.Second)), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatalf("process due backup schedule: %v", err)
+	}
+	var backupCount int
+	if err = d.QueryRow(`SELECT count(*) FROM server_backups WHERE server_id='scheduled-server'`).Scan(&backupCount); err != nil || backupCount != 1 {
+		t.Fatalf("scheduled backup count=%d err=%v", backupCount, err)
+	}
+	runs := testRequest(h, http.MethodGet, "/api/servers/scheduled-server/schedules/"+item.ID+"/runs", "", session)
+	if runs.Code != http.StatusOK || !strings.Contains(runs.Body.String(), `"status":"success"`) || !strings.Contains(runs.Body.String(), `created backup`) {
+		t.Fatalf("scheduled run was not recorded: %d %s", runs.Code, runs.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE servers SET status='running' WHERE id='scheduled-server'`); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Now()
+	if _, err = d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id=?`, scheduleTimestamp(now.Add(-time.Second)), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatalf("process running-server schedule: %v", err)
+	}
+	if err = d.QueryRow(`SELECT count(*) FROM server_backups WHERE server_id='scheduled-server'`).Scan(&backupCount); err != nil || backupCount != 1 {
+		t.Fatalf("running server was backed up: backups=%d err=%v", backupCount, err)
+	}
+	runs = testRequest(h, http.MethodGet, "/api/servers/scheduled-server/schedules/"+item.ID+"/runs", "", session)
+	if runs.Code != http.StatusOK || !strings.Contains(runs.Body.String(), `"status":"error"`) || !strings.Contains(runs.Body.String(), `stop the server`) {
+		t.Fatalf("failed scheduled backup outcome was not recorded: %d %s", runs.Code, runs.Body.String())
+	}
+	scheduleList := testRequest(h, http.MethodGet, "/api/servers/scheduled-server/schedules", "", session)
+	if scheduleList.Code != http.StatusOK || !strings.Contains(scheduleList.Body.String(), `"last_status":"error"`) {
+		t.Fatalf("schedule status was not updated: %d %s", scheduleList.Code, scheduleList.Body.String())
+	}
+	deleted := testRequest(h, http.MethodDelete, "/api/servers/scheduled-server/schedules/"+item.ID, `{}`, session)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete schedule: %d %s", deleted.Code, deleted.Body.String())
+	}
+	runs = testRequest(h, http.MethodGet, "/api/servers/scheduled-server/schedules/"+item.ID+"/runs", "", session)
+	if runs.Code != http.StatusNotFound {
+		t.Fatalf("deleted schedule retained accessible run history: %d %s", runs.Code, runs.Body.String())
 	}
 }
 

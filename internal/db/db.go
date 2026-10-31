@@ -107,6 +107,54 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 4 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS backup_schedules (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			cron TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			next_run TEXT NOT NULL DEFAULT '',
+			last_run TEXT NOT NULL DEFAULT '',
+			last_status TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_backup_schedules_due ON backup_schedules(enabled, next_run)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS backup_schedule_runs (
+			id TEXT PRIMARY KEY,
+			schedule_id TEXT NOT NULL,
+			server_id TEXT NOT NULL,
+			started_at TEXT NOT NULL,
+			finished_at TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_backup_schedule_runs_recent ON backup_schedule_runs(schedule_id, started_at DESC)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(4)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
