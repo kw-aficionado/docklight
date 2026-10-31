@@ -1,0 +1,25 @@
+gameskill:
+  id: vaultwarden
+  name: Vaultwarden
+  category: Apps
+  version: 1
+  docker:
+    image: vaultwarden/server:latest
+    data_path: /data
+    user: "0:0"
+    keep_entrypoint: true
+    env:
+      SIGNUPS_ALLOWED: "{{SIGNUPS_ALLOWED}}"
+      DOMAIN: "{{PUBLIC_URL}}"
+  variables:
+    - key: SIGNUPS_ALLOWED
+      name: Allow new signups
+      type: bool
+      default: false
+  startup:
+    done_regex: "Rocket has launched"
+    stop_timeout: 20
+  ports:
+    - name: web
+      default: 80
+      protocol: tcp

@@ -1,0 +1,63 @@
+gameskill:
+  id: minecraft-java
+  name: Minecraft Java
+  category: Games
+  version: 1
+  description: A Java Edition server powered by the upstream itzg image.
+  docker:
+    image: itzg/minecraft-server:latest
+    user: "0:0"
+    keep_entrypoint: true
+    env:
+      EULA: "{{EULA}}"
+      TYPE: "{{TYPE}}"
+      VERSION: "{{VERSION}}"
+      MEMORY: "{{MEMORY}}"
+      ENABLE_QUERY: "true"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "{{RCON_PASSWORD}}"
+      RCON_PORT: "25575"
+  variables:
+    - key: EULA
+      name: Accept Minecraft EULA
+      type: bool
+      default: true
+      required: true
+    - key: TYPE
+      name: Server type
+      type: select
+      options: [VANILLA, PAPER, PURPUR, FABRIC, FORGE]
+      default: PAPER
+    - key: VERSION
+      name: Minecraft version
+      type: string
+      default: LATEST
+    - key: MEMORY
+      name: Memory limit
+      type: string
+      default: 2G
+      pattern: "^[0-9]+[GM]$"
+      hint: Use a value such as 2G or 1536M.
+    - key: RCON_PASSWORD
+      name: RCON password
+      type: string
+      secret: true
+      required: true
+  startup:
+    done_regex: "Done \\([0-9.]+s\\)!"
+    stop: stop
+    save_command: save-all flush
+    stop_timeout: 60
+  ports:
+    - name: game
+      default: 25565
+      protocol: tcp
+    - name: rcon
+      default: 25575
+      protocol: tcp
+  query:
+    type: minecraft
+  rcon:
+    enabled: true
+    type: minecraft
+    password_var: RCON_PASSWORD

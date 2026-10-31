@@ -1,0 +1,6 @@
+/web/dist/
+/yggdrasil
+/coverage.out
+*.db
+*.db-shm
+*.db-wal

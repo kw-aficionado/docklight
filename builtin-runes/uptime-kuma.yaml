@@ -1,0 +1,17 @@
+gameskill:
+  id: uptime-kuma
+  name: Uptime Kuma
+  category: Apps
+  version: 1
+  docker:
+    image: louislam/uptime-kuma:1
+    data_path: /app/data
+    user: "0:0"
+    keep_entrypoint: true
+  startup:
+    done_regex: "Listening on"
+    stop_timeout: 20
+  ports:
+    - name: web
+      default: 3001
+      protocol: tcp

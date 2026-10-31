@@ -1,0 +1,24 @@
+gameskill:
+  id: cloudflared
+  name: Cloudflare Tunnel
+  category: Networking
+  version: 1
+  docker:
+    image: cloudflare/cloudflared:latest
+    user: "0:0"
+    keep_entrypoint: true
+  variables:
+    - key: TUNNEL_TOKEN
+      name: Tunnel token
+      type: string
+      secret: true
+      required: true
+  startup:
+    exec:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - "{{TUNNEL_TOKEN}}"
+    done_regex: "Registered tunnel connection"
+    stop_timeout: 15

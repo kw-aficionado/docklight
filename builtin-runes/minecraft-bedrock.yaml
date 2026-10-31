@@ -1,0 +1,44 @@
+gameskill:
+  id: minecraft-bedrock
+  name: Minecraft Bedrock
+  category: Games
+  version: 1
+  docker:
+    image: itzg/minecraft-bedrock-server:latest
+    user: "0:0"
+    keep_entrypoint: true
+    env:
+      EULA: "{{EULA}}"
+      VERSION: "{{VERSION}}"
+      GAMEMODE: "{{GAMEMODE}}"
+      DIFFICULTY: "{{DIFFICULTY}}"
+  variables:
+    - key: EULA
+      name: Accept Minecraft EULA
+      type: bool
+      default: true
+      required: true
+    - key: VERSION
+      name: Bedrock version
+      type: string
+      default: LATEST
+    - key: GAMEMODE
+      name: Game mode
+      type: select
+      options: [survival, creative, adventure]
+      default: survival
+    - key: DIFFICULTY
+      name: Difficulty
+      type: select
+      options: [peaceful, easy, normal, hard]
+      default: easy
+  startup:
+    done_regex: "Server started."
+    stop: stop
+    stop_timeout: 30
+  ports:
+    - name: game
+      default: 19132
+      protocol: udp
+  query:
+    type: minecraft-bedrock

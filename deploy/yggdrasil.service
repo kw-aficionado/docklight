@@ -1,0 +1,28 @@
+[Unit]
+Description=Yggdrasil game and app server panel
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=yggdrasil
+Group=yggdrasil
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/yggdrasil
+StateDirectory=yggdrasil
+StateDirectoryMode=0750
+ExecStart=/usr/local/bin/yggdrasil --config /etc/yggdrasil/config.yaml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/yggdrasil /etc/yggdrasil
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
