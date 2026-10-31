@@ -376,6 +376,10 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "Docker removed the container but panel data cleanup failed; fix storage permissions and retry cleanup")
 		return
 	}
+	if _, err := a.db.Exec(`DELETE FROM notification_channels WHERE server_id=?`, s.ID); err != nil {
+		writeError(w, 500, "server data was removed but scoped notification channels could not be deleted")
+		return
+	}
 	a.clearRuntimePending(s.ID)
 	a.resetWatchdog(s.ID)
 	a.releasePorts(s.ID)

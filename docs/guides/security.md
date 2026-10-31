@@ -22,6 +22,8 @@ Catalog repository tokens and the optional panel-wide GitHub token are also encr
 
 Private registry passwords and access tokens are encrypted with `auth.secret_key` and exposed only as a `has_secret` flag. Docklight sends them to Docker Engine in the `X-Registry-Auth` header for a pull matched to that registry. A credential is not written to Docker's daemon login store, a host credential file, an image URL, or audit details. The **Test** action uses Docker Engine's auth-check endpoint and discards its response body. Registry saves and removals are audited as `registry_login.save` and `registry_login.delete`.
 
+Notification channel configuration is encrypted with `auth.secret_key` and omitted from list, create, update, and test responses. Telegram requires its documented bot-token URL path; Docklight does not log HTTP request URLs and returns only a generic transport error if a request fails. SMTP uses TLS for remote hosts and does not send credentials before TLS is active.
+
 The audit page records the user and server actions implemented in this release, including user/grant changes, token creation/revocation, server lifecycle, settings changes, and file changes. Audit records are not a substitute for host/systemd or Docker logs.
 
 ## Host boundary

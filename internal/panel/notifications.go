@@ -31,11 +31,12 @@ const (
 )
 
 type notificationSettings struct {
-	Enabled                 bool     `json:"enabled"`
-	EndpointConfigured      bool     `json:"endpoint_configured"`
-	SigningSecretConfigured bool     `json:"signing_secret_configured"`
-	Events                  []string `json:"events"`
-	UpdatedAt               string   `json:"updated_at"`
+	Enabled                 bool                         `json:"enabled"`
+	EndpointConfigured      bool                         `json:"endpoint_configured"`
+	SigningSecretConfigured bool                         `json:"signing_secret_configured"`
+	Events                  []string                     `json:"events"`
+	Channels                []notificationChannelSummary `json:"channels"`
+	UpdatedAt               string                       `json:"updated_at"`
 }
 
 type storedNotificationSettings struct {
@@ -90,9 +91,14 @@ func (a *App) publicNotificationSettings(w http.ResponseWriter) {
 		writeError(w, http.StatusInternalServerError, "could not read notification settings")
 		return
 	}
+	channels, err := a.listNotificationChannelSummaries()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read notification channels")
+		return
+	}
 	writeJSON(w, http.StatusOK, notificationSettings{
 		Enabled: stored.Enabled, EndpointConfigured: stored.Endpoint != "",
-		SigningSecretConfigured: stored.SigningSecret != "", Events: stored.Events, UpdatedAt: stored.UpdatedAt,
+		SigningSecretConfigured: stored.SigningSecret != "", Events: stored.Events, Channels: channels, UpdatedAt: stored.UpdatedAt,
 	})
 }
 
@@ -262,19 +268,18 @@ func (a *App) dispatchWebhookNotificationWithSchedule(event string, server *webh
 	stored, err := a.readNotificationSettings()
 	if err != nil {
 		log.Printf("could not read notification settings for %s", event)
-		return
+	} else if stored.Enabled && containsString(stored.Events, event) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			defer cancel()
+			payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: server, Schedule: schedule, Message: message}
+			if err := a.deliverWebhook(ctx, stored, payload); err != nil {
+				log.Printf("webhook notification %s failed: %v", event, err)
+			}
+		}()
 	}
-	if !stored.Enabled || !containsString(stored.Events, event) {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-		defer cancel()
-		payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: server, Schedule: schedule, Message: message}
-		if err := a.deliverWebhook(ctx, stored, payload); err != nil {
-			log.Printf("webhook notification %s failed: %v", event, err)
-		}
-	}()
+	payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: server, Schedule: schedule, Message: message}
+	a.dispatchNotificationChannels(payload)
 }
 
 func containsString(values []string, target string) bool {

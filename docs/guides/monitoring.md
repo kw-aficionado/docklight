@@ -12,7 +12,7 @@ A confirmed incident sets the server to **Needs attention** and records the dete
 
 ## Low disk space
 
-Docklight checks the filesystem that contains its data directory every five minutes. If available space falls below 10%, it marks the alert active and sends `host.disk_low` to the configured webhook when that event is enabled. The alert rearms when free space reaches 15%, so a continuing low-space condition does not send a message every five minutes. The Notifications page shows current capacity and alert state. The message identifies the server-data and local-backup paths to inspect. Only the Docklight data filesystem is measured; other mounted volumes are not enumerated, and Docklight never deletes files automatically.
+Docklight checks the filesystem that contains its data directory every five minutes. If available space falls below 10%, it marks the alert active and sends `host.disk_low` to enabled notification channels. The legacy signed webhook sends it when that event is selected. The alert rearms when free space reaches 15%, so a continuing low-space condition does not send a message every five minutes. The Notifications page shows current capacity and alert state. The message identifies the server-data and local-backup paths to inspect. Only the Docklight data filesystem is measured; other mounted volumes are not enumerated, and Docklight never deletes files automatically.
 
 ## Automatic recovery
 

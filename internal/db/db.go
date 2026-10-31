@@ -720,6 +720,35 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 23 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS notification_channels (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			config_enc TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			server_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_notification_channels_scope ON notification_channels(enabled,server_id)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(23)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -83,3 +83,9 @@
 - Store one encrypted credential per normalized registry. Docker Hub aliases use `docker.io`; image matching follows Docker's rule that a registry is explicit in the first path component only when it contains a dot, a port, or is `localhost`.
 - Send the selected credential only in Docker Engine's `X-Registry-Auth` header for that individual image pull. The auth-check route uses `POST /auth`; the panel does not call `docker login` or persist auth in Docker's daemon/host credential store.
 - Use the same app pull helper for runtime, sidecars, install containers, and the BusyBox ownership helper so no pull path silently bypasses saved logins. Tests use an injected Engine HTTP client; live private-registry pulls remain part of host acceptance.
+
+## 2026-10-31: multiple notification transports
+
+- Preserve the original signed webhook settings and add encrypted channel records for Discord, Telegram, generic JSON webhooks, and SMTP rather than breaking the existing webhook API. A channel can be global or server-scoped; delivery remains asynchronous without retries or stored history.
+- Remote SMTP must establish TLS before auth; STARTTLS is used when advertised and port 465 uses implicit TLS. Telegram's Bot API requires its token in the HTTPS request path, so failures use generic messages and request URLs are never logged or returned.
+- Channel editing re-enters credentials because saved configuration is never returned. Existing event filters remain attached to the original webhook; new channels receive all supported events within their scope.

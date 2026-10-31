@@ -1,14 +1,14 @@
 # Notifications
 
-Docklight can send backup results, scheduled-action outcomes, confirmed container incidents, and low-disk alerts to one administrator-configured webhook. The receiver can be a small internal service or a webhook URL supplied by another product.
+Docklight can send backup results, scheduled-action outcomes, confirmed container incidents, and low-disk alerts to Discord, Telegram, email, or a JSON webhook. An administrator can add several channels and scope each one to every server or to one server.
 
 ## Configure a webhook
 
-Open **Notifications** as an administrator, enter the endpoint, select the events to receive, then save. Use **Save & send test** to check connectivity. The panel sends `notification.test` even while delivery is disabled, so the endpoint can be verified before enabling automatic events.
+Open **Notifications** as an administrator and choose **Add channel**. Enter the transport settings and select **All servers** or a single server. Each channel receives all supported events for its scope. Use **Test** in the channel list to verify delivery; the panel sends a short Docklight test message. Use **Edit** to replace a channel's complete settings, or **Remove** to delete it.
 
-The endpoint URL and optional signing secret are encrypted in SQLite with `auth.secret_key`. The API returns only whether each value is configured. Leave a credential field blank to keep its current value; use the clear checkbox to remove it. Keep the panel secret key with the database because Docklight needs it to decrypt webhook settings.
+Channel configuration is encrypted in SQLite with `auth.secret_key`. API responses contain channel type and scope only; URLs, bot tokens, SMTP passwords, and signing secrets are never returned. To replace a channel, enter all of its settings again. Keep the panel secret key with the database because Docklight needs it to decrypt saved configurations. The original signed webhook form remains available for existing installations.
 
-Endpoints must use HTTPS. Plain HTTP is allowed only for `localhost` or a loopback IP, which supports local development and testing. Redirects are not followed. The endpoint is configured by an administrator and can reach any HTTPS host; restrict administrative access accordingly.
+Webhook endpoints must use HTTPS. Plain HTTP is allowed only for `localhost` or a loopback IP. Redirects are not followed. Telegram Bot API requests use Telegram's required HTTPS URL format, which includes the bot token in the request path; Docklight never logs that URL or includes it in a response. SMTP uses STARTTLS when advertised, or implicit TLS on port 465. Remote SMTP without TLS is refused, and authentication is sent only after TLS is established. SMTP defaults to port 587; credentials are optional for trusted local relays.
 
 ## Events and request format
 
@@ -30,6 +30,4 @@ For a scheduler event, the payload also includes a `schedule` object such as `{"
 
 When a signing secret is configured, the request includes `X-Docklight-Signature: sha256=<hex>`. The value is the lowercase hexadecimal HMAC-SHA256 of the exact request body. Receivers should compare signatures in constant time and reject a mismatch.
 
-## Current limits
-
-Only one webhook endpoint can be configured. The panel does not yet provide dedicated Discord, Telegram, or SMTP email channels, retries, or delivery history. The host storage card on this page reports the filesystem that holds Docklight's data directory; it does not enumerate every mounted volume.
+Delivery runs asynchronously without retries or a delivery-history table. Failures are logged with channel ID and transport type; credential-bearing URLs and values are excluded. The panel storage card reports the filesystem that holds Docklight's data directory and does not enumerate every mounted volume.
