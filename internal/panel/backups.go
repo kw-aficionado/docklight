@@ -429,7 +429,7 @@ func (a *App) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parent := filepath.Dir(s.DataDir)
-	stage, err := os.MkdirTemp(parent, ".yggdrasil-restore-")
+	stage, err := os.MkdirTemp(parent, ".docklight-restore-")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create a restore staging directory; check panel storage permissions and free disk space")
 		return
@@ -443,42 +443,29 @@ func (a *App) restoreBackup(w http.ResponseWriter, r *http.Request) {
 	summary, restoreErr := backup.Extract(archiveFile, stage, []byte(a.cfg.Auth.SecretKey))
 	_ = archiveFile.Close()
 	if restoreErr != nil {
-		writeError(w, http.StatusUnprocessableEntity, "restore stopped before replacing server data: "+restoreErr.Error())
+		writeError(w, http.StatusUnprocessableEntity, "restore stopped before changing server data: "+restoreErr.Error())
 		return
 	}
-	restoreID, err := newID()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not generate a restore transaction ID")
-		return
-	}
-	oldPath := s.DataDir + ".restore-old-" + restoreID
-	info, statErr := os.Lstat(s.DataDir)
-	hadOld := statErr == nil
+	_, statErr := os.Lstat(s.DataDir)
 	if statErr != nil && !os.IsNotExist(statErr) {
 		writeError(w, http.StatusInternalServerError, "could not inspect current server data before restore")
 		return
 	}
-	if hadOld && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
-		writeError(w, http.StatusConflict, "current server data path is not a real directory; repair it before restoring")
-		return
-	}
-	if hadOld {
-		if err = os.Rename(s.DataDir, oldPath); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not preserve current server data before restore; check panel storage permissions")
+	cleanupWarning := ""
+	if os.IsNotExist(statErr) {
+		if err = os.Rename(stage, s.DataDir); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not activate restored server data; check panel storage permissions")
 			return
 		}
-	}
-	if err = os.Rename(stage, s.DataDir); err != nil {
-		if hadOld {
-			_ = os.Rename(oldPath, s.DataDir)
-		}
-		writeError(w, http.StatusInternalServerError, "could not activate restored server data; the previous data has been preserved")
-		return
-	}
-	cleanupWarning := ""
-	if hadOld {
-		if err = os.RemoveAll(oldPath); err != nil {
-			cleanupWarning = "restore completed, but old data remains at " + filepath.Base(oldPath) + "; remove it after checking the restored server"
+	} else {
+		cleanupWarning, err = backup.Overlay(stage, s.DataDir)
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, backup.ErrOverlayConflict) {
+				status = http.StatusConflict
+			}
+			writeError(w, status, "restore overlay failed: "+err.Error())
+			return
 		}
 	}
 	a.audit(principal(r), "server.backup.restore", "backup", item.ID, fmt.Sprintf("server=%s files=%d bytes=%d", s.ID, summary.Files, summary.Bytes))

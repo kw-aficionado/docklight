@@ -349,6 +349,9 @@ func TestLocalBackupsRequirePermissionAndRestoreVerifiedData(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(dataDir, "world.dat"), []byte("newer live data"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err = os.WriteFile(filepath.Join(dataDir, "after-backup.txt"), []byte("keep this file"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	restored := testRequest(h, http.MethodPost, "/api/servers/backup-server/backups/"+first.ID+"/restore", `{}`, session)
 	if restored.Code != http.StatusOK {
 		t.Fatalf("restore backup: %d %s", restored.Code, restored.Body.String())
@@ -356,6 +359,9 @@ func TestLocalBackupsRequirePermissionAndRestoreVerifiedData(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dataDir, "world.dat"))
 	if err != nil || string(data) != original {
 		t.Fatalf("restored file=%q err=%v; want original contents", data, err)
+	}
+	if retained, readErr := os.ReadFile(filepath.Join(dataDir, "after-backup.txt")); readErr != nil || string(retained) != "keep this file" {
+		t.Fatalf("restore removed a file absent from the archive: contents=%q err=%v", retained, readErr)
 	}
 	if !strings.Contains(restored.Body.String(), `"restored":true`) {
 		t.Fatalf("restore response missing success status: %s", restored.Body.String())

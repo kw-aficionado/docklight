@@ -6,7 +6,7 @@ Docklight stores encrypted snapshots of each server's data directory. Open a ser
 
 Stop the server before creating or restoring a backup. Docklight checks the saved server state and, when a container is recorded, asks Docker to confirm that it is stopped. This avoids copying a live database or world save midway through a write.
 
-A backup is written to a temporary file, compressed, encrypted in authenticated chunks, checksummed, and verified before Docklight records it. The server data is never staged in memory as one large archive. Symlinks and special filesystem objects are refused. Restore verifies the checksum and encrypted archive before extracting to a staging directory, then swaps the restored directory into place while preserving the current data until activation succeeds.
+A backup is written to a temporary file, compressed, encrypted in authenticated chunks, checksummed, and verified before Docklight records it. The server data is never staged in memory as one large archive. Symlinks and special filesystem objects are refused. Restore verifies the checksum and encrypted archive before extracting to a staging directory. It overlays archived files onto the existing data directory and leaves files absent from the archive untouched. If a file or directory conflicts with the archived path, or an unsafe filesystem object is present, restore stops and rolls back changes already made.
 
 Local backups are stored under `<database directory>/backups/<server id>/` by default. Set `backups.path` to another local directory to place them on a mounted disk or filesystem. The panel creates backup directories with owner-only access and files with mode `0600`.
 
@@ -40,4 +40,4 @@ Restart schedules can warn players using countdown commands declared in the temp
 
 ## Current limits
 
-SFTP and SMB destinations are not implemented yet. The S3 integration uses an in-repository REST client; run the gated emulator acceptance in `internal/backup/s3_test.go` by setting `DOCKLIGHT_S3_TEST_ENDPOINT`, `DOCKLIGHT_S3_TEST_BUCKET`, `DOCKLIGHT_S3_TEST_REGION`, `DOCKLIGHT_S3_TEST_ACCESS_KEY`, and `DOCKLIGHT_S3_TEST_SECRET_KEY`. A generic signed webhook can report backup and scheduled-action success or failure; see [notifications](notifications.md). Schedules are per-server; realm and global schedules are not available. Restore replaces the entire server data directory, not only selected files.
+SFTP and SMB destinations are not implemented yet. The S3 integration uses an in-repository REST client; run the gated emulator acceptance in `internal/backup/s3_test.go` by setting `DOCKLIGHT_S3_TEST_ENDPOINT`, `DOCKLIGHT_S3_TEST_BUCKET`, `DOCKLIGHT_S3_TEST_REGION`, `DOCKLIGHT_S3_TEST_ACCESS_KEY`, and `DOCKLIGHT_S3_TEST_SECRET_KEY`. A generic signed webhook can report backup and scheduled-action success or failure; see [notifications](notifications.md). Schedules are per-server; realm and global schedules are not available.
