@@ -331,6 +331,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 12 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "backup_schedules", "command_enc") {
+			if _, err = tx.Exec(`ALTER TABLE backup_schedules ADD COLUMN command_enc TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(12)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

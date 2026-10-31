@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gameskill "example.com/yggdrasil-panel/internal/rune"
+	"example.com/yggdrasil-panel/internal/security"
 )
 
 func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) {
@@ -155,6 +156,127 @@ func TestScheduledRestartContinuesWhenPlayerCountIsUnavailable(t *testing.T) {
 	}
 	if status != "success" || !strings.Contains(detail, "player count unavailable; proceeding with scheduled restart") || !strings.Contains(detail, "restart completed") {
 		t.Fatalf("restart did not proceed after the query failed: status=%q detail=%q", status, detail)
+	}
+}
+
+func TestScheduledCommandRequiresConsoleAndStoresEncryptedCommand(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "command-schedule-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,container_id,env_json,ports_json,data_dir) VALUES('command-schedule-server','Command test','minecraft-java','running',1,'command-container','{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('command-schedule-user','command-schedule-user','unused-hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	token, err := a.issue(User{ID: "command-schedule-user", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	if _, err = d.Exec(`INSERT INTO permissions(user_id,scope_type,scope_id,perms) VALUES('command-schedule-user','server','command-schedule-server','server.schedule')`); err != nil {
+		t.Fatal(err)
+	}
+	denied := testRequest(h, http.MethodPost, "/api/servers/command-schedule-server/schedules", `{"action":"command","command":"say Maintenance starts soon","cron":"0 3 * * *"}`, token)
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("command schedule was created without server.console: %d %s", denied.Code, denied.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule,server.console' WHERE user_id='command-schedule-user' AND scope_type='server' AND scope_id='command-schedule-server'`); err != nil {
+		t.Fatal(err)
+	}
+	plaintext := "say Maintenance starts soon"
+	created := testRequest(h, http.MethodPost, "/api/servers/command-schedule-server/schedules", `{"action":"command","cron":"0 3 * * *","command":"`+plaintext+`"}`, token)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create command schedule: %d %s", created.Code, created.Body.String())
+	}
+	var item backupSchedule
+	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.Action != "command" || item.Name != "Scheduled command" || !item.Enabled || item.NextRun == "" || strings.Contains(created.Body.String(), plaintext) {
+		t.Fatalf("command schedule response is invalid or exposed its command: %#v %s", item, created.Body.String())
+	}
+	var commandEnc string
+	if err = d.QueryRow(`SELECT command_enc FROM backup_schedules WHERE id=?`, item.ID).Scan(&commandEnc); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(commandEnc, "enc:") || strings.Contains(commandEnc, plaintext) {
+		t.Fatalf("command was not encrypted at rest: %q", commandEnc)
+	}
+	decrypted, err := security.Decrypt([]byte(a.cfg.Auth.SecretKey), commandEnc)
+	if err != nil || decrypted != plaintext {
+		t.Fatalf("encrypted command did not round-trip: command=%q err=%v", decrypted, err)
+	}
+	invalid := testRequest(h, http.MethodPost, "/api/servers/command-schedule-server/schedules", `{"action":"command","cron":"0 4 * * *","command":"say one\nsay two"}`, token)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("multi-line command was accepted: %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestScheduledCommandDispatchesAndKeepsCommandOutOfRunHistory(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "command-run-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,container_id,env_json,ports_json,data_dir) VALUES('command-run-server','Command run','minecraft-java','running',1,'command-run-container','{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	command := "say private maintenance note"
+	commandEnc, err := security.Encrypt([]byte(a.cfg.Auth.SecretKey), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err = d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,command_enc,next_run) VALUES('command-run','command-run-server','Maintenance note','command','* * * * *',1,?,?)`, commandEnc, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	var sent string
+	a.scheduleCommand = func(_ context.Context, _ Server, value string) error { sent = value; return nil }
+	if err = a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if sent != command {
+		t.Fatalf("scheduled console command=%q, want %q", sent, command)
+	}
+	var status, detail string
+	if err = d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id='command-run'`).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "success" || detail != "console command sent" || strings.Contains(detail, command) {
+		t.Fatalf("scheduled command history exposed command or has wrong result: status=%q detail=%q", status, detail)
+	}
+	if _, err = d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('command-history-admin','command-history-admin','unused-hash','admin')`); err != nil {
+		t.Fatal(err)
+	}
+	adminToken, err := a.issue(User{ID: "command-history-admin", Role: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	listed := testRequest(h, http.MethodGet, "/api/servers/command-run-server/schedules", "", adminToken)
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), command) || !strings.Contains(listed.Body.String(), `"action":"command"`) {
+		t.Fatalf("command schedule response leaked its command or missed the action: %d %s", listed.Code, listed.Body.String())
+	}
+	runs := testRequest(h, http.MethodGet, "/api/servers/command-run-server/schedules/command-run/runs", "", adminToken)
+	if runs.Code != http.StatusOK || strings.Contains(runs.Body.String(), command) {
+		t.Fatalf("command run response leaked its command: %d %s", runs.Code, runs.Body.String())
+	}
+	a.scheduleCommand = func(_ context.Context, _ Server, value string) error { return errors.New("transport echoed " + value) }
+	if _, err = d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id='command-run'`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.processDueBackupSchedules(context.Background(), now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var failedDetail string
+	if err = d.QueryRow(`SELECT detail FROM backup_schedule_runs WHERE schedule_id='command-run' AND status='error' ORDER BY started_at DESC LIMIT 1`).Scan(&failedDetail); err != nil {
+		t.Fatal(err)
+	}
+	if failedDetail != "console command could not be sent" || strings.Contains(failedDetail, command) {
+		t.Fatalf("failed command run exposed its command: %q", failedDetail)
 	}
 }
 
