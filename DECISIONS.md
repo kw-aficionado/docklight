@@ -122,6 +122,13 @@
 - Treat imports like manual local edits: upsert non-built-in IDs, clear catalog provenance, and refuse any built-in ID collision in a transaction.
 - Make validated `config_files` useful in the server UI: list only existing paths as Files-tab shortcuts, keep edits behind the existing `server.files` permission, and preserve comments/unsupported lines when the key/value form editor is used.
 
+## 2026-11-01: public host detection and reachability probes
+
+- Store the optional public hostname in a singleton database row rather than startup config so administrators can change it from the Network page without restarting the panel.
+- Use the user brief's ipify JSON endpoint with a three-second timeout, one-hour successful cache, and a short retry backoff. Keep the last successful address after a failed refresh; do not replace a usable value with an empty result.
+- Probe only the server's declared query/game port, use its Rune query protocol when present and TCP otherwise, with a four-second deadline and a 30-second cache.
+- Resolve the host before connecting and never send a probe to loopback, unspecified, or multicast addresses. Report that NAT loopback can make an otherwise reachable public service look offline.
+
 
 ## 2026-11-01: administrator host mounts
 

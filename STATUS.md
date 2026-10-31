@@ -62,6 +62,12 @@ Administrators can import Pterodactyl egg JSON or the supported `<gameskill>` XM
 
 Tests cover both translations, deterministic fields, secret default removal, multipart XML upload, admin access, built-in collisions, size limits, re-import provenance clearing and generated-template round-trips. The Files tab lists existing `config_files` paths as shortcuts; `.properties`, `.env`, `.cfg`, and `.conf` files open in a key/value editor with a raw view. The panel listener is blocked in this environment, so this UI has not been visually exercised here.
 
+## Phase 3 public connection address and reachability
+
+The admin-only Network page stores an optional public hostname. Without one, Docklight detects its public IP through ipify with a three-second timeout and one-hour cache; a failed refresh keeps the last successful address. The effective host is shown to signed-in users. Running and starting servers expose a `server.view` reachability check against the allocated game/query port, using the Rune's query protocol when declared and TCP otherwise. Probes have a four-second timeout, results are cached for 30 seconds, and resolved loopback, unspecified, and multicast targets are skipped or rejected. A failed probe can reflect missing port forwarding, a host firewall, or a router without NAT loopback.
+
+Tests cover migration 28, user-visible/admin-writable settings, hostname normalization, the ipify request and stale-value fallback, target port/protocol selection, 30-second result caching, stopped-server suppression, and loopback refusal. Live DNS, router/NAT behavior, and visual UI review remain host acceptance work.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -98,7 +104,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
+- Phase 3: UPnP, UniFi forwarding, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

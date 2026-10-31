@@ -13,3 +13,25 @@
 .config-kv-list>.config-editor-help{margin:0}
 @media(max-width:560px){.config-shortcuts{padding:9px 11px}.config-shortcuts-title{width:100%}.config-kv-row{grid-template-columns:minmax(90px,.4fr) minmax(130px,1fr);gap:6px}}
 .light .config-kv-row input{background:#fff;color:#1b2922;border-color:#ccd8d0}
+.network-settings-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,.85fr);gap:16px;align-items:start}
+.network-settings-card,.network-facts{padding:20px}
+.network-settings-card form{display:flex;flex-direction:column;gap:13px}
+.network-settings-card form>label{display:flex;flex-direction:column;gap:6px}
+.network-settings-card form input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:7px;background:var(--panel-2);color:var(--text)}
+.network-settings-card form label small{color:var(--muted);font-size:10px}
+.network-fact{display:flex;flex-direction:column;gap:4px;padding:12px 0;border-bottom:1px solid var(--border-soft)}
+.network-fact>span,.network-detection-note{font-size:10px;color:var(--muted)}
+.network-fact>b,.network-fact>code{font-size:13px;overflow-wrap:anywhere}
+.network-detection-note{margin:13px 0 0;line-height:1.5}
+.reachability-card{padding:17px;min-width:0}
+.reachability-card .panel-head{align-items:flex-start}
+.reachability-state{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border-radius:5px;background:#1e2928;font-size:8px;font-weight:800;letter-spacing:.55px;white-space:nowrap}
+.reachability-state>i{width:5px;height:5px;border-radius:50%;background:currentColor}
+.reachability-state.good{color:var(--green)}
+.reachability-state.bad{color:var(--red)}
+.reachability-state.muted{color:var(--muted)}
+.reachability-address{display:block;margin:13px 0 7px;color:var(--green);font-size:14px;overflow-wrap:anywhere}
+.reachability-message{margin:9px 0;color:var(--muted);font-size:11px;line-height:1.5}
+.reachability-time{color:var(--faint);font-size:9px}
+@media(max-width:900px){.network-settings-grid{grid-template-columns:1fr}}
+.light .network-settings-card form input{background:#fff;color:#1b2922;border-color:#ccd8d0}

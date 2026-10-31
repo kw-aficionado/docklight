@@ -50,6 +50,8 @@ Registration and sign-in require user verification and discoverable credentials.
 | `GET /api/status` | Public summary for opted-in servers; returns `404` unless the public status page is enabled. |
 | `GET /api/settings/status-page` | Admin only; read the master switch, title, and per-server public opt-ins. |
 | `PUT /api/settings/status-page` | Admin only; save `enabled`, `title`, and `server_ids` together. The master switch and each server opt-in are both required for public display. |
+| `GET /api/settings/network` | Any signed-in user; return the configured hostname, detected public IP, and effective host. Detection is cached for one hour and falls back to the last successful value if a lookup fails. |
+| `PUT /api/settings/network` | Admin only; set or clear `public_hostname`. Scheme and trailing slash are stripped; hostnames containing a path or port and loopback addresses are rejected. |
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). Replacing a catalog template clears its source metadata. |
@@ -100,6 +102,7 @@ Registration and sign-in require user verification and discoverable credentials.
 | `POST /api/servers/{id}/start`, `/stop`, `/restart` | Control lifecycle; requires `server.control`. |
 | `GET /api/servers/{id}/stats` | Current Docker CPU and memory sample; requires `server.view`. |
 | `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. Successful queries refresh the public status page's player sample. |
+| `GET /api/servers/{id}/reachability` | Requires `server.view`; check a running or starting server's allocated game/query port at the effective public host. Results are cached for 30 seconds, and loopback targets are refused. |
 | `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |
 | `GET /api/servers/{id}/backups` | List encrypted backups and their `storage` (`local`, `s3`, `sftp`, or `smb`) without exposing remote object keys; requires `server.backup`. |
 | `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; optional `destination` is `local`, `s3`, `sftp`, or `smb`. Verifies the saved copy before recording it; defaults to local. |
@@ -182,4 +185,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Scheduler actions beyond backup/start/stop/restart/update/command/message and external networking integrations are not implemented yet. See [server backups](guides/backups.md) for schedules and local/remote backup behavior, [app stacks](guides/stacks.md) for private sidecars, [notifications](guides/notifications.md) for delivery transports, [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery, and [the status-page guide](guides/status-page.md) for public exposure and freshness rules. See [realms and access](guides/realms.md) for server grouping and scoped grants.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Scheduler actions beyond backup/start/stop/restart/update/command/message and networking integrations such as UPnP, Cloudflare routes, and reverse proxies are not implemented yet. See [server backups](guides/backups.md) for schedules and local/remote backup behavior, [app stacks](guides/stacks.md) for private sidecars, [networking](guides/networking.md) for public host detection and reachability probes, [notifications](guides/notifications.md) for delivery transports, [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery, and [the status-page guide](guides/status-page.md) for public exposure and freshness rules. See [realms and access](guides/realms.md) for server grouping and scoped grants.

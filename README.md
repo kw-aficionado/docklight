@@ -8,7 +8,7 @@ Official product domain: [docklight.app](https://docklight.app).
 
 The browser and product identity use **Docklight**. The current binary, CLI, service, and default filesystem paths still use `yggdrasil` while the implementation transitions from its original internal name.
 
-The current checkout contains the Phase 1 core plus local, S3-compatible, SFTP, and SMB encrypted backups, scoped schedules, Discord, Telegram, SMTP, and signed JSON webhook alerts, confirmed container crash history and alerts, low-disk monitoring, a public status page with double opt-in, realm grouping with scoped access, private app stacks, Docker Compose and Pterodactyl egg/XML template imports, GitHub/Gitea/Forgejo template catalogs, and encrypted per-registry credentials for private images. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
+The current checkout contains the Phase 1 core plus local, S3-compatible, SFTP, and SMB encrypted backups, scoped schedules, Discord, Telegram, SMTP, and signed JSON webhook alerts, confirmed container crash history and alerts, low-disk monitoring, a public status page with double opt-in, public host detection and server reachability checks, realm grouping with scoped access, private app stacks, Docker Compose and Pterodactyl egg/XML template imports, GitHub/Gitea/Forgejo template catalogs, and encrypted per-registry credentials for private images. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
 
 ## Install on Debian or Ubuntu
 
@@ -54,7 +54,7 @@ The CLI also provides:
 - `reset-password USER [--config PATH]` — root-only break-glass password reset; generates a password unless one is supplied.
 - `reset-2fa USER [--config PATH]` — root-only break-glass authenticator reset.
 
-See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [monitoring](docs/guides/monitoring.md), [public status page](docs/guides/status-page.md), [realms and access](docs/guides/realms.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
+See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [networking](docs/guides/networking.md), [monitoring](docs/guides/monitoring.md), [public status page](docs/guides/status-page.md), [realms and access](docs/guides/realms.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
 
 ## Network and security
 
