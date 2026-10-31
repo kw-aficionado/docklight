@@ -33,6 +33,7 @@ type App struct {
 	engine             *docker.Engine
 	dataRoot           string
 	backupRoot         string
+	backupStoreFactory func(backupTargetConfig) (backupObjectStore, error)
 	booted             time.Time
 	dataMu             sync.Mutex
 	scheduleMu         sync.Mutex
@@ -211,6 +212,10 @@ func (a *App) Router() http.Handler {
 			priv.Get("/notifications", a.admin(a.getNotificationSettings))
 			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
 			priv.Post("/notifications/test", a.admin(a.testNotification))
+			priv.Get("/backups/target/status", a.backupTargetStatus)
+			priv.Get("/backups/target", a.admin(a.getBackupTarget))
+			priv.Put("/backups/target", a.admin(a.updateBackupTarget))
+			priv.Post("/backups/target/test", a.admin(a.testBackupTarget))
 			priv.Get("/system/disk", a.admin(a.getDiskStatus))
 			priv.Post("/servers/{id}/install", a.installServer)
 			priv.Get("/servers/{id}/install/status", a.installStatus)

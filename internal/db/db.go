@@ -392,6 +392,47 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 14 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS backup_target_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			endpoint_enc TEXT NOT NULL DEFAULT '',
+			bucket TEXT NOT NULL DEFAULT '',
+			region TEXT NOT NULL DEFAULT '',
+			access_key_enc TEXT NOT NULL DEFAULT '',
+			secret_key_enc TEXT NOT NULL DEFAULT '',
+			prefix TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		for _, column := range []struct {
+			name string
+			ddl  string
+		}{
+			{"storage", `ALTER TABLE server_backups ADD COLUMN storage TEXT NOT NULL DEFAULT 'local'`},
+			{"storage_key", `ALTER TABLE server_backups ADD COLUMN storage_key TEXT NOT NULL DEFAULT ''`},
+		} {
+			if !hasColumn(tx, "server_backups", column.name) {
+				if _, err = tx.Exec(column.ddl); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(14)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

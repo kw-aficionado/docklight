@@ -17,6 +17,21 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if _, err = legacy.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = legacy.Exec(`CREATE TABLE server_backups (
+		id TEXT PRIMARY KEY,
+		server_id TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		sha256 TEXT NOT NULL,
+		files INTEGER NOT NULL,
+		directories INTEGER NOT NULL,
+		data_bytes INTEGER NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = legacy.Exec(`INSERT INTO server_backups(id,server_id,size_bytes,sha256,files,directories,data_bytes) VALUES('legacy-backup','legacy-server',10,'hash',1,0,8)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = legacy.Exec(`CREATE TABLE backup_schedules (
 		id TEXT PRIMARY KEY,
 		server_id TEXT NOT NULL,
@@ -47,8 +62,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 13 {
-		t.Fatalf("expected 13 migrations, got %d", count)
+	if count != 14 {
+		t.Fatalf("expected 14 migrations, got %d", count)
 	}
 	var notificationTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_settings'`).Scan(&notificationTable); err != nil || notificationTable != "notification_settings" {
@@ -123,5 +138,20 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var templates int
 	if err = d.QueryRow(`SELECT count(*) FROM message_templates WHERE builtin=1`).Scan(&templates); err != nil || templates != 5 {
 		t.Fatalf("version 13 should seed five built-in message templates, count=%d err=%v", templates, err)
+	}
+	var backupTargetTable int
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='backup_target_settings'`).Scan(&backupTargetTable); err != nil || backupTargetTable != 1 {
+		t.Fatalf("version 14 did not create encrypted backup target settings: count=%d err=%v", backupTargetTable, err)
+	}
+	var backupStorageColumns int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('server_backups') WHERE name IN ('storage','storage_key')`).Scan(&backupStorageColumns); err != nil || backupStorageColumns != 2 {
+		t.Fatalf("version 14 did not add backup storage metadata: count=%d err=%v", backupStorageColumns, err)
+	}
+	var storage, storageKey string
+	if err = d.QueryRow(`SELECT storage,storage_key FROM server_backups WHERE id='legacy-backup'`).Scan(&storage, &storageKey); err != nil {
+		t.Fatal(err)
+	}
+	if storage != "local" || storageKey != "" {
+		t.Fatalf("legacy backup location migrated as storage=%q key=%q", storage, storageKey)
 	}
 }

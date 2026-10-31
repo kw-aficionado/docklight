@@ -35,19 +35,23 @@ Password and TOTP endpoints:
 | `POST /api/servers` | Create from a template. Body: `name`, `gameskill_id`, optional `env`, `cpu_limit`, `memory_limit_mb`. |
 | `GET /api/servers/{id}` | Read one server; requires `server.view`. |
 | `PUT /api/servers/{id}` | Update name, settings, or resource limits; requires `server.control`. |
-| `DELETE /api/servers/{id}` | Stop/remove the container, server data, local backups, ports, and grants; requires `server.delete`. |
+| `DELETE /api/servers/{id}` | Stop/remove the container, server data, local and recorded S3 backups, ports, and grants; requires `server.delete`. |
 | `POST /api/servers/{id}/install` | Start installation; returns `202` and a log URL. Requires `server.control`. |
 | `GET /api/servers/{id}/install/status` | Poll install state and recent lines. Requires `server.view`. |
 | `POST /api/servers/{id}/start`, `/stop`, `/restart` | Control lifecycle; requires `server.control`. |
 | `GET /api/servers/{id}/stats` | Current Docker CPU and memory sample; requires `server.view`. |
 | `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. |
 | `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |
-| `GET /api/servers/{id}/backups` | List encrypted local backups; requires `server.backup`. |
-| `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; verifies it before saving. |
+| `GET /api/servers/{id}/backups` | List encrypted backups and their `storage` (`local` or `s3`) without exposing object keys; requires `server.backup`. |
+| `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; accepts optional `{"destination":"local"}` or `{"destination":"s3"}` and verifies the saved copy before recording it. Defaults to local. |
 | `POST /api/servers/{id}/backups/prune` | Apply configured retention or a JSON `keep` count from 1 to 100. |
 | `POST /api/servers/{id}/backups/{backupID}/verify` | Verify the checksum, encryption, and archive structure. |
 | `POST /api/servers/{id}/backups/{backupID}/restore` | Restore after verifying; server must be stopped. |
-| `DELETE /api/servers/{id}/backups/{backupID}` | Delete a local backup. |
+| `DELETE /api/servers/{id}/backups/{backupID}` | Delete the local file or recorded S3 object and its metadata. |
+| `GET /api/backups/target/status` | Authenticated summary indicating whether S3 is enabled for new backups. |
+| `GET /api/backups/target` | Admin only; return the redacted S3 target summary. |
+| `PUT /api/backups/target` | Admin only; create/update S3 settings, rotate credentials, enable/disable the destination, or clear with `{"clear_target":true}`. Secret values are never returned. |
+| `POST /api/backups/target/test` | Admin only; upload and delete a temporary object to check configured bucket access. |
 | `GET /api/message-templates` | List message templates; command bodies are returned only to administrators. |
 | `POST /api/message-templates` | Admin only; create a one-line console-command template. |
 | `PUT /api/message-templates/{id}` | Admin only; edit a custom message template. Built-ins are protected. |
@@ -105,4 +109,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, sidecars, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. SFTP and SMB backup targets, scheduler actions beyond backup/start/stop/restart/command/message, realm/global schedules, Discord, Telegram, SMTP, sidecars, and external integrations are not implemented yet. See [server backups](guides/backups.md) for local and S3-compatible backup behavior and [monitoring](guides/monitoring.md) for runtime monitoring and automatic recovery.

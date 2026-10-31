@@ -16,7 +16,7 @@ The config reader supports scalar block-style YAML for these keys. Unknown keys 
 | `docker.socket` | `unix:///var/run/docker.sock` | Docker Engine Unix socket. The daemon account must have permission to use it. |
 | `docker.api_version` | `v1.45` | Versioned Docker Engine HTTP API prefix. |
 | `backups.path` | `<database directory>/backups` | Local encrypted backup directory. Relative paths resolve against the database directory. Keep it outside `servers/`. |
-| `backups.retention` | `10` | Number of recent local backups retained per server; from 1 through 100. |
+| `backups.retention` | `10` | Number of recent local and S3 backups retained per server; from 1 through 100. |
 | `ports.range_min` | `25000` | First host port eligible for allocation; minimum is 1024. |
 | `ports.range_max` | `30000` | Exclusive upper bound for allocated host ports; maximum is 65535. |
 

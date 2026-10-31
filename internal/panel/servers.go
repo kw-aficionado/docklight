@@ -325,7 +325,7 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.removeServerBackupSchedules(s.ID); err != nil {
-		writeError(w, 500, "local backups were removed but their schedules could not be deleted")
+		writeError(w, 500, "backups were removed but their schedules could not be deleted")
 		return
 	}
 	if _, err := a.db.Exec(`DELETE FROM server_crashes WHERE server_id=?`, s.ID); err != nil {

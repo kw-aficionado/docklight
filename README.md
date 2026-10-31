@@ -6,7 +6,7 @@ Docklight is a self-hosted control panel for Docker game servers and apps. It ru
 
 The browser and product identity use **Docklight**. The current binary, CLI, service, and default filesystem paths still use `yggdrasil` while the implementation transitions from its original internal name.
 
-The current checkout contains the Phase 1 core plus local encrypted backups, per-server backup scheduling, signed webhook alerts, confirmed container crash history and alerts, and low-disk monitoring for Docklight's data filesystem. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
+The current checkout contains the Phase 1 core plus local and S3-compatible encrypted backups, per-server backup scheduling, signed webhook alerts, confirmed container crash history and alerts, and low-disk monitoring for Docklight's data filesystem. See [STATUS.md](STATUS.md) for implemented behavior, remaining work, and environment limits.
 
 ## Install on Debian or Ubuntu
 
