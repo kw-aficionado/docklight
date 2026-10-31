@@ -30,8 +30,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 6 {
-		t.Fatalf("expected 6 migrations, got %d", count)
+	if count != 7 {
+		t.Fatalf("expected 7 migrations, got %d", count)
 	}
 	var notificationTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_settings'`).Scan(&notificationTable); err != nil || notificationTable != "notification_settings" {
@@ -40,6 +40,10 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var crashTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='server_crashes'`).Scan(&crashTable); err != nil || crashTable != "server_crashes" {
 		t.Fatalf("server crash table missing: name=%q err=%v", crashTable, err)
+	}
+	var alertTable string
+	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='system_alert_state'`).Scan(&alertTable); err != nil || alertTable != "system_alert_state" {
+		t.Fatalf("system alert state table missing: name=%q err=%v", alertTable, err)
 	}
 	rows, err := d.Query(`PRAGMA table_info(servers)`)
 	if err != nil {

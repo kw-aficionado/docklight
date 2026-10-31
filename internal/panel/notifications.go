@@ -23,6 +23,7 @@ import (
 const (
 	notificationBackupSuccess = "backup.success"
 	notificationBackupFailure = "backup.failure"
+	notificationHostDiskLow   = "host.disk_low"
 )
 
 type notificationSettings struct {
@@ -142,8 +143,8 @@ func (a *App) updateNotificationSettings(w http.ResponseWriter, r *http.Request)
 		current.Events = make([]string, 0, len(in.Events))
 		for _, event := range in.Events {
 			event = strings.TrimSpace(event)
-			if event != notificationBackupSuccess && event != notificationBackupFailure {
-				writeError(w, http.StatusBadRequest, "event must be backup.success or backup.failure")
+			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationHostDiskLow {
+				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, or host.disk_low")
 				return
 			}
 			if !seen[event] {
@@ -218,6 +219,10 @@ func normalizeWebhookEndpoint(value string) (string, error) {
 }
 
 func (a *App) dispatchBackupNotification(event, serverID, serverName, message string) {
+	a.dispatchWebhookNotification(event, &webhookServer{ID: serverID, Name: serverName}, message)
+}
+
+func (a *App) dispatchWebhookNotification(event string, server *webhookServer, message string) {
 	stored, err := a.readNotificationSettings()
 	if err != nil {
 		log.Printf("could not read notification settings for %s", event)
@@ -229,7 +234,7 @@ func (a *App) dispatchBackupNotification(event, serverID, serverName, message st
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
-		payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: &webhookServer{ID: serverID, Name: serverName}, Message: message}
+		payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: server, Message: message}
 		if err := a.deliverWebhook(ctx, stored, payload); err != nil {
 			log.Printf("webhook notification %s failed: %v", event, err)
 		}

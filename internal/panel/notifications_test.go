@@ -41,10 +41,14 @@ func TestNotificationSettingsAreAdminOnlyEncryptedAndSigned(t *testing.T) {
 	if invalidHTTP.Code != http.StatusBadRequest {
 		t.Fatalf("remote HTTP endpoint accepted: %d %s", invalidHTTP.Code, invalidHTTP.Body.String())
 	}
+	invalidEvent := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"https://hooks.example.com/docklight","events":["host.disk_recovered"]}`, adminToken)
+	if invalidEvent.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported notification event accepted: %d %s", invalidEvent.Code, invalidEvent.Body.String())
+	}
 	endpoint := "http://127.0.0.1:18765/hook?private=url-token"
 	secret := "signing-secret-do-not-store-plaintext"
-	updated := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"`+endpoint+`","signing_secret":"`+secret+`","events":["backup.success","backup.failure"]}`, adminToken)
-	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"endpoint_configured":true`) || !strings.Contains(updated.Body.String(), `"signing_secret_configured":true`) {
+	updated := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"`+endpoint+`","signing_secret":"`+secret+`","events":["backup.success","backup.failure","host.disk_low"]}`, adminToken)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"endpoint_configured":true`) || !strings.Contains(updated.Body.String(), `"signing_secret_configured":true`) || !strings.Contains(updated.Body.String(), `"host.disk_low"`) {
 		t.Fatalf("save notification settings: %d %s", updated.Code, updated.Body.String())
 	}
 	if strings.Contains(updated.Body.String(), secret) || strings.Contains(updated.Body.String(), "private=url-token") || strings.Contains(updated.Body.String(), `"endpoint"`) {

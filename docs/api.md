@@ -55,8 +55,9 @@ Password and TOTP endpoints:
 | `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
 | `GET /api/servers/{id}/crashes` | Read the 50 most recent confirmed container exits or missing-container incidents; requires `server.view`. |
 | `GET /api/notifications` | Read admin-only webhook notification state; secrets and endpoint are never returned. |
-| `PUT /api/notifications` | Save admin-only webhook settings and backup event filters. |
+| `PUT /api/notifications` | Save admin-only webhook settings and event filters for backups and host disk alerts. |
 | `POST /api/notifications/test` | Send a signed test event to the configured webhook; admin only. |
+| `GET /api/system/disk` | Read current capacity and low-space alert state for the filesystem containing Docklight data; admin only. |
 
 Create a schedule with `{"name":"Nightly","cron":"0 3 * * *","enabled":true}`. The enabled field may be omitted; new schedules are enabled by default. Five-field cron uses minute, hour, day of month, month, and weekday. Six-field cron adds seconds first. Times are interpreted in the panel host local timezone. A scheduled backup runs only when the server is stopped; otherwise the failed attempt is recorded and the next cron time remains scheduled.
 

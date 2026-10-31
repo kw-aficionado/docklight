@@ -10,6 +10,10 @@ If Docker returns another error, Docklight keeps the last known server state and
 
 A confirmed incident sets the server to **Needs attention** and records the detected time, incident type, exit code when available, and a restart hint. Server files are preserved. Use the per-server **History** tab to read up to 50 recent incidents; Docklight retains up to 100 per server. Deleting a server also deletes its incident history.
 
+## Low disk space
+
+Docklight checks the filesystem that contains its data directory every five minutes. If available space falls below 10%, it marks the alert active and sends `host.disk_low` to the configured webhook when that event is enabled. The alert rearms when free space reaches 15%, so a continuing low-space condition does not send a message every five minutes. The Notifications page shows current capacity and alert state. The message identifies the server-data and local-backup paths to inspect. Only the Docklight data filesystem is measured; other mounted volumes are not enumerated, and Docklight never deletes files automatically.
+
 ## Current limits
 
-The monitor does not restart containers automatically, send crash notifications, retain Docker logs as crash artifacts, or detect low disk space. Review the Console and host Docker logs, then restart the server after addressing the cause.
+The runtime monitor does not restart containers automatically, send crash notifications, or retain Docker logs as crash artifacts. Review the Console and host Docker logs, then restart a server after addressing the cause.

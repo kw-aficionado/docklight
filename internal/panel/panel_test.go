@@ -83,8 +83,8 @@ func TestEmbeddedUIAndHealthRoutes(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
-		if w.Code != http.StatusOK || w.Header().Get("Content-Type") != tc.contentType || !strings.Contains(w.Body.String(), tc.bodyContains) {
-			t.Errorf("GET %s: status=%d content-type=%q body contains %q: %t", tc.path, w.Code, w.Header().Get("Content-Type"), tc.bodyContains, strings.Contains(w.Body.String(), tc.bodyContains))
+		if w.Code != http.StatusOK || w.Header().Get("Content-Type") != tc.contentType || w.Header().Get("Cache-Control") != "no-cache" || !strings.Contains(w.Body.String(), tc.bodyContains) {
+			t.Errorf("GET %s: status=%d content-type=%q cache-control=%q body contains %q: %t", tc.path, w.Code, w.Header().Get("Content-Type"), w.Header().Get("Cache-Control"), tc.bodyContains, strings.Contains(w.Body.String(), tc.bodyContains))
 		}
 	}
 	health := httptest.NewRecorder()

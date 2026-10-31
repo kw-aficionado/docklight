@@ -41,6 +41,8 @@ type App struct {
 	runtimePending     map[string]pendingRuntimeIncident
 	runtimeInspect     func(context.Context, string) (docker.Inspect, error)
 	runtimePing        func(context.Context) error
+	diskAlertMu        sync.Mutex
+	diskProbe          func(string) (diskUsage, error)
 	rateMu             sync.Mutex
 	loginIPs           map[string][]time.Time
 	loginUsers         map[string][]time.Time
@@ -192,6 +194,7 @@ func (a *App) Router() http.Handler {
 			priv.Get("/notifications", a.admin(a.getNotificationSettings))
 			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
 			priv.Post("/notifications/test", a.admin(a.testNotification))
+			priv.Get("/system/disk", a.admin(a.getDiskStatus))
 			priv.Post("/servers/{id}/install", a.installServer)
 			priv.Get("/servers/{id}/install/status", a.installStatus)
 			priv.Post("/servers/{id}/start", a.startServer)
@@ -254,6 +257,7 @@ func (a *App) static(file, contentType string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(200)
 		_, _ = w.Write(b)
 	}
