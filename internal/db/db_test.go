@@ -47,8 +47,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 10 {
-		t.Fatalf("expected 10 migrations, got %d", count)
+	if count != 11 {
+		t.Fatalf("expected 11 migrations, got %d", count)
 	}
 	var notificationTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_settings'`).Scan(&notificationTable); err != nil || notificationTable != "notification_settings" {
@@ -108,15 +108,15 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 		t.Fatalf("version 4 did not create schedule tables: schedules=%d runs=%d", schedulesTable, runsTable)
 	}
 	var scheduleColumns int
-	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_schedules') WHERE name IN ('action','warn_players','warning_seconds')`).Scan(&scheduleColumns); err != nil || scheduleColumns != 3 {
-		t.Fatalf("version 10 schedule columns missing: count=%d err=%v", scheduleColumns, err)
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_schedules') WHERE name IN ('action','warn_players','warning_seconds','skip_if_players_online')`).Scan(&scheduleColumns); err != nil || scheduleColumns != 4 {
+		t.Fatalf("version 10/11 schedule columns missing: count=%d err=%v", scheduleColumns, err)
 	}
 	var action string
-	var warnPlayers, warningSeconds int
-	if err = d.QueryRow(`SELECT action,warn_players,warning_seconds FROM backup_schedules WHERE id='legacy-schedule'`).Scan(&action, &warnPlayers, &warningSeconds); err != nil {
+	var warnPlayers, warningSeconds, skipIfPlayersOnline int
+	if err = d.QueryRow(`SELECT action,warn_players,warning_seconds,skip_if_players_online FROM backup_schedules WHERE id='legacy-schedule'`).Scan(&action, &warnPlayers, &warningSeconds, &skipIfPlayersOnline); err != nil {
 		t.Fatal(err)
 	}
-	if action != "backup" || warnPlayers != 0 || warningSeconds != 60 {
-		t.Fatalf("legacy backup schedule migrated as action=%q warn=%d seconds=%d", action, warnPlayers, warningSeconds)
+	if action != "backup" || warnPlayers != 0 || warningSeconds != 60 || skipIfPlayersOnline != 0 {
+		t.Fatalf("legacy backup schedule migrated as action=%q warn=%d seconds=%d skip=%d", action, warnPlayers, warningSeconds, skipIfPlayersOnline)
 	}
 }

@@ -312,6 +312,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 11 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "backup_schedules", "skip_if_players_online") {
+			if _, err = tx.Exec(`ALTER TABLE backup_schedules ADD COLUMN skip_if_players_online INTEGER NOT NULL DEFAULT 0`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(11)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

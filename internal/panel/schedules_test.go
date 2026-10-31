@@ -3,6 +3,7 @@ package panel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,10 +46,10 @@ func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) 
 		t.Fatal(err)
 	}
 	options = testRequest(h, http.MethodGet, "/api/servers/restart-schedule-server/schedule-options", "", token)
-	if options.Code != http.StatusOK || !strings.Contains(options.Body.String(), `"at":"1m"`) {
+	if options.Code != http.StatusOK || !strings.Contains(options.Body.String(), `"at":"1m"`) || !strings.Contains(options.Body.String(), `"can_skip_if_players_online":true`) {
 		t.Fatalf("authorized user did not receive template restart warnings: %d %s", options.Code, options.Body.String())
 	}
-	created := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"restart","name":"Daily restart","cron":"0 3 * * *","warning_seconds":60}`, token)
+	created := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"restart","name":"Daily restart","cron":"0 3 * * *","warning_seconds":60,"skip_if_players_online":true}`, token)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create restart schedule: %d %s", created.Code, created.Body.String())
 	}
@@ -56,16 +57,104 @@ func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) 
 	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil {
 		t.Fatal(err)
 	}
-	if item.Action != "restart" || !item.WarnPlayers || item.WarningSeconds != 60 || !item.Enabled || item.NextRun == "" {
+	if item.Action != "restart" || !item.WarnPlayers || item.WarningSeconds != 60 || !item.SkipIfPlayersOnline || !item.Enabled || item.NextRun == "" {
 		t.Fatalf("restart schedule was not persisted correctly: %#v", item)
 	}
 	invalid := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"restart","cron":"0 4 * * *","warning_seconds":600}`, token)
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("countdown absent from template warnings was accepted: %d %s", invalid.Code, invalid.Body.String())
 	}
+	wrongAction := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"start","cron":"0 5 * * *","skip_if_players_online":true}`, token)
+	if wrongAction.Code != http.StatusBadRequest {
+		t.Fatalf("player guard was accepted for a start schedule: %d %s", wrongAction.Code, wrongAction.Body.String())
+	}
 	listed := testRequest(h, http.MethodGet, "/api/servers/restart-schedule-server/schedules", "", token)
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"action":"restart"`) || !strings.Contains(listed.Body.String(), `"warning_seconds":60`) {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"action":"restart"`) || !strings.Contains(listed.Body.String(), `"warning_seconds":60`) || !strings.Contains(listed.Body.String(), `"skip_if_players_online":true`) {
 		t.Fatalf("restart schedule settings missing from list response: %d %s", listed.Code, listed.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE servers SET gameskill_id='uptime-kuma' WHERE id='restart-schedule-server'`); err != nil {
+		t.Fatal(err)
+	}
+	unsupportedQuery := testRequest(h, http.MethodPost, "/api/servers/restart-schedule-server/schedules", `{"action":"restart","cron":"0 6 * * *","warn_players":false,"skip_if_players_online":true}`, token)
+	if unsupportedQuery.Code != http.StatusBadRequest || !strings.Contains(unsupportedQuery.Body.String(), "player query protocol") {
+		t.Fatalf("player guard was accepted without a query-capable template: %d %s", unsupportedQuery.Code, unsupportedQuery.Body.String())
+	}
+}
+
+func TestScheduledRestartSkipsWhenPlayersAreOnline(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "players-online-schedule-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('players-online-schedule-server','Online test','minecraft-java','running',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('players-online-restart','players-online-schedule-server','Do not interrupt players','restart','* * * * *',1,1,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	a.schedulePlayers = func(context.Context, string) (int, error) { return 4, nil }
+	restarted := make(chan struct{}, 1)
+	a.scheduleRestart = func(context.Context, string, bool, int) (string, error) {
+		restarted <- struct{}{}
+		return "unexpected restart", nil
+	}
+	if err := a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	var status, detail, lastError string
+	deadline := time.Now().Add(time.Second)
+	for {
+		if err := d.QueryRow(`SELECT r.status,r.detail,s.last_error FROM backup_schedule_runs r JOIN backup_schedules s ON s.id=r.schedule_id WHERE s.id='players-online-restart'`).Scan(&status, &detail, &lastError); err != nil {
+			t.Fatal(err)
+		}
+		if status != "running" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case <-restarted:
+		t.Fatal("scheduled restart ran while players were online")
+	default:
+	}
+	if status != "skipped" || detail != "skipped because players are online (4 online)" || lastError != "" {
+		t.Fatalf("online-player run status=%q detail=%q last_error=%q", status, detail, lastError)
+	}
+}
+
+func TestScheduledRestartContinuesWhenPlayerCountIsUnavailable(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "unknown-player-count-schedule-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('unknown-player-count-schedule-server','Unknown count test','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,skip_if_players_online,next_run) VALUES('unknown-player-count-restart','unknown-player-count-schedule-server','Proceed on query failure','restart','* * * * *',1,1,?)`, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	a.schedulePlayers = func(context.Context, string) (int, error) { return 0, errors.New("query unavailable") }
+	a.scheduleRestart = func(context.Context, string, bool, int) (string, error) { return "restart completed", nil }
+	if err := a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	var status, detail string
+	for time.Now().Before(deadline) {
+		if err := d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id='unknown-player-count-restart'`).Scan(&status, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if status == "success" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if status != "success" || !strings.Contains(detail, "player count unavailable; proceeding with scheduled restart") || !strings.Contains(detail, "restart completed") {
+		t.Fatalf("restart did not proceed after the query failed: status=%q detail=%q", status, detail)
 	}
 }
 

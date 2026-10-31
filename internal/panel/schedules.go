@@ -20,19 +20,20 @@ import (
 const scheduleTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 
 type backupSchedule struct {
-	ID             string `json:"id"`
-	ServerID       string `json:"server_id"`
-	Name           string `json:"name"`
-	Action         string `json:"action"`
-	Cron           string `json:"cron"`
-	Enabled        bool   `json:"enabled"`
-	WarnPlayers    bool   `json:"warn_players"`
-	WarningSeconds int    `json:"warning_seconds"`
-	NextRun        string `json:"next_run"`
-	LastRun        string `json:"last_run"`
-	LastStatus     string `json:"last_status"`
-	LastError      string `json:"last_error"`
-	CreatedAt      string `json:"created_at"`
+	ID                  string `json:"id"`
+	ServerID            string `json:"server_id"`
+	Name                string `json:"name"`
+	Action              string `json:"action"`
+	Cron                string `json:"cron"`
+	Enabled             bool   `json:"enabled"`
+	WarnPlayers         bool   `json:"warn_players"`
+	WarningSeconds      int    `json:"warning_seconds"`
+	SkipIfPlayersOnline bool   `json:"skip_if_players_online"`
+	NextRun             string `json:"next_run"`
+	LastRun             string `json:"last_run"`
+	LastStatus          string `json:"last_status"`
+	LastError           string `json:"last_error"`
+	CreatedAt           string `json:"created_at"`
 }
 
 type backupScheduleRun struct {
@@ -129,7 +130,7 @@ func (a *App) listBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := a.db.Query(`SELECT id,server_id,name,action,cron,enabled,warn_players,warning_seconds,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE server_id=? ORDER BY created_at DESC,id DESC`, s.ID)
+	rows, err := a.db.Query(`SELECT id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE server_id=? ORDER BY created_at DESC,id DESC`, s.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list backup schedules")
 		return
@@ -138,13 +139,14 @@ func (a *App) listBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	out := []backupSchedule{}
 	for rows.Next() {
 		var item backupSchedule
-		var enabled, warnPlayers int
-		if err = rows.Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt); err != nil {
+		var enabled, warnPlayers, skipIfPlayersOnline int
+		if err = rows.Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read backup schedule metadata")
 			return
 		}
 		item.Enabled = enabled != 0
 		item.WarnPlayers = warnPlayers != 0
+		item.SkipIfPlayersOnline = skipIfPlayersOnline != 0
 		out = append(out, item)
 	}
 	if err = rows.Err(); err != nil {
@@ -160,6 +162,7 @@ func (a *App) scheduleOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	warnings := []gameskill.RestartWarning{}
+	canSkipIfPlayersOnline := false
 	if a.allowedServer(principal(r), "server.control", s.ID, s.GameskillID) {
 		gs, err := a.loadRune(s.GameskillID)
 		if err != nil {
@@ -169,8 +172,9 @@ func (a *App) scheduleOptions(w http.ResponseWriter, r *http.Request) {
 		if gs.Restart != nil {
 			warnings = gs.Restart.Warnings
 		}
+		canSkipIfPlayersOnline = gs.Query != nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"restart_warnings": warnings})
+	writeJSON(w, http.StatusOK, map[string]any{"restart_warnings": warnings, "can_skip_if_players_online": canSkipIfPlayersOnline})
 }
 
 func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
@@ -180,12 +184,13 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	u := principal(r)
 	var in struct {
-		Name           string `json:"name"`
-		Action         string `json:"action"`
-		Cron           string `json:"cron"`
-		Enabled        *bool  `json:"enabled"`
-		WarnPlayers    *bool  `json:"warn_players"`
-		WarningSeconds *int   `json:"warning_seconds"`
+		Name                string `json:"name"`
+		Action              string `json:"action"`
+		Cron                string `json:"cron"`
+		Enabled             *bool  `json:"enabled"`
+		WarnPlayers         *bool  `json:"warn_players"`
+		WarningSeconds      *int   `json:"warning_seconds"`
+		SkipIfPlayersOnline bool   `json:"skip_if_players_online"`
 	}
 	if decodeJSON(w, r, &in, 4096) != nil {
 		return
@@ -202,6 +207,21 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	if !a.allowedServer(u, permission, s.ID, s.GameskillID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
 		return
+	}
+	if in.SkipIfPlayersOnline {
+		if in.Action != "restart" {
+			writeError(w, http.StatusBadRequest, "skip_if_players_online is supported only for restart schedules")
+			return
+		}
+		gs, loadErr := a.loadRune(s.GameskillID)
+		if loadErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not read the server template to validate its player query")
+			return
+		}
+		if gs.Query == nil {
+			writeError(w, http.StatusBadRequest, "skip_if_players_online requires a template with a player query protocol")
+			return
+		}
 	}
 	warnPlayers, warningSeconds, err := a.validateScheduleAction(s, in.Action, in.WarnPlayers, in.WarningSeconds)
 	if err != nil {
@@ -248,7 +268,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not generate a schedule ID")
 		return
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,warn_players,warning_seconds,next_run) VALUES(?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, nextRun); err != nil {
+	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), nextRun); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save backup schedule")
 		return
 	}
@@ -417,9 +437,11 @@ func (a *App) getBackupSchedule(serverID, id string) (backupSchedule, error) {
 	var item backupSchedule
 	var enabled int
 	var warnPlayers int
-	err := a.db.QueryRow(`SELECT id,server_id,name,action,cron,enabled,warn_players,warning_seconds,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE id=? AND server_id=?`, id, serverID).Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt)
+	var skipIfPlayersOnline int
+	err := a.db.QueryRow(`SELECT id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE id=? AND server_id=?`, id, serverID).Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt)
 	item.Enabled = enabled != 0
 	item.WarnPlayers = warnPlayers != 0
+	item.SkipIfPlayersOnline = skipIfPlayersOnline != 0
 	return item, err
 }
 
@@ -487,8 +509,8 @@ func (a *App) processDueBackupSchedules(ctx context.Context, now time.Time) erro
 
 func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time) error {
 	var serverID, name, action, expression, nextRun string
-	var enabled, warnPlayers, warningSeconds int
-	if err := a.db.QueryRow(`SELECT server_id,name,action,cron,enabled,warn_players,warning_seconds,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &expression, &enabled, &warnPlayers, &warningSeconds, &nextRun); err != nil {
+	var enabled, warnPlayers, warningSeconds, skipIfPlayersOnline int
+	if err := a.db.QueryRow(`SELECT server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &expression, &enabled, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &nextRun); err != nil {
 		return err
 	}
 	if enabled == 0 || nextRun == "" || nextRun > scheduleTimestamp(now) {
@@ -532,6 +554,19 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 		return err
 	}
 	if action == "restart" {
+		playerCheckDetail := ""
+		if skipIfPlayersOnline != 0 {
+			players, queryErr := a.scheduledPlayerCount(ctx, serverID)
+			if ctx.Err() != nil {
+				return a.finishScheduleRun(id, serverID, action, runID, "error", ctx.Err().Error())
+			}
+			if queryErr == nil && players > 0 {
+				return a.finishScheduleRun(id, serverID, action, runID, "skipped", fmt.Sprintf("skipped because players are online (%d online)", players))
+			}
+			if queryErr != nil {
+				playerCheckDetail = "player count unavailable; proceeding with scheduled restart"
+			}
+		}
 		warn := warnPlayers != 0
 		leadSeconds := warningSeconds
 		initiated := "restart initiated"
@@ -542,7 +577,7 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 			return fmt.Errorf("restart was queued but its run history could not be updated: %w", err)
 		}
 		a.audit(User{Username: "scheduler"}, "server.schedule.restart", "backup_schedule", id, fmt.Sprintf("server=%s detail=%s", serverID, initiated))
-		go a.finishScheduledRestart(ctx, serverID, id, name, warn, leadSeconds, runID)
+		go a.finishScheduledRestart(ctx, serverID, id, name, warn, leadSeconds, playerCheckDetail, runID)
 		return nil
 	}
 	status, detail := "success", ""
@@ -570,7 +605,7 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 	return a.finishScheduleRun(id, serverID, action, runID, status, detail)
 }
 
-func (a *App) finishScheduledRestart(ctx context.Context, serverID, scheduleID, name string, warn bool, warningSeconds int, runID string) {
+func (a *App) finishScheduledRestart(ctx context.Context, serverID, scheduleID, name string, warn bool, warningSeconds int, playerCheckDetail, runID string) {
 	var detail string
 	var err error
 	if a.scheduleRestart != nil {
@@ -583,12 +618,53 @@ func (a *App) finishScheduledRestart(ctx context.Context, serverID, scheduleID, 
 		status = "error"
 		detail = err.Error()
 	}
+	if playerCheckDetail != "" {
+		if detail != "" {
+			detail = playerCheckDetail + "; " + detail
+		} else {
+			detail = playerCheckDetail
+		}
+	}
 	if strings.TrimSpace(name) != "" && status == "success" {
 		detail = name + ": " + detail
 	}
 	if err = a.finishScheduleRun(scheduleID, serverID, "restart", runID, status, detail); err != nil {
 		log.Printf("scheduled restart %s: %v", scheduleID, err)
 	}
+}
+
+func (a *App) scheduledPlayerCount(ctx context.Context, serverID string) (int, error) {
+	if a.schedulePlayers != nil {
+		return a.schedulePlayers(ctx, serverID)
+	}
+	s, err := a.getServer(serverID)
+	if err != nil {
+		return 0, errors.New("server no longer exists")
+	}
+	if s.Status != "running" {
+		return 0, errors.New("server is not running")
+	}
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		return 0, err
+	}
+	if gs.Query == nil {
+		return 0, errors.New("server template does not define a player query protocol")
+	}
+	port, err := queryPort(s, gs)
+	if err != nil {
+		return 0, err
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	result, err := queryAtPort(queryCtx, gs, port)
+	if err != nil {
+		return 0, err
+	}
+	if result.Online < 0 {
+		return 0, errors.New("player query returned a negative count")
+	}
+	return result.Online, nil
 }
 
 func (a *App) finishScheduleRun(id, serverID, action, runID, status, detail string) error {

@@ -38,6 +38,7 @@ type App struct {
 	scheduleMu         sync.Mutex
 	scheduleRestart    func(context.Context, string, bool, int) (string, error)
 	scheduleControl    func(context.Context, string, string) (string, string, error)
+	schedulePlayers    func(context.Context, string) (int, error)
 	scheduleWait       func(context.Context, time.Duration) error
 	scheduleCommand    func(context.Context, Server, string) error
 	notificationClient *http.Client
