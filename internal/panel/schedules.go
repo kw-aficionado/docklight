@@ -3,6 +3,7 @@ package panel
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -62,6 +63,8 @@ func scheduleActionPermission(action string) (string, bool) {
 		return "server.control", true
 	case "command":
 		return "server.console", true
+	case "message":
+		return "", true
 	default:
 		return "", false
 	}
@@ -69,7 +72,7 @@ func scheduleActionPermission(action string) (string, bool) {
 
 func (a *App) validateScheduleAction(s Server, action string, warnInput *bool, secondsInput *int) (bool, int, error) {
 	switch action {
-	case "backup", "start", "stop", "command":
+	case "backup", "start", "stop", "command", "message":
 		return false, 60, nil
 	case "restart":
 	default:
@@ -202,14 +205,16 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	u := principal(r)
 	var in struct {
-		Name                string `json:"name"`
-		Action              string `json:"action"`
-		Cron                string `json:"cron"`
-		Enabled             *bool  `json:"enabled"`
-		WarnPlayers         *bool  `json:"warn_players"`
-		WarningSeconds      *int   `json:"warning_seconds"`
-		SkipIfPlayersOnline bool   `json:"skip_if_players_online"`
-		Command             string `json:"command"`
+		Name                string         `json:"name"`
+		Action              string         `json:"action"`
+		Cron                string         `json:"cron"`
+		Enabled             *bool          `json:"enabled"`
+		WarnPlayers         *bool          `json:"warn_players"`
+		WarningSeconds      *int           `json:"warning_seconds"`
+		SkipIfPlayersOnline bool           `json:"skip_if_players_online"`
+		Command             string         `json:"command"`
+		MessageTemplateID   string         `json:"message_template_id"`
+		MessageValues       map[string]int `json:"values"`
 	}
 	if decodeJSON(w, r, &in, 8*1024) != nil {
 		return
@@ -220,10 +225,10 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	permission, ok := scheduleActionPermission(in.Action)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, stop, or command")
+		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, stop, command, or message")
 		return
 	}
-	if !a.allowedServer(u, permission, s.ID, s.GameskillID) {
+	if permission != "" && !a.allowedServer(u, permission, s.ID, s.GameskillID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
 		return
 	}
@@ -254,6 +259,31 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "command is accepted only for command schedules")
 		return
 	}
+	messagePayload := scheduledMessagePayload{}
+	if in.Action == "message" {
+		if s.GameskillID != "minecraft-java" && s.GameskillID != "minecraft-bedrock" {
+			writeError(w, http.StatusBadRequest, "scheduled player messages are supported by Minecraft Java and Bedrock templates")
+			return
+		}
+		_, templateBody, lookupErr := a.messageTemplateByID(in.MessageTemplateID)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "select an available message template")
+			return
+		}
+		if lookupErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not read the selected message template")
+			return
+		}
+		payload, payloadErr := prepareScheduledMessage(templateBody, in.MessageValues)
+		if payloadErr != nil {
+			writeError(w, http.StatusBadRequest, payloadErr.Error())
+			return
+		}
+		messagePayload = payload
+	} else if in.MessageTemplateID != "" || in.MessageValues != nil {
+		writeError(w, http.StatusBadRequest, "message_template_id and values are accepted only for message schedules")
+		return
+	}
 	warnPlayers, warningSeconds, err := a.validateScheduleAction(s, in.Action, in.WarnPlayers, in.WarningSeconds)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -270,6 +300,8 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 			in.Name = "Scheduled stop"
 		case "command":
 			in.Name = "Scheduled command"
+		case "message":
+			in.Name = "Scheduled message"
 		default:
 			in.Name = "Scheduled backup"
 		}
@@ -302,6 +334,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	commandEnc := ""
+	messagePayloadEnc := ""
 	if command != "" {
 		commandEnc, err = security.Encrypt([]byte(a.cfg.Auth.SecretKey), command)
 		if err != nil {
@@ -309,7 +342,19 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,next_run) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), commandEnc, nextRun); err != nil {
+	if in.Action == "message" {
+		payload, marshalErr := json.Marshal(messagePayload)
+		if marshalErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not encode scheduled message")
+			return
+		}
+		messagePayloadEnc, err = security.Encrypt([]byte(a.cfg.Auth.SecretKey), string(payload))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not encrypt scheduled message")
+			return
+		}
+	}
+	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), commandEnc, messagePayloadEnc, nextRun); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save backup schedule")
 		return
 	}
@@ -351,7 +396,7 @@ func (a *App) updateBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "stored schedule action is invalid")
 		return
 	}
-	if (in.Cron != nil || in.Enabled != nil && *in.Enabled) && !a.allowedServer(u, permission, s.ID, s.GameskillID) {
+	if permission != "" && (in.Cron != nil || in.Enabled != nil && *in.Enabled) && !a.allowedServer(u, permission, s.ID, s.GameskillID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to enable or change this schedule")
 		return
 	}
@@ -549,9 +594,9 @@ func (a *App) processDueBackupSchedules(ctx context.Context, now time.Time) erro
 }
 
 func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time) error {
-	var serverID, name, action, expression, commandEnc, nextRun string
+	var serverID, name, action, expression, commandEnc, messagePayloadEnc, nextRun string
 	var enabled, warnPlayers, warningSeconds, skipIfPlayersOnline int
-	if err := a.db.QueryRow(`SELECT server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &expression, &enabled, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &nextRun); err != nil {
+	if err := a.db.QueryRow(`SELECT server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &expression, &enabled, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc, &nextRun); err != nil {
 		return err
 	}
 	if enabled == 0 || nextRun == "" || nextRun > scheduleTimestamp(now) {
@@ -644,6 +689,21 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 		} else if detail, err = a.executeScheduledCommand(ctx, serverID, command); err != nil {
 			status = "error"
 			detail = err.Error()
+		}
+	} else if action == "message" {
+		payloadJSON, decryptErr := security.Decrypt([]byte(a.cfg.Auth.SecretKey), messagePayloadEnc)
+		if decryptErr != nil {
+			status = "error"
+			detail = "stored scheduled message could not be decrypted; check auth.secret_key"
+		} else {
+			var payload scheduledMessagePayload
+			if json.Unmarshal([]byte(payloadJSON), &payload) != nil {
+				status = "error"
+				detail = "stored scheduled message could not be read"
+			} else if detail, err = a.executeScheduledMessage(ctx, serverID, payload); err != nil {
+				status = "error"
+				detail = err.Error()
+			}
 		}
 	} else if action != "backup" {
 		status = "error"
@@ -802,15 +862,33 @@ func (a *App) executeScheduledControl(ctx context.Context, serverID, action stri
 func (a *App) executeScheduledCommand(ctx context.Context, serverID, command string) (string, error) {
 	a.dataMu.Lock()
 	defer a.dataMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
 	s, err := a.getServer(serverID)
 	if err != nil {
 		return "", errors.New("server no longer exists")
 	}
+	return a.dispatchScheduledConsoleCommand(ctx, s, command, "console command sent", "console command could not be sent")
+}
+
+func (a *App) executeScheduledMessage(ctx context.Context, serverID string, payload scheduledMessagePayload) (string, error) {
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	s, err := a.getServer(serverID)
+	if err != nil {
+		return "", errors.New("server no longer exists")
+	}
+	command, err := renderScheduledMessage(payload, s.Name)
+	if err != nil {
+		return "", err
+	}
+	return a.dispatchScheduledConsoleCommand(ctx, s, command, "scheduled message sent", "scheduled message could not be sent")
+}
+
+func (a *App) dispatchScheduledConsoleCommand(ctx context.Context, s Server, command, successDetail, errorDetail string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if s.ContainerID == "" || s.Status != "running" {
-		return "", errors.New("server is not running; start it before the scheduled command")
+		return "", errors.New("server is not running; start it before the scheduled console action")
 	}
 	send := a.scheduleCommand
 	if send == nil {
@@ -819,10 +897,10 @@ func (a *App) executeScheduledCommand(ctx context.Context, serverID, command str
 			return sendErr
 		}
 	}
-	if err = send(ctx, s, command); err != nil {
-		return "", errors.New("console command could not be sent")
+	if err := send(ctx, s, command); err != nil {
+		return "", errors.New(errorDetail)
 	}
-	return "console command sent", nil
+	return successDetail, nil
 }
 
 func (a *App) executeScheduledRestart(ctx context.Context, serverID string, warn bool, warningSeconds int) (string, error) {

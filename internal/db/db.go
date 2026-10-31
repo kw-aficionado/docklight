@@ -350,6 +350,48 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 13 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS message_templates (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			body TEXT NOT NULL,
+			builtin INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if !hasColumn(tx, "backup_schedules", "message_payload_enc") {
+			if _, err = tx.Exec(`ALTER TABLE backup_schedules ADD COLUMN message_payload_enc TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		for _, item := range []struct{ id, name, body string }{
+			{"builtin-restart-warning", "Restart warning", "say {{server_name}} will restart in {{minutes}} minutes."},
+			{"builtin-restart-countdown", "Restart countdown", "say {{server_name}} is restarting in {{seconds}} seconds."},
+			{"builtin-backup-warning", "Backup warning", "say {{server_name}} backup starts in {{minutes}} minutes."},
+			{"builtin-maintenance-notice", "Maintenance notice", "say {{server_name}} maintenance starts in {{minutes}} minutes."},
+			{"builtin-update-warning", "Update warning", "say {{server_name}} update starts in {{minutes}} minutes."},
+		} {
+			if _, err = tx.Exec(`INSERT INTO message_templates(id,name,body,builtin) VALUES(?,?,?,1) ON CONFLICT(id) DO NOTHING`, item.id, item.name, item.body); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(13)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -280,6 +280,96 @@ func TestScheduledCommandDispatchesAndKeepsCommandOutOfRunHistory(t *testing.T) 
 	}
 }
 
+func TestScheduledMessageUsesEncryptedTemplateWithSchedulePermissionOnly(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "message-schedule-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,container_id,env_json,ports_json,data_dir) VALUES('message-schedule-server','Visible MC','minecraft-java','running',1,'message-container','{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('message-schedule-user','message-schedule-user','unused-hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	token, err := a.issue(User{ID: "message-schedule-user", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO permissions(user_id,scope_type,scope_id,perms) VALUES('message-schedule-user','server','message-schedule-server','server.schedule')`); err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	if _, err = d.Exec(`UPDATE servers SET gameskill_id='uptime-kuma' WHERE id='message-schedule-server'`); err != nil {
+		t.Fatal(err)
+	}
+	wrongTemplate := testRequest(h, http.MethodPost, "/api/servers/message-schedule-server/schedules", `{"action":"message","cron":"0 2 * * *","message_template_id":"builtin-maintenance-notice","values":{"minutes":5}}`, token)
+	if wrongTemplate.Code != http.StatusBadRequest || !strings.Contains(wrongTemplate.Body.String(), "Minecraft Java and Bedrock") {
+		t.Fatalf("player message schedule was offered for a non-Minecraft app: %d %s", wrongTemplate.Code, wrongTemplate.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE servers SET gameskill_id='minecraft-java' WHERE id='message-schedule-server'`); err != nil {
+		t.Fatal(err)
+	}
+	missingValue := testRequest(h, http.MethodPost, "/api/servers/message-schedule-server/schedules", `{"action":"message","cron":"0 3 * * *","message_template_id":"builtin-maintenance-notice"}`, token)
+	if missingValue.Code != http.StatusBadRequest || !strings.Contains(missingValue.Body.String(), "enter a value for {{minutes}}") {
+		t.Fatalf("message schedule accepted a missing template value: %d %s", missingValue.Code, missingValue.Body.String())
+	}
+	created := testRequest(h, http.MethodPost, "/api/servers/message-schedule-server/schedules", `{"action":"message","cron":"0 3 * * *","message_template_id":"builtin-maintenance-notice","values":{"minutes":5}}`, token)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create schedule with only server.schedule permission: %d %s", created.Code, created.Body.String())
+	}
+	var item backupSchedule
+	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.Action != "message" || item.Name != "Scheduled message" || strings.Contains(created.Body.String(), "maintenance starts") {
+		t.Fatalf("message schedule response contains an unexpected value: %#v %s", item, created.Body.String())
+	}
+	var messagePayloadEnc, commandEnc string
+	if err = d.QueryRow(`SELECT message_payload_enc,command_enc FROM backup_schedules WHERE id=?`, item.ID).Scan(&messagePayloadEnc, &commandEnc); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(messagePayloadEnc, "enc:") || commandEnc != "" {
+		t.Fatalf("message schedule payload is not encrypted in its dedicated field: payload=%q command=%q", messagePayloadEnc, commandEnc)
+	}
+	decrypted, err := security.Decrypt([]byte(a.cfg.Auth.SecretKey), messagePayloadEnc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload scheduledMessagePayload
+	if err = json.Unmarshal([]byte(decrypted), &payload); err != nil || payload.Body != "say {{server_name}} maintenance starts in {{minutes}} minutes." || payload.Values["minutes"] != 5 {
+		t.Fatalf("stored message template did not round-trip: payload=%#v err=%v", payload, err)
+	}
+	now := time.Now()
+	if _, err = d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id=?`, scheduleTimestamp(now.Add(-time.Second)), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	var sent string
+	a.scheduleCommand = func(_ context.Context, _ Server, value string) error { sent = value; return nil }
+	if err = a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	want := "say Visible MC maintenance starts in 5 minutes."
+	if sent != want {
+		t.Fatalf("rendered scheduled message=%q, want %q", sent, want)
+	}
+	var status, detail string
+	if err = d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id=?`, item.ID).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "success" || detail != "scheduled message sent" || strings.Contains(detail, want) {
+		t.Fatalf("message run history leaked content or has wrong result: status=%q detail=%q", status, detail)
+	}
+	listed := testRequest(h, http.MethodGet, "/api/servers/message-schedule-server/schedules", "", token)
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), want) || !strings.Contains(listed.Body.String(), `"action":"message"`) {
+		t.Fatalf("message schedule API response leaked rendered content: %d %s", listed.Code, listed.Body.String())
+	}
+	runs := testRequest(h, http.MethodGet, "/api/servers/message-schedule-server/schedules/"+item.ID+"/runs", "", token)
+	if runs.Code != http.StatusOK || strings.Contains(runs.Body.String(), want) {
+		t.Fatalf("message run API response leaked rendered content: %d %s", runs.Code, runs.Body.String())
+	}
+}
+
 func TestLifecycleSchedulesRequireControlAndPersistAction(t *testing.T) {
 	a, d, _ := testApp(t)
 	dataDir := filepath.Join(a.dataRoot, "lifecycle-schedule-server")
