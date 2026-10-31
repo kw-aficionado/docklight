@@ -69,7 +69,7 @@ Create a backup with `{"action":"backup","name":"Nightly","cron":"0 3 * * *","en
 
 Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires `server.backup`; schedule management requires `server.schedule`, and backup, lifecycle, and console-command schedules additionally require `server.backup`, `server.control`, or `server.console`, respectively. Message-template management requires an administrator. API token permissions are intersected with the account's grants.
 
-Webhook notification settings accept `enabled`, `endpoint`, `signing_secret`, `events`, `clear_endpoint`, and `clear_signing_secret`. Supported events are `backup.success`, `backup.failure`, `server.crash`, `server.watchdog`, and `host.disk_low`. Blank endpoint or signing secret fields preserve the saved value; use the `clear_*` flags to remove them. Endpoint and signing secret are encrypted at rest and omitted from every response. See [notifications](guides/notifications.md) for delivery and signature details.
+Webhook notification settings accept `enabled`, `endpoint`, `signing_secret`, `events`, `clear_endpoint`, and `clear_signing_secret`. Supported events are `backup.success`, `backup.failure`, `schedule.success`, `schedule.failure`, `server.crash`, `server.watchdog`, and `host.disk_low`. Blank endpoint or signing secret fields preserve the saved value; use the `clear_*` flags to remove them. Endpoint and signing secret are encrypted at rest and omitted from every response. See [notifications](guides/notifications.md) for delivery and signature details.
 
 Example server creation:
 

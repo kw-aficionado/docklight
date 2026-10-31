@@ -794,6 +794,7 @@ func (a *App) finishScheduleRun(id, serverID, action, runID, status, detail stri
 			a.dispatchBackupNotification(notificationBackupFailure, serverID, server.Name, "A scheduled backup failed. Review the schedule run history for details.")
 		}
 	}
+	a.dispatchScheduledRunNotification(id, serverID, action, status)
 	if _, pruneErr := a.db.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id=? AND id NOT IN (SELECT id FROM backup_schedule_runs WHERE schedule_id=? ORDER BY started_at DESC,id DESC LIMIT 50)`, id, id); pruneErr != nil {
 		log.Printf("could not prune run history for schedule %s", id)
 	}

@@ -21,11 +21,13 @@ import (
 )
 
 const (
-	notificationBackupSuccess = "backup.success"
-	notificationBackupFailure = "backup.failure"
-	notificationServerCrash   = "server.crash"
-	notificationWatchdog      = "server.watchdog"
-	notificationHostDiskLow   = "host.disk_low"
+	notificationBackupSuccess   = "backup.success"
+	notificationBackupFailure   = "backup.failure"
+	notificationServerCrash     = "server.crash"
+	notificationWatchdog        = "server.watchdog"
+	notificationHostDiskLow     = "host.disk_low"
+	notificationScheduleSuccess = "schedule.success"
+	notificationScheduleFailure = "schedule.failure"
 )
 
 type notificationSettings struct {
@@ -45,16 +47,23 @@ type storedNotificationSettings struct {
 }
 
 type webhookPayload struct {
-	Product  string         `json:"product"`
-	Event    string         `json:"event"`
-	Occurred string         `json:"occurred_at"`
-	Server   *webhookServer `json:"server,omitempty"`
-	Message  string         `json:"message,omitempty"`
+	Product  string           `json:"product"`
+	Event    string           `json:"event"`
+	Occurred string           `json:"occurred_at"`
+	Server   *webhookServer   `json:"server,omitempty"`
+	Schedule *webhookSchedule `json:"schedule,omitempty"`
+	Message  string           `json:"message,omitempty"`
 }
 
 type webhookServer struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type webhookSchedule struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	Status string `json:"status"`
 }
 
 func (a *App) readNotificationSettings() (storedNotificationSettings, error) {
@@ -145,8 +154,8 @@ func (a *App) updateNotificationSettings(w http.ResponseWriter, r *http.Request)
 		current.Events = make([]string, 0, len(in.Events))
 		for _, event := range in.Events {
 			event = strings.TrimSpace(event)
-			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationServerCrash && event != notificationWatchdog && event != notificationHostDiskLow {
-				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, server.crash, server.watchdog, or host.disk_low")
+			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationServerCrash && event != notificationWatchdog && event != notificationHostDiskLow && event != notificationScheduleSuccess && event != notificationScheduleFailure {
+				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, server.crash, server.watchdog, host.disk_low, schedule.success, or schedule.failure")
 				return
 			}
 			if !seen[event] {
@@ -225,6 +234,31 @@ func (a *App) dispatchBackupNotification(event, serverID, serverName, message st
 }
 
 func (a *App) dispatchWebhookNotification(event string, server *webhookServer, message string) {
+	a.dispatchWebhookNotificationWithSchedule(event, server, nil, message)
+}
+
+func (a *App) dispatchScheduledRunNotification(scheduleID, serverID, action, status string) {
+	event := ""
+	message := ""
+	switch status {
+	case "success":
+		event = notificationScheduleSuccess
+		message = fmt.Sprintf("Scheduled %s completed successfully.", action)
+	case "error":
+		event = notificationScheduleFailure
+		message = fmt.Sprintf("Scheduled %s failed. Review the schedule run history in Docklight.", action)
+	default:
+		return
+	}
+	server := &webhookServer{ID: serverID}
+	if storedServer, err := a.getServer(serverID); err == nil {
+		server.Name = storedServer.Name
+	}
+	schedule := &webhookSchedule{ID: scheduleID, Action: action, Status: status}
+	a.dispatchWebhookNotificationWithSchedule(event, server, schedule, message)
+}
+
+func (a *App) dispatchWebhookNotificationWithSchedule(event string, server *webhookServer, schedule *webhookSchedule, message string) {
 	stored, err := a.readNotificationSettings()
 	if err != nil {
 		log.Printf("could not read notification settings for %s", event)
@@ -236,7 +270,7 @@ func (a *App) dispatchWebhookNotification(event string, server *webhookServer, m
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
-		payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: server, Message: message}
+		payload := webhookPayload{Product: "Docklight", Event: event, Occurred: time.Now().UTC().Format(time.RFC3339Nano), Server: server, Schedule: schedule, Message: message}
 		if err := a.deliverWebhook(ctx, stored, payload); err != nil {
 			log.Printf("webhook notification %s failed: %v", event, err)
 		}

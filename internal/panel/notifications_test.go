@@ -47,8 +47,8 @@ func TestNotificationSettingsAreAdminOnlyEncryptedAndSigned(t *testing.T) {
 	}
 	endpoint := "http://127.0.0.1:18765/hook?private=url-token"
 	secret := "signing-secret-do-not-store-plaintext"
-	updated := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"`+endpoint+`","signing_secret":"`+secret+`","events":["backup.success","backup.failure","server.crash","server.watchdog","host.disk_low"]}`, adminToken)
-	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"endpoint_configured":true`) || !strings.Contains(updated.Body.String(), `"signing_secret_configured":true`) || !strings.Contains(updated.Body.String(), `"host.disk_low"`) || !strings.Contains(updated.Body.String(), `"server.crash"`) || !strings.Contains(updated.Body.String(), `"server.watchdog"`) {
+	updated := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":true,"endpoint":"`+endpoint+`","signing_secret":"`+secret+`","events":["backup.success","backup.failure","server.crash","server.watchdog","host.disk_low","schedule.success","schedule.failure"]}`, adminToken)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"endpoint_configured":true`) || !strings.Contains(updated.Body.String(), `"signing_secret_configured":true`) || !strings.Contains(updated.Body.String(), `"host.disk_low"`) || !strings.Contains(updated.Body.String(), `"server.crash"`) || !strings.Contains(updated.Body.String(), `"server.watchdog"`) || !strings.Contains(updated.Body.String(), `"schedule.success"`) || !strings.Contains(updated.Body.String(), `"schedule.failure"`) {
 		t.Fatalf("save notification settings: %d %s", updated.Code, updated.Body.String())
 	}
 	if strings.Contains(updated.Body.String(), secret) || strings.Contains(updated.Body.String(), "private=url-token") || strings.Contains(updated.Body.String(), `"endpoint"`) {
@@ -68,7 +68,7 @@ func TestNotificationSettingsAreAdminOnlyEncryptedAndSigned(t *testing.T) {
 		t.Fatalf("encrypted signing secret did not round trip: value=%q err=%v", got, decryptErr)
 	}
 
-	requests := make(chan webhookPayload, 2)
+	requests := make(chan webhookPayload, 4)
 	a.notificationClient = &http.Client{Transport: notificationRoundTripper(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != endpoint {
 			t.Errorf("webhook endpoint=%q, want configured endpoint", r.URL.String())
@@ -111,10 +111,81 @@ func TestNotificationSettingsAreAdminOnlyEncryptedAndSigned(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("enabled backup event was not delivered")
 	}
+	a.dispatchScheduledRunNotification("schedule-1", "srv-1", "message", "success")
+	select {
+	case payload := <-requests:
+		if payload.Event != notificationScheduleSuccess || payload.Schedule == nil || payload.Schedule.ID != "schedule-1" || payload.Schedule.Action != "message" || payload.Schedule.Status != "success" || payload.Server == nil || payload.Server.ID != "srv-1" || !strings.Contains(payload.Message, "completed successfully") {
+			t.Fatalf("unexpected scheduled success notification: %#v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("enabled scheduled success event was not delivered")
+	}
+	a.dispatchScheduledRunNotification("schedule-2", "srv-1", "command", "error")
+	select {
+	case payload := <-requests:
+		if payload.Event != notificationScheduleFailure || payload.Schedule == nil || payload.Schedule.ID != "schedule-2" || payload.Schedule.Action != "command" || payload.Schedule.Status != "error" || strings.Contains(payload.Message, "private command") || !strings.Contains(payload.Message, "schedule run history") {
+			t.Fatalf("unexpected scheduled failure notification: %#v", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("enabled scheduled failure event was not delivered")
+	}
+	a.dispatchScheduledRunNotification("schedule-3", "srv-1", "start", "skipped")
+	select {
+	case payload := <-requests:
+		t.Fatalf("skipped scheduled action sent a notification: %#v", payload)
+	default:
+	}
 
 	updatedForUser := testRequest(h, http.MethodPut, "/api/notifications", `{"enabled":false}`, userToken)
 	if updatedForUser.Code != http.StatusForbidden {
 		t.Fatalf("non-admin updated notification settings: %d %s", updatedForUser.Code, updatedForUser.Body.String())
+	}
+}
+
+func TestScheduleRunNotificationOmitsSensitiveRunDetails(t *testing.T) {
+	a, d, _ := testApp(t)
+	endpoint := "https://hooks.example.com/docklight"
+	endpointEnc, err := security.Encrypt([]byte(a.cfg.Auth.SecretKey), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO notification_settings(id,enabled,endpoint_enc,events_json) VALUES(1,1,?,?)`, endpointEnc, `["schedule.failure"]`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('scheduled-notify-server','Night Harbor','minecraft-java','stopped',1,'{}','{}',?)`, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO backup_schedule_runs(id,schedule_id,server_id,started_at,status) VALUES('run-1','schedule-1','scheduled-notify-server',?,'running')`, scheduleTimestamp(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	requests := make(chan webhookPayload, 1)
+	a.notificationClient = &http.Client{Transport: notificationRoundTripper(func(r *http.Request) (*http.Response, error) {
+		body, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			t.Errorf("read webhook body: %v", readErr)
+		}
+		var payload webhookPayload
+		if decodeErr := json.Unmarshal(body, &payload); decodeErr != nil {
+			t.Errorf("decode webhook body: %v", decodeErr)
+		}
+		requests <- payload
+		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+	})}
+	const sensitiveDetail = "private console command must stay in local run history"
+	if err = a.finishScheduleRun("schedule-1", "scheduled-notify-server", "message", "run-1", "error", sensitiveDetail); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-requests:
+		encoded, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if payload.Event != notificationScheduleFailure || payload.Server == nil || payload.Server.Name != "Night Harbor" || payload.Schedule == nil || payload.Schedule.ID != "schedule-1" || payload.Schedule.Action != "message" || payload.Schedule.Status != "error" || strings.Contains(string(encoded), sensitiveDetail) {
+			t.Fatalf("unexpected schedule failure webhook or sensitive detail leak: %s", encoded)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("schedule failure webhook was not delivered")
 	}
 }
 

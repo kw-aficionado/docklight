@@ -28,4 +28,4 @@ Restart schedules can warn players using countdown commands declared in the temp
 
 ## Current limits
 
-Backups are local only. SFTP, SMB, S3-compatible storage, Discord, Telegram, SMTP, and schedule-run notifications are not implemented yet. A generic signed webhook can report backup success and failure; see [notifications](notifications.md). Schedules are per-server; realm and global schedules are not available. Restore replaces the entire server data directory, not only selected files.
+Backups are local only. SFTP, SMB, S3-compatible storage, Discord, Telegram, and SMTP are not implemented yet. A generic signed webhook can report backup and scheduled-action success or failure; see [notifications](notifications.md). Schedules are per-server; realm and global schedules are not available. Restore replaces the entire server data directory, not only selected files.
