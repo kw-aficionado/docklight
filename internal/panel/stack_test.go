@@ -28,9 +28,11 @@ import (
 )
 
 type fakeStackContainer struct {
-	name   string
-	state  string
-	config docker.CreateConfig
+	name        string
+	state       string
+	config      docker.CreateConfig
+	healthcheck bool
+	healthState string
 }
 
 type stackRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -80,17 +82,18 @@ func readWebSocketFrame(reader *bufio.Reader) (byte, string, error) {
 }
 
 type fakeStackDocker struct {
-	mu          sync.Mutex
-	networkName string
-	networkID   string
-	serverID    string
-	failStart   string
-	containers  map[string]fakeStackContainer
-	byName      map[string]string
-	configs     map[string]docker.CreateConfig
-	operations  []string
-	nextID      int
-	logsOutput  string
+	mu             sync.Mutex
+	networkName    string
+	networkID      string
+	serverID       string
+	failStart      string
+	containers     map[string]fakeStackContainer
+	byName         map[string]string
+	configs        map[string]docker.CreateConfig
+	operations     []string
+	nextID         int
+	logsOutput     string
+	healthInspects int
 }
 
 func newFakeStackDocker(serverID, failStart string) *fakeStackDocker {
@@ -150,7 +153,12 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 		}
 		f.nextID++
 		id, name := fmt.Sprintf("container-%d", f.nextID), query.Get("name")
-		f.containers[id] = fakeStackContainer{name: name, state: "created", config: config}
+		container := fakeStackContainer{name: name, state: "created", config: config}
+		if strings.HasPrefix(config.Image, "healthcheck:") {
+			container.healthcheck = true
+			container.healthState = strings.TrimPrefix(config.Image, "healthcheck:")
+		}
+		f.containers[id] = container
 		f.byName[name], f.configs[name] = id, config
 		f.operations = append(f.operations, "container:create:"+name)
 		return respond(http.StatusCreated, `{"Id":"`+id+`"}`)
@@ -187,7 +195,14 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 		if !ok {
 			return respond(http.StatusNotFound, `{"message":"No such container"}`)
 		}
-		result, _ := json.Marshal(map[string]any{"Id": id, "Name": "/" + container.name, "Config": map[string]any{"Image": container.config.Image, "Labels": container.config.Labels}, "State": map[string]any{"Status": container.state, "Running": container.state == "running", "ExitCode": 0}})
+		configView := map[string]any{"Image": container.config.Image, "Labels": container.config.Labels}
+		stateView := map[string]any{"Status": container.state, "Running": container.state == "running", "ExitCode": 0}
+		if container.healthcheck {
+			configView["Healthcheck"] = map[string]any{"Test": []string{"CMD", "health-check"}}
+			stateView["Health"] = map[string]string{"Status": container.healthState}
+			f.healthInspects++
+		}
+		result, _ := json.Marshal(map[string]any{"Id": id, "Name": "/" + container.name, "Config": configView, "State": stateView})
 		return respond(http.StatusOK, string(result))
 	}
 	if req.Method == http.MethodGet && strings.HasPrefix(path, "/v1.45/containers/") && strings.HasSuffix(path, "/logs") {
@@ -467,6 +482,95 @@ func TestAppStackSupportsStatelessAndDisabledServices(t *testing.T) {
 	}
 	if _, err = os.Stat(filepath.Join(s.DataDir, "_stack", "stateless")); !os.IsNotExist(err) {
 		t.Fatalf("stateless service unexpectedly created a data directory: err=%v", err)
+	}
+}
+
+func TestAppStackWaitsForDeclaredDockerHealthChecks(t *testing.T) {
+	a, d, config := testApp(t)
+	fake := newFakeStackDocker("stack-server", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	s := insertWordPressStackServer(t, a, d, config.Database.Path)
+	gs, err := a.loadRune(s.GameskillID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs.Stack.Services = []rune.Service{
+		{Name: "ready", Image: "healthcheck:healthy"},
+		{Name: "worker", Image: "busybox:1.36"},
+	}
+	if _, err = a.engine.CreateNetwork(context.Background(), "health-check-network", docker.NetworkCreateConfig{Driver: "bridge"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.createStackSidecars(context.Background(), s, gs, map[string]string{}, "health-check-network", stackResourceLimits(s, gs)); err != nil {
+		t.Fatalf("healthy service should allow the stack to continue: %v", err)
+	}
+	fake.mu.Lock()
+	initialHealthInspects := fake.healthInspects
+	containerID := fake.byName[stackContainerName(s.ID, "ready")]
+	container := fake.containers[containerID]
+	container.healthState = "starting"
+	fake.containers[containerID] = container
+	fake.mu.Unlock()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		fake.mu.Lock()
+		container := fake.containers[containerID]
+		container.healthState = "healthy"
+		fake.containers[containerID] = container
+		fake.mu.Unlock()
+	}()
+	if err = a.waitStackSidecarHealth(context.Background(), s, gs, time.Second, time.Millisecond); err != nil {
+		t.Fatalf("starting health check did not wait for recovery: %v", err)
+	}
+	fake.mu.Lock()
+	healthInspects := fake.healthInspects
+	container = fake.containers[containerID]
+	container.healthState = "unhealthy"
+	fake.containers[containerID] = container
+	fake.mu.Unlock()
+	if initialHealthInspects != 1 || healthInspects < initialHealthInspects+2 {
+		t.Fatalf("health-check polling did not skip unmonitored workers or wait while starting: initial=%d after=%d", initialHealthInspects, healthInspects)
+	}
+	if err = a.waitStackSidecarHealth(context.Background(), s, gs, time.Second, time.Millisecond); err == nil || !strings.Contains(err.Error(), "failed its Docker health check") {
+		t.Fatalf("unhealthy sidecar did not stop stack startup: %v", err)
+	}
+	fake.mu.Lock()
+	container = fake.containers[containerID]
+	container.healthState = "starting"
+	fake.containers[containerID] = container
+	fake.mu.Unlock()
+	if err = a.waitStackSidecarHealth(context.Background(), s, gs, 10*time.Millisecond, time.Millisecond); err == nil || !strings.Contains(err.Error(), "did not become healthy") {
+		t.Fatalf("stalled sidecar health check did not respect the bounded wait: %v", err)
+	}
+}
+
+func TestUnhealthyStackSidecarRollsBackBeforeMainAppStart(t *testing.T) {
+	a, d, config := testApp(t)
+	fake := newFakeStackDocker("stack-server", "")
+	a.engine = docker.NewWithHTTPClient("fake-docker", "1.45", &http.Client{Transport: stackRoundTripFunc(fake.roundTrip)})
+	s := insertWordPressStackServer(t, a, d, config.Database.Path)
+	var raw string
+	if err := d.QueryRow(`SELECT yaml_blob FROM gameskills WHERE id='wordpress-mariadb'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	raw = strings.Replace(raw, "image: mariadb:11", "image: healthcheck:unhealthy", 1)
+	if _, err := d.Exec(`UPDATE gameskills SET yaml_blob=? WHERE id='wordpress-mariadb'`, raw); err != nil {
+		t.Fatal(err)
+	}
+	err := a.startWithContext(s, context.Background())
+	if err == nil || !strings.Contains(err.Error(), "failed its Docker health check") {
+		t.Fatalf("unhealthy sidecar should block stack startup, got %v", err)
+	}
+	var sidecarRows int
+	if err = d.QueryRow(`SELECT count(*) FROM server_sidecars WHERE server_id=?`, s.ID).Scan(&sidecarRows); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	containerCount := len(fake.containers)
+	mainCreated := fake.byName[docker.SafeContainerName(s.ID)] != ""
+	fake.mu.Unlock()
+	if sidecarRows != 0 || containerCount != 0 || mainCreated {
+		t.Fatalf("health failure did not roll back before main app start: rows=%d containers=%d main=%t", sidecarRows, containerCount, mainCreated)
 	}
 }
 

@@ -3,12 +3,15 @@ package panel
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"example.com/yggdrasil-panel/internal/docker"
 	"example.com/yggdrasil-panel/internal/rune"
@@ -18,6 +21,8 @@ const (
 	docklightServerLabel  = "docklight.server_id"
 	docklightRoleLabel    = "docklight.role"
 	docklightServiceLabel = "docklight.service"
+	stackHealthTimeout    = 2 * time.Minute
+	stackHealthInterval   = 2 * time.Second
 )
 
 type stackResourceLimit struct {
@@ -436,7 +441,65 @@ func (a *App) createStackSidecars(ctx context.Context, s Server, gs rune.Rune, e
 			return err
 		}
 	}
-	return nil
+	return a.waitStackSidecarHealth(ctx, s, gs, stackHealthTimeout, stackHealthInterval)
+}
+
+func (a *App) waitStackSidecarHealth(ctx context.Context, s Server, gs rune.Rune, timeout, interval time.Duration) error {
+	if gs.Stack == nil {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		pending := false
+		for _, service := range gs.Stack.Services {
+			var containerID string
+			err := a.db.QueryRowContext(ctx, `SELECT container_id FROM server_sidecars WHERE server_id=? AND service_name=?`, s.ID, service.Name).Scan(&containerID)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("read app stack service %q before health check: %w", service.Name, err)
+			}
+			inspectCtx, cancel := context.WithTimeout(ctx, runtimeInspectTimeout)
+			ins, inspectErr := a.engine.Inspect(inspectCtx, containerID)
+			cancel()
+			if docker.IsNotFound(inspectErr) {
+				return fmt.Errorf("app stack service %q disappeared before its health check completed", service.Name)
+			}
+			if inspectErr != nil {
+				return fmt.Errorf("inspect app stack service %q health: %w", service.Name, inspectErr)
+			}
+			check := ins.Config.Healthcheck.Test
+			if len(check) == 0 || strings.EqualFold(check[0], "NONE") {
+				continue
+			}
+			if ins.State.Health != nil && ins.State.Health.Status == "healthy" {
+				continue
+			}
+			if ins.State.Health != nil && ins.State.Health.Status == "unhealthy" {
+				return fmt.Errorf("app stack service %q failed its Docker health check; review its Logs and image settings", service.Name)
+			}
+			pending = true
+		}
+		if !pending {
+			return nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("app stack sidecar health checks did not become healthy within %s; review service logs and Docker image settings", timeout)
+		}
+		wait := interval
+		if wait <= 0 || wait > remaining {
+			wait = remaining
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func applyStackCommand(command []string, env map[string]string) []string {

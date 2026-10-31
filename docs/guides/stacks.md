@@ -21,12 +21,12 @@ The main application's configured ports are published on the host. Sidecars have
 
 Sidecar status is refreshed by the runtime monitor. If Docker cannot be reached, Docklight keeps the last known status. A confirmed missing or exited sidecar appears as **Needs attention** in the server overview; it does not silently change the main container's state.
 
-This release does not allocate public ports for sidecars or wait for Docker health checks before starting the main app. Select **Logs** beside a service in the overview for its recent and live output. Log access requires `server.view`, verifies Docker ownership labels, and redacts template secret values. Sidecar command input is not exposed.
+This release does not allocate public ports for sidecars. When a sidecar image declares a Docker health check, Docklight waits up to two minutes for it to become healthy before starting the main app. Services without a health check do not delay startup. Select **Logs** beside a service in the overview for recent and live output. Log access requires `server.view`, verifies Docker ownership labels, and redacts template secret values. Sidecar command input is not exposed.
 
 ## Template authoring
 
 Add `stack.services` to a template. Each service needs a DNS-safe name and an image. Set an absolute writable `data_path` for persistent services; leave it empty for stateless workers. The `enabled` value can use a declared boolean variable to make a sidecar optional; an unset placeholder keeps the sidecar off for existing servers. Sidecar environment values can interpolate declared variables with `{{KEY}}`; image references and command arguments may use non-secret variables. Flag credentials `secret: true` and map them through `env`; Docklight rejects secret interpolation into images and commands. Sidecar `env` is isolated to that sidecar. Main app variables must be mapped through `docker.env`.
 
-`install.script` runs in a temporary container before the stack starts and does not have sidecar DNS access. Put runtime database initialization in the main app's startup or in the app image's own entrypoint. Sidecar logs are available from the overview; command input and sidecar health-check readiness waits are not exposed yet.
+`install.script` runs in a temporary container before the stack starts and does not have sidecar DNS access. Put runtime database initialization in the main app's startup or in the app image's own entrypoint. Sidecar logs are available from the overview; command input is not exposed yet.
 
 See [Template schema](../templates.md) for the complete field list and validation rules.
