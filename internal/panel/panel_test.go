@@ -520,7 +520,7 @@ func TestBackupSchedulesRequirePermissionsAndRunFromWorker(t *testing.T) {
 		t.Fatalf("create backup schedule: %d %s", created.Code, created.Body.String())
 	}
 	var item backupSchedule
-	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil || item.ID == "" || !item.Enabled || item.NextRun == "" {
+	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil || item.ID == "" || !item.Enabled || item.NextRun == "" || item.Destination != "local" {
 		t.Fatalf("invalid created schedule: %#v err=%v body=%s", item, err, created.Body.String())
 	}
 	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule' WHERE user_id='schedule-user' AND scope_type='server' AND scope_id='scheduled-server'`); err != nil {

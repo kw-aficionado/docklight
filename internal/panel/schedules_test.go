@@ -15,6 +15,84 @@ import (
 	"example.com/yggdrasil-panel/internal/security"
 )
 
+func TestScheduledBackupUsesSelectedS3Destination(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "s3-scheduled-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "world.dat"), []byte("scheduled world"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('s3-scheduled-server','Scheduled S3','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('s3-schedule-admin','s3-schedule-admin','unused-hash','admin')`); err != nil {
+		t.Fatal(err)
+	}
+	token, err := a.issue(User{ID: "s3-schedule-admin", Role: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	noTarget := testRequest(h, http.MethodPost, "/api/servers/s3-scheduled-server/schedules", `{"action":"backup","destination":"s3","cron":"0 3 * * *"}`, token)
+	if noTarget.Code != http.StatusBadRequest || !strings.Contains(noTarget.Body.String(), "enable and configure the S3 backup target") {
+		t.Fatalf("S3 schedule was accepted without a target: %d %s", noTarget.Code, noTarget.Body.String())
+	}
+	store := newMemoryBackupStore()
+	a.backupStoreFactory = func(backupTargetConfig) (backupObjectStore, error) { return store, nil }
+	setBackupTargetForTest(t, a, d)
+	created := testRequest(h, http.MethodPost, "/api/servers/s3-scheduled-server/schedules", `{"action":"backup","destination":"s3","cron":"* * * * *"}`, token)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create S3 backup schedule: %d %s", created.Code, created.Body.String())
+	}
+	var item backupSchedule
+	if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil || item.Destination != "s3" || item.Action != "backup" {
+		t.Fatalf("S3 schedule response destination=%q action=%q err=%v body=%s", item.Destination, item.Action, err, created.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id=?`, scheduleTimestamp(time.Now().Add(-time.Second)), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err = a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	var storage string
+	if err = d.QueryRow(`SELECT storage FROM server_backups WHERE server_id='s3-scheduled-server'`).Scan(&storage); err != nil || storage != "s3" || store.count() != 1 {
+		t.Fatalf("scheduled S3 snapshot storage=%q objects=%d err=%v", storage, store.count(), err)
+	}
+	var status, detail string
+	if err = d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id=?`, item.ID).Scan(&status, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if status != "success" || !strings.Contains(detail, "created backup") || !strings.Contains(detail, "(s3)") {
+		t.Fatalf("scheduled S3 run status=%q detail=%q", status, detail)
+	}
+	listed := testRequest(h, http.MethodGet, "/api/servers/s3-scheduled-server/schedules", "", token)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"destination":"s3"`) {
+		t.Fatalf("schedule listing lost its S3 destination: %d %s", listed.Code, listed.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE backup_target_settings SET enabled=0 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`UPDATE backup_schedules SET next_run=? WHERE id=?`, scheduleTimestamp(time.Now().Add(-time.Second)), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.processDueBackupSchedules(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var backupCount, runCount int
+	if err = d.QueryRow(`SELECT count(*) FROM server_backups WHERE server_id='s3-scheduled-server'`).Scan(&backupCount); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.QueryRow(`SELECT count(*) FROM backup_schedule_runs WHERE schedule_id=? AND status='error' AND detail LIKE '%enable and configure the S3 backup target%'`, item.ID).Scan(&runCount); err != nil {
+		t.Fatal(err)
+	}
+	if backupCount != 1 || runCount != 1 || store.count() != 1 {
+		t.Fatalf("disabled S3 target created another backup or lost its failure record: backups=%d failed_runs=%d objects=%d", backupCount, runCount, store.count())
+	}
+}
+
 func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) {
 	a, d, _ := testApp(t)
 	dataDir := filepath.Join(a.dataRoot, "restart-schedule-server")

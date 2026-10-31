@@ -480,6 +480,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 17 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "backup_schedules", "destination") {
+			if _, err = tx.Exec(`ALTER TABLE backup_schedules ADD COLUMN destination TEXT NOT NULL DEFAULT 'local'`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(17)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -62,8 +62,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 16 {
-		t.Fatalf("expected 16 migrations, got %d", count)
+	if count != 17 {
+		t.Fatalf("expected 17 migrations, got %d", count)
 	}
 	var sidecarTable string
 	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='server_sidecars'`).Scan(&sidecarTable); err != nil || sidecarTable != "server_sidecars" {
@@ -127,17 +127,17 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 		t.Fatalf("version 4 did not create schedule tables: schedules=%d runs=%d", schedulesTable, runsTable)
 	}
 	var scheduleColumns int
-	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_schedules') WHERE name IN ('action','warn_players','warning_seconds','skip_if_players_online','command_enc','message_payload_enc')`).Scan(&scheduleColumns); err != nil || scheduleColumns != 6 {
-		t.Fatalf("version 10/11/12/13 schedule columns missing: count=%d err=%v", scheduleColumns, err)
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_schedules') WHERE name IN ('action','warn_players','warning_seconds','skip_if_players_online','command_enc','message_payload_enc','destination')`).Scan(&scheduleColumns); err != nil || scheduleColumns != 7 {
+		t.Fatalf("version 10/11/12/13/17 schedule columns missing: count=%d err=%v", scheduleColumns, err)
 	}
-	var action string
+	var action, destination string
 	var warnPlayers, warningSeconds, skipIfPlayersOnline int
 	var commandEnc, messagePayloadEnc string
-	if err = d.QueryRow(`SELECT action,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc FROM backup_schedules WHERE id='legacy-schedule'`).Scan(&action, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc); err != nil {
+	if err = d.QueryRow(`SELECT action,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,destination FROM backup_schedules WHERE id='legacy-schedule'`).Scan(&action, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc, &destination); err != nil {
 		t.Fatal(err)
 	}
-	if action != "backup" || warnPlayers != 0 || warningSeconds != 60 || skipIfPlayersOnline != 0 || commandEnc != "" || messagePayloadEnc != "" {
-		t.Fatalf("legacy backup schedule migrated as action=%q warn=%d seconds=%d skip=%d command_enc=%q message_payload_enc=%q", action, warnPlayers, warningSeconds, skipIfPlayersOnline, commandEnc, messagePayloadEnc)
+	if action != "backup" || warnPlayers != 0 || warningSeconds != 60 || skipIfPlayersOnline != 0 || commandEnc != "" || messagePayloadEnc != "" || destination != "local" {
+		t.Fatalf("legacy backup schedule migrated as action=%q warn=%d seconds=%d skip=%d command_enc=%q message_payload_enc=%q destination=%q", action, warnPlayers, warningSeconds, skipIfPlayersOnline, commandEnc, messagePayloadEnc, destination)
 	}
 	var templates int
 	if err = d.QueryRow(`SELECT count(*) FROM message_templates WHERE builtin=1`).Scan(&templates); err != nil || templates != 5 {

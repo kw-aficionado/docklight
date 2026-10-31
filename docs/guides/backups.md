@@ -20,7 +20,7 @@ The server's **Backups** tab offers the S3 destination after an administrator en
 
 Retention uses `server_backups` database records, never a bucket listing. Automatic and manual prune remove the recorded S3 object before deleting its row. Deleting a server removes its local and recorded remote backups; if a remote delete fails, server-data cleanup stops and the error identifies the affected backup. While S3 backup records exist, Docklight locks the endpoint, bucket, region, and prefix so those records continue to identify their objects. You can rotate credentials without changing that target identity. Delete the S3 backup records first if you need to move to another bucket or prefix.
 
-Scheduled backup actions currently use local panel storage. Choose S3 from the server's Backups tab for a manual remote copy.
+When creating a backup schedule, choose panel storage or the enabled S3-compatible destination. The selected destination is retained with the schedule; if S3 is later disabled or its credentials stop working, the run is recorded as a failure. Choose S3 from the server's Backups tab for a manual remote copy.
 
 ## Encryption key and recovery
 

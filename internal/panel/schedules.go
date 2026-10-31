@@ -27,6 +27,7 @@ type backupSchedule struct {
 	ServerID            string `json:"server_id"`
 	Name                string `json:"name"`
 	Action              string `json:"action"`
+	Destination         string `json:"destination"`
 	Cron                string `json:"cron"`
 	Enabled             bool   `json:"enabled"`
 	WarnPlayers         bool   `json:"warn_players"`
@@ -151,7 +152,7 @@ func (a *App) listBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := a.db.Query(`SELECT id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE server_id=? ORDER BY created_at DESC,id DESC`, s.ID)
+	rows, err := a.db.Query(`SELECT id,server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE server_id=? ORDER BY created_at DESC,id DESC`, s.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list backup schedules")
 		return
@@ -161,7 +162,7 @@ func (a *App) listBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item backupSchedule
 		var enabled, warnPlayers, skipIfPlayersOnline int
-		if err = rows.Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt); err != nil {
+		if err = rows.Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Destination, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not read backup schedule metadata")
 			return
 		}
@@ -207,6 +208,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name                string         `json:"name"`
 		Action              string         `json:"action"`
+		Destination         string         `json:"destination"`
 		Cron                string         `json:"cron"`
 		Enabled             *bool          `json:"enabled"`
 		WarnPlayers         *bool          `json:"warn_players"`
@@ -223,6 +225,18 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	if in.Action == "" {
 		in.Action = "backup"
 	}
+	destination := strings.TrimSpace(in.Destination)
+	if destination == "" {
+		destination = "local"
+	}
+	if destination != "local" && destination != "s3" {
+		writeError(w, http.StatusBadRequest, "backup destination must be local or s3")
+		return
+	}
+	if in.Action != "backup" && destination != "local" {
+		writeError(w, http.StatusBadRequest, "destination is accepted only for backup schedules")
+		return
+	}
 	permission, ok := scheduleActionPermission(in.Action)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, stop, command, or message")
@@ -231,6 +245,13 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	if permission != "" && !a.allowedServer(u, permission, s.ID, s.GameskillID) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
 		return
+	}
+	if destination == "s3" {
+		_, target, targetErr := a.backupStoreForRemote()
+		if targetErr != nil || !target.Enabled {
+			writeError(w, http.StatusBadRequest, "enable and configure the S3 backup target before scheduling S3 backups")
+			return
+		}
 	}
 	if in.SkipIfPlayersOnline {
 		if in.Action != "restart" {
@@ -354,7 +375,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), commandEnc, messagePayloadEnc, nextRun); err != nil {
+	if _, err = a.db.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.ID, in.Name, in.Action, destination, strings.TrimSpace(in.Cron), boolInt(enabled), boolInt(warnPlayers), warningSeconds, boolInt(in.SkipIfPlayersOnline), commandEnc, messagePayloadEnc, nextRun); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save backup schedule")
 		return
 	}
@@ -524,7 +545,7 @@ func (a *App) getBackupSchedule(serverID, id string) (backupSchedule, error) {
 	var enabled int
 	var warnPlayers int
 	var skipIfPlayersOnline int
-	err := a.db.QueryRow(`SELECT id,server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE id=? AND server_id=?`, id, serverID).Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt)
+	err := a.db.QueryRow(`SELECT id,server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,next_run,last_run,last_status,last_error,created_at FROM backup_schedules WHERE id=? AND server_id=?`, id, serverID).Scan(&item.ID, &item.ServerID, &item.Name, &item.Action, &item.Destination, &item.Cron, &enabled, &warnPlayers, &item.WarningSeconds, &skipIfPlayersOnline, &item.NextRun, &item.LastRun, &item.LastStatus, &item.LastError, &item.CreatedAt)
 	item.Enabled = enabled != 0
 	item.WarnPlayers = warnPlayers != 0
 	item.SkipIfPlayersOnline = skipIfPlayersOnline != 0
@@ -594,9 +615,9 @@ func (a *App) processDueBackupSchedules(ctx context.Context, now time.Time) erro
 }
 
 func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time) error {
-	var serverID, name, action, expression, commandEnc, messagePayloadEnc, nextRun string
+	var serverID, name, action, destination, expression, commandEnc, messagePayloadEnc, nextRun string
 	var enabled, warnPlayers, warningSeconds, skipIfPlayersOnline int
-	if err := a.db.QueryRow(`SELECT server_id,name,action,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &expression, &enabled, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc, &nextRun); err != nil {
+	if err := a.db.QueryRow(`SELECT server_id,name,action,destination,cron,enabled,warn_players,warning_seconds,skip_if_players_online,command_enc,message_payload_enc,next_run FROM backup_schedules WHERE id=?`, id).Scan(&serverID, &name, &action, &destination, &expression, &enabled, &warnPlayers, &warningSeconds, &skipIfPlayersOnline, &commandEnc, &messagePayloadEnc, &nextRun); err != nil {
 		return err
 	}
 	if enabled == 0 || nextRun == "" || nextRun > scheduleTimestamp(now) {
@@ -708,7 +729,7 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 	} else if action != "backup" {
 		status = "error"
 		detail = "unsupported stored schedule action"
-	} else if detail, err = a.executeScheduledBackup(serverID, id, name); err != nil {
+	} else if detail, err = a.executeScheduledBackup(serverID, id, name, destination); err != nil {
 		status = "error"
 		detail = err.Error()
 	}
@@ -801,7 +822,7 @@ func (a *App) finishScheduleRun(id, serverID, action, runID, status, detail stri
 	return nil
 }
 
-func (a *App) executeScheduledBackup(serverID, scheduleID, name string) (string, error) {
+func (a *App) executeScheduledBackup(serverID, scheduleID, name, destination string) (string, error) {
 	a.dataMu.Lock()
 	defer a.dataMu.Unlock()
 	s, err := a.getServer(serverID)
@@ -811,11 +832,11 @@ func (a *App) executeScheduledBackup(serverID, scheduleID, name string) (string,
 	if err = a.confirmServerStopped(s); err != nil {
 		return "", err
 	}
-	item, pruned, warning, err := a.createBackupSnapshot(s)
+	item, pruned, warning, err := a.createBackupSnapshot(s, destination)
 	if err != nil {
 		return "", err
 	}
-	detail := fmt.Sprintf("%s: created backup %s with %d files and %d bytes; retention removed %d", name, item.ID, item.Files, item.DataBytes, pruned)
+	detail := fmt.Sprintf("%s: created backup %s (%s) with %d files and %d bytes; retention removed %d", name, item.ID, item.Storage, item.Files, item.DataBytes, pruned)
 	if warning != "" {
 		detail += "; " + warning
 	}
