@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,8 +15,9 @@ import (
 
 type Config struct {
 	Server struct {
-		Host string
-		Port int
+		Host      string
+		Port      int
+		PublicURL string
 	}
 	Database struct{ Path string }
 	Auth     struct {
@@ -100,6 +103,8 @@ func Load(path string) (Config, error) {
 			setString(&c.Server.Host)
 		case "server.port":
 			setErr = setInt(&c.Server.Port)
+		case "server.public_url":
+			setString(&c.Server.PublicURL)
 		case "server.demo_mode": // accepted for compatibility with early generated configs
 			var ignored bool
 			setErr = setBool(&ignored)
@@ -134,6 +139,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return c, errors.New("server.port must be from 1 to 65535")
+	}
+	if err := validatePublicURL(c.Server.PublicURL); err != nil {
+		return c, err
 	}
 	if c.Ports.RangeMin < 1024 || c.Ports.RangeMin >= c.Ports.RangeMax || c.Ports.RangeMax > 65535 {
 		return c, errors.New("ports.range_min and range_max must satisfy 1024 <= min < max <= 65535")
@@ -196,7 +204,7 @@ func Save(path string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	s := fmt.Sprintf("server:\n  host: %s\n  port: %d\ndatabase:\n  path: %s\nauth:\n  secret_key: %s\n  session_ttl_hours: %d\nadmin:\n  username: %s\n", c.Server.Host, c.Server.Port, c.Database.Path, c.Auth.SecretKey, c.Auth.SessionTTLHours, c.Admin.Username)
+	s := fmt.Sprintf("server:\n  host: %s\n  port: %d\n  public_url: %s\ndatabase:\n  path: %s\nauth:\n  secret_key: %s\n  session_ttl_hours: %d\nadmin:\n  username: %s\n", c.Server.Host, c.Server.Port, c.Server.PublicURL, c.Database.Path, c.Auth.SecretKey, c.Auth.SessionTTLHours, c.Admin.Username)
 	if c.Admin.Password != "" {
 		s += fmt.Sprintf("  password: %s\n", c.Admin.Password)
 	}
@@ -206,6 +214,42 @@ func Save(path string, c Config) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+func validatePublicURL(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if strings.ContainsAny(value, "\r\n\t \\") {
+		return errors.New("server.public_url must be an origin such as https://panel.example.com")
+	}
+	u, err := url.Parse(value)
+	if err != nil || !u.IsAbs() || u.Opaque != "" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return errors.New("server.public_url must be an origin such as https://panel.example.com")
+	}
+	if port := u.Port(); port != "" {
+		portNumber, parseErr := strconv.Atoi(port)
+		if parseErr != nil || portNumber < 1 || portNumber > 65535 {
+			return errors.New("server.public_url port must be from 1 through 65535")
+		}
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme != "http" {
+		return errors.New("server.public_url must use HTTPS, except for localhost loopback testing")
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("server.public_url must use HTTPS, except for localhost loopback testing")
+	}
+	return nil
 }
 
 func Password() (string, error) {

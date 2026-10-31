@@ -79,3 +79,39 @@ func TestLoadAcceptsOldDemoKeyAndRejectsInvalidPorts(t *testing.T) {
 		t.Fatal("invalid listener port was accepted")
 	}
 }
+
+func TestPublicURLRoundTripsAndRequiresTrustedScheme(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	c := Defaults()
+	c.Server.PublicURL = "https://panel.example.com"
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil || loaded.Server.PublicURL != c.Server.PublicURL {
+		t.Fatalf("public URL round trip = %q, err=%v", loaded.Server.PublicURL, err)
+	}
+	for _, invalid := range []string{
+		"http://panel.example.com",
+		"https://user:secret@panel.example.com",
+		"https://panel.example.com/path",
+		"https://panel.example.com/?token=x",
+		"https://panel.example.com:70000",
+		"https://panel.example.com\\@evil.example",
+	} {
+		if err := os.WriteFile(path, []byte("server:\n  host: 127.0.0.1\n  port: 8080\n  public_url: "+invalid+"\ndatabase:\n  path: /tmp/panel.db\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("untrusted public URL %q was accepted", invalid)
+		}
+	}
+	for _, valid := range []string{"http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+		if err := os.WriteFile(path, []byte("server:\n  host: 127.0.0.1\n  port: 8080\n  public_url: "+valid+"\ndatabase:\n  path: /tmp/panel.db\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err != nil {
+			t.Errorf("loopback public URL %q was rejected: %v", valid, err)
+		}
+	}
+}

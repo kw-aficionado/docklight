@@ -513,10 +513,22 @@ func (a *App) postChannelJSON(ctx context.Context, endpoint string, payload any,
 
 func sendSMTPNotification(ctx context.Context, config notificationChannelConfig, message string) error {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	return sendSMTPNotificationWithDial(ctx, config, message, dialer.DialContext)
+	return sendSMTPEmailWithDial(ctx, config, "[Docklight] Notification", message, dialer.DialContext)
 }
 
 func sendSMTPNotificationWithDial(ctx context.Context, config notificationChannelConfig, message string, dial func(context.Context, string, string) (net.Conn, error)) error {
+	return sendSMTPEmailWithDial(ctx, config, "[Docklight] Notification", message, dial)
+}
+
+func sendSMTPEmail(ctx context.Context, config notificationChannelConfig, subject, message string) error {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return sendSMTPEmailWithDial(ctx, config, subject, message, dialer.DialContext)
+}
+
+func sendSMTPEmailWithDial(ctx context.Context, config notificationChannelConfig, subject, message string, dial func(context.Context, string, string) (net.Conn, error)) error {
+	if subject == "" || len(subject) > 200 || strings.ContainsAny(subject, "\r\n\x00") {
+		return errors.New("SMTP subject is invalid")
+	}
 	address := net.JoinHostPort(config.SMTPHost, strconv.Itoa(config.SMTPPort))
 	conn, err := dial(ctx, "tcp", address)
 	if err != nil {
@@ -574,7 +586,7 @@ func sendSMTPNotificationWithDial(ctx context.Context, config notificationChanne
 	if err != nil {
 		return errors.New("SMTP refused the message")
 	}
-	contents := "From: " + from + "\r\nTo: " + to + "\r\nSubject: [Docklight] Notification\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + message
+	contents := "From: " + from + "\r\nTo: " + to + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + message
 	if _, err = io.WriteString(writer, contents); err != nil {
 		_ = writer.Close()
 		return errors.New("could not write the SMTP message")

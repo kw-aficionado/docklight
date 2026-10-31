@@ -18,7 +18,7 @@ sudo env YGG_REPO="OWNER/REPOSITORY" YGG_VERSION="latest" bash install.sh
 
 The release path verifies the downloaded binary against the release `SHA256SUMS`. For a direct binary URL, optionally provide `YGG_SHA256`; local `YGG_BINARY_FILE` input is trusted as supplied. The installer installs Docker if the `docker` command is missing, creates the service account, preserves `/etc/yggdrasil/config.yaml`, installs the systemd service, and restarts it.
 
-On first install, the script prints `http://<host>:8080` and a generated one-time administrator password. Sign in, change the password in the account menu, and enroll an authenticator there. API tokens can also be created in the account menu; copy the token at creation because it is not shown again.
+On first install, the script prints `http://<host>:8080` and a generated one-time administrator password. Sign in, change the password in the account menu, and enroll an authenticator there. To enable self-service password recovery, add a unique email to each account under **Users & access**, add a global SMTP email channel under **Notifications**, and set `server.public_url` in `/etc/yggdrasil/config.yaml` when the panel is behind a proxy or public hostname. API tokens can also be created in the account menu; copy the token at creation because it is not shown again.
 
 ## Deploy an app
 

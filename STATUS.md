@@ -8,7 +8,7 @@ This checkout began empty on 2026-10-31. The product identity is **Docklight** w
 | --- | --- | --- |
 | CLI and configuration | `serve`, `version`, `gen-config`, `reset-password`, `reset-2fa`; generated session key and one-time admin password; config is not overwritten | Unit and local process smoke checks |
 | SQLite | SQLite schema with numbered migrations; WAL mode; foreign keys; audit, users, grants, template definitions, servers, ports, and API tokens | Migration tests and panel API tests |
-| Authentication | Argon2id passwords, expiring HS256 sessions, rate limits, TOTP with replay rejection, password changes, hashed scoped API tokens | Security and panel tests |
+| Authentication | Argon2id passwords, expiring HS256 sessions, sign-in and reset rate limits, TOTP with replay rejection, password changes and email recovery, hashed scoped API tokens | Security and panel tests |
 | Users and access | Admin/user roles; global, realm, template, and server grants; API enforcement on listing, control, files, backups, console, and template creation | RBAC tests, including inaccessible-server and realm-visibility checks |
 | Templates | Bounded YAML subset parser and validator; six embedded templates; private app-stack schema; protected mount, capability, reserved variable, and setting validation | Parser, secret interpolation, network alias, and built-in template tests |
 | Container lifecycle | Direct Docker Engine API client; install container, logs, start/readiness polling, stop, restart, deletion, port mappings, shared stack CPU/RAM limits, ownership repair, confirmed exit tracking, private per-server networks and sidecars | API/runtime-monitor tests plus fake Docker Engine lifecycle tests; no Docker Engine was available for live lifecycle tests |
@@ -68,9 +68,15 @@ Admins can save one encrypted username/secret pair per normalized registry, test
 
 Tests cover normalization, encrypted-at-rest storage, masked API responses, in-place replacement, admin-only listing, audit redaction, Docker auth-check behavior, per-pull credential isolation, and login-required error wording. The migration test covers schema 22. Docker-host pulls and visual browser review remain pending because this environment has no Docker daemon and the panel listener is blocked by the sandbox.
 
+## Phase 2 password recovery
+
+Administrators can set a unique account email. Public forgot-password requests accept a username or email and return one generic response, are rate limited by IP and identifier, and send asynchronously through the first enabled global SMTP email channel. Reset tokens are 256-bit random values; only their SHA-256 hashes are stored, they expire after one hour, and successful use atomically changes the password, revokes web sessions, consumes outstanding reset tokens, clears the username lockout, and records `user.password_reset`. TOTP remains enabled. `server.public_url` pins the reset-link origin; when unset the request origin is used. The UI removes the token query parameter immediately and responses set `Referrer-Policy: no-referrer`.
+
+Tests cover identical responses for unknown accounts, accounts without email, and missing SMTP setup; recipient routing; configured-origin links; hash-only storage; token expiry and replay; session invalidation; audit history; and unique validated emails. Migration 24 adds the account email and reset-token table. SMTP transport is tested independently with an in-process protocol fixture; external mail delivery and live browser review remain pending.
+
 ## Not implemented
 
-- Phase 2: scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; email resets; passkeys.
+- Phase 2: scheduler actions beyond backup/start/stop/restart/command/message and realm/global scopes; passkeys.
 - Phase 3: UPnP, external reachability probes, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, cross-server ban automation, and importers.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.

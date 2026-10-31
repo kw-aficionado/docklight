@@ -89,3 +89,9 @@
 - Preserve the original signed webhook settings and add encrypted channel records for Discord, Telegram, generic JSON webhooks, and SMTP rather than breaking the existing webhook API. A channel can be global or server-scoped; delivery remains asynchronous without retries or stored history.
 - Remote SMTP must establish TLS before auth; STARTTLS is used when advertised and port 465 uses implicit TLS. Telegram's Bot API requires its token in the HTTPS request path, so failures use generic messages and request URLs are never logged or returned.
 - Channel editing re-enters credentials because saved configuration is never returned. Existing event filters remain attached to the original webhook; new channels receive all supported events within their scope.
+
+## 2026-10-31: email password recovery
+
+- Reuse the first enabled global SMTP email channel for account recovery, overriding only its configured notification recipient with the account's unique email. Server-scoped channels are excluded.
+- Forgot requests use one generic response and IP/identifier rate limits. Store a SHA-256 token hash for one hour, consume it once in the same transaction as the password/session-version update, and preserve TOTP.
+- Set `server.public_url` to the canonical origin so reset links do not trust a forwarded request Host. If absent, fall back to the validated request origin as specified. The login UI strips the token query parameter as soon as it loads and the panel uses `no-referrer`.

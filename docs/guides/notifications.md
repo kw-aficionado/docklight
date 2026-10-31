@@ -8,6 +8,8 @@ Open **Notifications** as an administrator and choose **Add channel**. Enter the
 
 Channel configuration is encrypted in SQLite with `auth.secret_key`. API responses contain channel type and scope only; URLs, bot tokens, SMTP passwords, and signing secrets are never returned. To replace a channel, enter all of its settings again. Keep the panel secret key with the database because Docklight needs it to decrypt saved configurations. The original signed webhook form remains available for existing installations.
 
+Password reset email uses the first enabled **global** SMTP email channel and sends to the unique email address saved on the account. Server-scoped email channels are not used for account recovery. Configure `server.public_url` so reset links use the canonical public panel origin; otherwise Docklight falls back to the request origin.
+
 Webhook endpoints must use HTTPS. Plain HTTP is allowed only for `localhost` or a loopback IP. Redirects are not followed. Telegram Bot API requests use Telegram's required HTTPS URL format, which includes the bot token in the request path; Docklight never logs that URL or includes it in a response. SMTP uses STARTTLS when advertised, or implicit TLS on port 465. Remote SMTP without TLS is refused, and authentication is sent only after TLS is established. SMTP defaults to port 587; credentials are optional for trusted local relays.
 
 ## Events and request format

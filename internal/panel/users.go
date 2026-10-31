@@ -1,7 +1,9 @@
 package panel
 
 import (
+	"errors"
 	"net/http"
+	"net/mail"
 	"strings"
 
 	"example.com/yggdrasil-panel/internal/security"
@@ -9,7 +11,7 @@ import (
 )
 
 func (a *App) listUsers(w http.ResponseWriter, r *http.Request) {
-	rows, e := a.db.Query(`SELECT id,username,role,disabled,created_at,totp_enabled FROM users ORDER BY username`)
+	rows, e := a.db.Query(`SELECT id,username,email,role,disabled,created_at,totp_enabled FROM users ORDER BY username`)
 	if e != nil {
 		writeError(w, 500, "could not list users")
 		return
@@ -18,6 +20,7 @@ func (a *App) listUsers(w http.ResponseWriter, r *http.Request) {
 	type item struct {
 		ID          string `json:"id"`
 		Username    string `json:"username"`
+		Email       string `json:"email"`
 		Role        string `json:"role"`
 		Disabled    bool   `json:"disabled"`
 		CreatedAt   string `json:"created_at"`
@@ -27,7 +30,7 @@ func (a *App) listUsers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var x item
 		var d, t int
-		if rows.Scan(&x.ID, &x.Username, &x.Role, &d, &x.CreatedAt, &t) == nil {
+		if rows.Scan(&x.ID, &x.Username, &x.Email, &x.Role, &d, &x.CreatedAt, &t) == nil {
 			x.Disabled = d != 0
 			x.TOTPEnabled = t != 0
 			out = append(out, x)
@@ -58,7 +61,19 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	if _, err = a.db.Exec(`UPDATE users SET password_hash=?,token_version=token_version+1 WHERE id=?`, newHash, u.ID); err != nil {
+	tx, err := a.db.Begin()
+	if err != nil {
+		writeError(w, 500, "could not change the password")
+		return
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`UPDATE users SET password_hash=?,token_version=token_version+1 WHERE id=?`, newHash, u.ID); err == nil {
+		_, err = tx.Exec(`DELETE FROM password_reset_tokens WHERE user_id=?`, u.ID)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
 		writeError(w, 500, "could not change the password")
 		return
 	}
@@ -70,6 +85,7 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Username string `json:"username"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 		Role     string `json:"role"`
 	}
@@ -77,6 +93,11 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Username = strings.TrimSpace(in.Username)
+	email, emailErr := normalizeUserEmail(in.Email)
+	if emailErr != nil {
+		writeError(w, 400, emailErr.Error())
+		return
+	}
 	if in.Username == "" || len(in.Username) > 64 {
 		writeError(w, 400, "username must contain 1 to 64 characters")
 		return
@@ -98,25 +119,26 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "could not create user ID")
 		return
 	}
-	if _, e = a.db.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES(?,?,?,?)`, id, in.Username, hash, in.Role); e != nil {
-		writeError(w, 409, "that username is already in use")
+	if _, e = a.db.Exec(`INSERT INTO users(id,username,email,password_hash,role) VALUES(?,?,?,?,?)`, id, in.Username, email, hash, in.Role); e != nil {
+		writeError(w, 409, "that username or email address is already in use")
 		return
 	}
 	a.audit(principal(r), "user.create", "user", id, "role="+in.Role)
-	writeJSON(w, 201, map[string]string{"id": id, "username": in.Username, "role": in.Role})
+	writeJSON(w, 201, map[string]string{"id": id, "username": in.Username, "email": email, "role": in.Role})
 }
 
 func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var old User
 	var disabled int
-	if e := a.db.QueryRow(`SELECT id,username,role,disabled,token_version,totp_enabled FROM users WHERE id=?`, id).Scan(&old.ID, &old.Username, &old.Role, &disabled, &old.TokenVersion, &old.TotpEnabled); e != nil {
+	if e := a.db.QueryRow(`SELECT id,username,email,role,disabled,token_version,totp_enabled FROM users WHERE id=?`, id).Scan(&old.ID, &old.Username, &old.Email, &old.Role, &disabled, &old.TokenVersion, &old.TotpEnabled); e != nil {
 		writeError(w, 404, "user not found")
 		return
 	}
 	old.Disabled = disabled != 0
 	var in struct {
 		Username *string `json:"username"`
+		Email    *string `json:"email"`
 		Password string  `json:"password"`
 		Role     *string `json:"role"`
 		Disabled *bool   `json:"disabled"`
@@ -144,6 +166,15 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 	if in.Disabled != nil {
 		dis = *in.Disabled
 	}
+	email := old.Email
+	if in.Email != nil {
+		var emailErr error
+		email, emailErr = normalizeUserEmail(*in.Email)
+		if emailErr != nil {
+			writeError(w, 400, emailErr.Error())
+			return
+		}
+	}
 	if old.ID == principal(r).ID && (dis || role != "admin") {
 		writeError(w, 409, "you cannot disable or demote your own account")
 		return
@@ -154,8 +185,8 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	query := `UPDATE users SET username=?,role=?,disabled=?,token_version=token_version+1`
-	args := []any{username, role, boolInt(dis)}
+	query := `UPDATE users SET username=?,email=?,role=?,disabled=?,token_version=token_version+1`
+	args := []any{username, email, role, boolInt(dis)}
 	if in.Password != "" {
 		hash, e := security.HashPassword(in.Password)
 		if e != nil {
@@ -167,12 +198,24 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	query += ` WHERE id=?`
 	args = append(args, id)
-	if _, e := a.db.Exec(query, args...); e != nil {
-		writeError(w, 409, "could not update the user; username may already be in use")
+	tx, e := a.db.Begin()
+	if e != nil {
+		writeError(w, 500, "could not update the user")
+		return
+	}
+	defer tx.Rollback()
+	if _, e = tx.Exec(query, args...); e == nil {
+		_, e = tx.Exec(`DELETE FROM password_reset_tokens WHERE user_id=?`, id)
+	}
+	if e == nil {
+		e = tx.Commit()
+	}
+	if e != nil {
+		writeError(w, 409, "could not update the user; username or email may already be in use")
 		return
 	}
 	a.audit(principal(r), "user.update", "user", id, "role="+role)
-	writeJSON(w, 200, map[string]any{"id": id, "username": username, "role": role, "disabled": dis})
+	writeJSON(w, 200, map[string]any{"id": id, "username": username, "email": email, "role": role, "disabled": dis})
 }
 
 func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +236,7 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = a.db.Exec(`DELETE FROM permissions WHERE user_id=?`, id)
 	_, _ = a.db.Exec(`DELETE FROM api_tokens WHERE user_id=?`, id)
+	_, _ = a.db.Exec(`DELETE FROM password_reset_tokens WHERE user_id=?`, id)
 	if _, e := a.db.Exec(`DELETE FROM users WHERE id=?`, id); e != nil {
 		writeError(w, 500, "could not delete user")
 		return
@@ -313,4 +357,19 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func normalizeUserEmail(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if len(value) > 254 || strings.ContainsAny(value, "\r\n\x00") {
+		return "", errors.New("email address must be valid and at most 254 characters")
+	}
+	parsed, err := mail.ParseAddress(value)
+	if err != nil || parsed.Address != value {
+		return "", errors.New("email address must be a single valid address")
+	}
+	return strings.ToLower(value), nil
 }

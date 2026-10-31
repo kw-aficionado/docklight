@@ -749,6 +749,42 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 24 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "users", "email") {
+			if _, err = tx.Exec(`ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(lower(email)) WHERE email<>''`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+			token_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			expires_at INTEGER NOT NULL,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(24)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

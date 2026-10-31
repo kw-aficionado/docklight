@@ -8,6 +8,8 @@ The optional public status page is available without authentication only when an
 
 `POST /api/login` accepts `{"username":"admin","password":"…","totp":"123456"}`. `totp` is needed after two-factor authentication is enabled. A successful login sets the HttpOnly `ygg_token` cookie and returns a session token and user summary. Passwords, hashes, and stored secret values are not included.
 
+`POST /api/auth/forgot` accepts `{"identifier":"username-or-email"}` and always returns the same generic `200` message for unknown accounts, accounts without an email, or missing SMTP configuration. Enabled accounts with an email receive a one-hour reset link through the first enabled global SMTP email channel. `POST /api/auth/reset` accepts `{"token":"…","password":"…"}`; the token is single-use and its SHA-256 hash is stored. A successful reset revokes web sessions and records `user.password_reset` without changing TOTP enrollment.
+
 For non-browser clients, send the returned session token as `Authorization: Bearer <session-token>`. Browser clients use the same-origin cookie. URL query-string tokens are not accepted.
 
 API tokens are created at `POST /api/tokens`; send their value as `Authorization: Bearer ygg_…`. The create response is the only time the clear token is returned. `GET /api/tokens` returns name, scopes, creation time, and last-used time. `DELETE /api/tokens/{id}` revokes a token. Tokens cannot create or revoke other tokens.
@@ -17,6 +19,8 @@ Password and TOTP endpoints:
 | Method and path | Purpose |
 | --- | --- |
 | `POST /api/password` | Change own password with `current_password` and `new_password`; revokes web sessions and clears the current cookie. |
+| `POST /api/auth/forgot` | Public; request a password reset by username or email without disclosing whether the account exists. |
+| `POST /api/auth/reset` | Public; consume a one-hour reset token and choose a new password. |
 | `POST /api/logout` | Revoke current account web sessions and clear the cookie. |
 | `GET /api/2fa/status` | Read whether TOTP is enabled. |
 | `POST /api/2fa/setup` | Create a TOTP secret and provisioning URI before enrollment. |
@@ -145,7 +149,7 @@ WebSocket connections are authenticated with the same-origin session cookie. The
 
 ## Users, grants, and audit
 
-Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `GET/PUT /api/users/{id}/permissions`, and `GET /api/permissions/catalog` (authenticated permission metadata). User profile changes invalidate that user's sessions; permission updates take effect on the next request without ending the session. `GET /api/audit` returns the most recent 200 audit records and is administrator-only. Grants combine with OR logic across `global`, `realm`, `gameskill`, and `server` scopes. Editing permissions replaces the complete grant set. Realm grants apply to servers currently in that realm and future servers created there.
+Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`, `GET/PUT /api/users/{id}/permissions`, and `GET /api/permissions/catalog` (authenticated permission metadata). User create and update accept an optional unique `email` for password recovery. User profile changes invalidate that user's sessions; permission updates take effect on the next request without ending the session. `GET /api/audit` returns the most recent 200 audit records and is administrator-only. Grants combine with OR logic across `global`, `realm`, `gameskill`, and `server` scopes. Editing permissions replaces the complete grant set. Realm grants apply to servers currently in that realm and future servers created there.
 
 ## Limits
 

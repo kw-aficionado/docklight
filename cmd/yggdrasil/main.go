@@ -195,13 +195,27 @@ func resetPassword(args []string) error {
 		return err
 	}
 	defer d.Close()
-	res, err := d.Exec(`UPDATE users SET password_hash=?,token_version=token_version+1 WHERE username=?`, hash, username)
+	tx, err := d.Begin()
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE users SET password_hash=?,token_version=token_version+1 WHERE username=?`, hash, username)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if n == 0 {
 		return fmt.Errorf("user %q not found", username)
+	}
+	if _, err = tx.Exec(`DELETE FROM password_reset_tokens WHERE user_id=(SELECT id FROM users WHERE username=?)`, username); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	fmt.Printf("Password reset for %s. New password: %s\n", username, pw)
 	return nil

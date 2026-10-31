@@ -8,6 +8,7 @@ The config reader supports scalar block-style YAML for these keys. Unknown keys 
 | --- | --- | --- |
 | `server.host` | `0.0.0.0` | Listener interface. Set to a trusted host address to avoid listening on every interface. |
 | `server.port` | `8080` | HTTP listener port, from 1 through 65535. |
+| `server.public_url` | empty | Canonical panel origin used in password-reset emails, for example `https://panel.example.com`. HTTPS is required except for localhost loopback. When empty, Docklight uses the request origin; set this when a reverse proxy or public hostname is involved. |
 | `database.path` | `/var/lib/yggdrasil/yggdrasil.db` | SQLite database path. Server directories are stored beside the database in `servers/`. |
 | `auth.secret_key` | generated | At least 32 characters. Used for signed sessions and AES-GCM secret encryption. Keep it stable and back it up with the database. |
 | `auth.session_ttl_hours` | `168` | Session lifetime in hours; must be at least 1. |
@@ -28,6 +29,7 @@ The config reader supports scalar block-style YAML for these keys. Unknown keys 
 server:
   host: 192.168.1.20
   port: 8080
+  public_url: https://panel.example.com
 database:
   path: /var/lib/yggdrasil/yggdrasil.db
 auth:

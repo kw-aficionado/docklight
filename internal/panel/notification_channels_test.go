@@ -215,13 +215,13 @@ func TestEmailChannelValidationDefaultsPortAndSMTPUsesTLSBoundary(t *testing.T) 
 	config.SMTPHost = "localhost"
 	config.SMTPPort = 2525
 	config.SMTPUsername, config.SMTPPassword = "", ""
-	err = sendSMTPNotificationWithDial(context.Background(), config, "Docklight test body", func(context.Context, string, string) (net.Conn, error) { return client, nil })
+	err = sendSMTPEmailWithDial(context.Background(), config, "[Docklight] Reset your password", "Docklight test body", func(context.Context, string, string) (net.Conn, error) { return client, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case body := <-serverDone:
-		if !strings.Contains(body, "Subject: [Docklight] Notification") || !strings.Contains(body, "Docklight test body") || strings.Contains(body, "smtp-private-password") {
+		if !strings.Contains(body, "Subject: [Docklight] Reset your password") || !strings.Contains(body, "Docklight test body") || strings.Contains(body, "smtp-private-password") {
 			t.Fatalf("unexpected SMTP message: %q", body)
 		}
 	case <-time.After(time.Second):

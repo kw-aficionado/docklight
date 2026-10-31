@@ -64,6 +64,9 @@ type App struct {
 	rateMu                sync.Mutex
 	loginIPs              map[string][]time.Time
 	loginUsers            map[string][]time.Time
+	forgotAttempts        map[string][]time.Time
+	passwordResetSender   func(context.Context, notificationChannelConfig, string, string) error
+	passwordResetWG       sync.WaitGroup
 	jobsMu                sync.RWMutex
 	jobs                  map[string]*installJob
 }
@@ -71,6 +74,7 @@ type App struct {
 type User struct {
 	ID              string          `json:"id"`
 	Username        string          `json:"username"`
+	Email           string          `json:"-"`
 	Role            string          `json:"role"`
 	Disabled        bool            `json:"disabled"`
 	TokenVersion    int             `json:"-"`
@@ -97,7 +101,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}}
 }
 
 func EnsureAdmin(d *sql.DB, username, password string) (string, error) {
@@ -176,6 +180,8 @@ func (a *App) Router() http.Handler {
 		})
 		api.Post("/login", a.login)
 		api.Post("/auth/login", a.login)
+		api.Post("/auth/forgot", a.forgotPassword)
+		api.Post("/auth/reset", a.resetPassword)
 		api.Post("/logout", a.auth(a.logout))
 		api.Post("/password", a.auth(a.changePassword))
 		api.Get("/me", a.auth(a.me))
@@ -299,12 +305,15 @@ func (a *App) headers(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 		if r.URL.Path == "/robots.txt" || r.URL.Path == "/app.js" || r.URL.Path == "/style.css" {
 			w.Header().Set("Cache-Control", "public, max-age=60")
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		if r.URL.Path == "/" && r.URL.Query().Has("reset") {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
@@ -318,7 +327,11 @@ func (a *App) static(file, contentType string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Cache-Control", "no-cache")
+		cacheControl := "no-cache"
+		if r.URL.Path == "/" && r.URL.Query().Has("reset") {
+			cacheControl = "no-store"
+		}
+		w.Header().Set("Cache-Control", cacheControl)
 		w.WriteHeader(200)
 		_, _ = w.Write(b)
 	}

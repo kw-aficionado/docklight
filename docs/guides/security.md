@@ -6,6 +6,8 @@ The first administrator is created from `admin.username` and the generated boots
 
 Login attempts are rate limited by client IP and username. A TOTP code is required at each login after enrollment, and the last accepted time counter is recorded to reject code replay.
 
+Administrators can set a unique email address for each account in **Users & access**. Password recovery sends a one-hour, single-use link through the first enabled global SMTP email channel. The reset endpoint returns the same generic response whether a matching account is eligible or not, and forgot requests are rate limited by IP and identifier. Only a SHA-256 token hash is stored. Resetting a password increments the session version, clears other outstanding reset tokens, and preserves TOTP. Set `server.public_url` to the canonical HTTPS origin when Docklight is behind a reverse proxy; otherwise the request origin is used. The reset page removes the token from the address bar immediately and responses use `Referrer-Policy: no-referrer`.
+
 ## Roles, grants, and API tokens
 
 Administrators can create users and grant permissions globally, per realm, per template, or per server. The API checks grants on list, control, file, backup, console, query, RCON, and server creation paths; realm and template grants also cover servers created later in that scope; hiding a button in the UI does not grant access. See [realms and access](realms.md) for the complete scope behavior.
