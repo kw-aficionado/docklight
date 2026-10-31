@@ -53,10 +53,15 @@ Password and TOTP endpoints:
 | `PUT /api/servers/{id}/schedules/{scheduleID}` | Change the name, cron expression, or enabled state. |
 | `DELETE /api/servers/{id}/schedules/{scheduleID}` | Delete a schedule and its run history. |
 | `GET /api/servers/{id}/schedules/{scheduleID}/runs` | Read the 50 most recent schedule runs. |
+| `GET /api/notifications` | Read admin-only webhook notification state; secrets and endpoint are never returned. |
+| `PUT /api/notifications` | Save admin-only webhook settings and backup event filters. |
+| `POST /api/notifications/test` | Send a signed test event to the configured webhook; admin only. |
 
 Create a schedule with `{"name":"Nightly","cron":"0 3 * * *","enabled":true}`. The enabled field may be omitted; new schedules are enabled by default. Five-field cron uses minute, hour, day of month, month, and weekday. Six-field cron adds seconds first. Times are interpreted in the panel host local timezone. A scheduled backup runs only when the server is stopped; otherwise the failed attempt is recorded and the next cron time remains scheduled.
 
 Server objects returned by list, get, create, and update include the caller's effective `permissions` array. The backups API requires `server.backup`; schedule management requires `server.schedule`, and creating a backup schedule also requires `server.backup`. API token permissions are intersected with the account's grants.
+
+Webhook notification settings accept `enabled`, `endpoint`, `signing_secret`, `events`, `clear_endpoint`, and `clear_signing_secret`. Supported events are `backup.success` and `backup.failure`. Blank endpoint or signing secret fields preserve the saved value; use the `clear_*` flags to remove them. Endpoint and signing secret are encrypted at rest and omitted from every response. See [notifications](guides/notifications.md) for delivery and signature details.
 
 Example server creation:
 
@@ -92,4 +97,4 @@ Administrator endpoints are `GET/POST /api/users`, `PUT/DELETE /api/users/{id}`,
 
 ## Limits
 
-There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior.
+There is no pagination for server or user lists. Audit history returns at most 200 rows. Login attempts are rate limited. File editor and upload limits are documented above. Remote backup targets, schedule actions beyond backup, realm/global schedules, Discord, Telegram, SMTP, non-backup notifications, sidecars, and integrations are not implemented yet. See [server backups](guides/backups.md) for local backup behavior.

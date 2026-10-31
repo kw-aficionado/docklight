@@ -27,20 +27,21 @@ import (
 )
 
 type App struct {
-	cfg        config.Config
-	configPath string
-	db         *sql.DB
-	engine     *docker.Engine
-	dataRoot   string
-	backupRoot string
-	booted     time.Time
-	dataMu     sync.Mutex
-	scheduleMu sync.Mutex
-	rateMu     sync.Mutex
-	loginIPs   map[string][]time.Time
-	loginUsers map[string][]time.Time
-	jobsMu     sync.RWMutex
-	jobs       map[string]*installJob
+	cfg                config.Config
+	configPath         string
+	db                 *sql.DB
+	engine             *docker.Engine
+	dataRoot           string
+	backupRoot         string
+	booted             time.Time
+	dataMu             sync.Mutex
+	scheduleMu         sync.Mutex
+	notificationClient *http.Client
+	rateMu             sync.Mutex
+	loginIPs           map[string][]time.Time
+	loginUsers         map[string][]time.Time
+	jobsMu             sync.RWMutex
+	jobs               map[string]*installJob
 }
 
 type User struct {
@@ -183,6 +184,9 @@ func (a *App) Router() http.Handler {
 			priv.Put("/servers/{id}/schedules/{scheduleID}", a.updateBackupSchedule)
 			priv.Delete("/servers/{id}/schedules/{scheduleID}", a.deleteBackupSchedule)
 			priv.Get("/servers/{id}/schedules/{scheduleID}/runs", a.listBackupScheduleRuns)
+			priv.Get("/notifications", a.admin(a.getNotificationSettings))
+			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
+			priv.Post("/notifications/test", a.admin(a.testNotification))
 			priv.Post("/servers/{id}/install", a.installServer)
 			priv.Get("/servers/{id}/install/status", a.installStatus)
 			priv.Post("/servers/{id}/start", a.startServer)

@@ -94,6 +94,7 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	item, pruned, warning, err := a.createBackupSnapshot(s)
 	if err != nil {
+		a.dispatchBackupNotification(notificationBackupFailure, s.ID, s.Name, "A manual backup failed. Review the panel response for details.")
 		var operationErr *backupOperationError
 		if errors.As(err, &operationErr) {
 			writeError(w, operationErr.status, operationErr.message)
@@ -104,6 +105,7 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	u := principal(r)
 	a.audit(u, "server.backup.create", "backup", item.ID, fmt.Sprintf("server=%s files=%d bytes=%d", s.ID, item.Files, item.DataBytes))
+	a.dispatchBackupNotification(notificationBackupSuccess, s.ID, s.Name, "A manual backup completed and passed integrity verification.")
 	response := map[string]any{"backup": item, "pruned": pruned}
 	if warning != "" {
 		response["warning"] = warning

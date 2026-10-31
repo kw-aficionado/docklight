@@ -423,6 +423,12 @@ func (a *App) runDueBackupSchedule(id string, now time.Time) error {
 		return fmt.Errorf("backup finished with status %s but schedule status could not be updated: %w", status, updateErr)
 	}
 	a.audit(User{Username: "scheduler"}, "server.schedule.backup", "backup_schedule", id, fmt.Sprintf("server=%s status=%s detail=%s", serverID, status, detail))
+	server, _ := a.getServer(serverID)
+	if status == "success" {
+		a.dispatchBackupNotification(notificationBackupSuccess, serverID, server.Name, "A scheduled backup completed and passed integrity verification.")
+	} else {
+		a.dispatchBackupNotification(notificationBackupFailure, serverID, server.Name, "A scheduled backup failed. Review the schedule run history for details.")
+	}
 	if _, pruneErr := a.db.Exec(`DELETE FROM backup_schedule_runs WHERE schedule_id=? AND id NOT IN (SELECT id FROM backup_schedule_runs WHERE schedule_id=? ORDER BY started_at DESC,id DESC LIMIT 50)`, id, id); pruneErr != nil {
 		log.Printf("could not prune old run history for backup schedule %s", id)
 	}

@@ -155,6 +155,30 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 5 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS notification_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			endpoint_enc TEXT NOT NULL DEFAULT '',
+			signing_secret_enc TEXT NOT NULL DEFAULT '',
+			events_json TEXT NOT NULL DEFAULT '[]',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(5)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

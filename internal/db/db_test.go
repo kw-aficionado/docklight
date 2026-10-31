@@ -30,8 +30,12 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Fatalf("expected 4 migrations, got %d", count)
+	if count != 5 {
+		t.Fatalf("expected 5 migrations, got %d", count)
+	}
+	var notificationTable string
+	if err = d.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_settings'`).Scan(&notificationTable); err != nil || notificationTable != "notification_settings" {
+		t.Fatalf("notification settings table missing: name=%q err=%v", notificationTable, err)
 	}
 	rows, err := d.Query(`PRAGMA table_info(servers)`)
 	if err != nil {
