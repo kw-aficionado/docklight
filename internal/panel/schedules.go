@@ -55,16 +55,19 @@ func scheduleActionPermission(action string) (string, bool) {
 		return "server.backup", true
 	case "restart":
 		return "server.control", true
+	case "start", "stop":
+		return "server.control", true
 	default:
 		return "", false
 	}
 }
 
 func (a *App) validateScheduleAction(s Server, action string, warnInput *bool, secondsInput *int) (bool, int, error) {
-	if action == "backup" {
+	switch action {
+	case "backup", "start", "stop":
 		return false, 60, nil
-	}
-	if action != "restart" {
+	case "restart":
+	default:
 		return false, 0, errors.New("unsupported schedule action")
 	}
 	gs, err := a.loadRune(s.GameskillID)
@@ -193,7 +196,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	permission, ok := scheduleActionPermission(in.Action)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "schedule action must be backup or restart")
+		writeError(w, http.StatusBadRequest, "schedule action must be backup, restart, start, or stop")
 		return
 	}
 	if !a.allowedServer(u, permission, s.ID, s.GameskillID) {
@@ -207,9 +210,14 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
-		if in.Action == "restart" {
+		switch in.Action {
+		case "restart":
 			in.Name = "Scheduled restart"
-		} else {
+		case "start":
+			in.Name = "Scheduled start"
+		case "stop":
+			in.Name = "Scheduled stop"
+		default:
 			in.Name = "Scheduled backup"
 		}
 	}
@@ -538,7 +546,21 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 		return nil
 	}
 	status, detail := "success", ""
-	if action != "backup" {
+	if action == "start" || action == "stop" {
+		var actionStatus string
+		if a.scheduleControl != nil {
+			actionStatus, detail, err = a.scheduleControl(ctx, serverID, action)
+		} else {
+			actionStatus, detail, err = a.executeScheduledControl(ctx, serverID, action)
+		}
+		if actionStatus != "" {
+			status = actionStatus
+		}
+		if err != nil {
+			status = "error"
+			detail = err.Error()
+		}
+	} else if action != "backup" {
 		status = "error"
 		detail = "unsupported stored schedule action"
 	} else if detail, err = a.executeScheduledBackup(serverID, id, name); err != nil {
@@ -612,6 +634,43 @@ func (a *App) executeScheduledBackup(serverID, scheduleID, name string) (string,
 	}
 	a.audit(User{Username: "scheduler"}, "server.backup.create", "backup", item.ID, fmt.Sprintf("server=%s schedule=%s files=%d bytes=%d", serverID, scheduleID, item.Files, item.DataBytes))
 	return detail, nil
+}
+
+func (a *App) executeScheduledControl(ctx context.Context, serverID, action string) (string, string, error) {
+	a.dataMu.Lock()
+	defer a.dataMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "error", "", err
+	}
+	s, err := a.getServer(serverID)
+	if err != nil {
+		return "error", "", errors.New("server no longer exists")
+	}
+	switch action {
+	case "start":
+		if s.Status == "running" || s.Status == "starting" {
+			return "skipped", "start skipped because the server is already running or starting", nil
+		}
+		if !s.Installed {
+			return "error", "", errors.New("install this server before scheduling a start")
+		}
+		if err = a.startWithContext(s, ctx); err != nil {
+			return "error", "", err
+		}
+		a.resetWatchdog(s.ID)
+		return "success", "start initiated", nil
+	case "stop":
+		if s.ContainerID == "" {
+			return "skipped", "stop skipped because no container exists", nil
+		}
+		if err = a.stop(s); err != nil {
+			return "error", "", err
+		}
+		a.resetWatchdog(s.ID)
+		return "success", "server stopped", nil
+	default:
+		return "error", "", errors.New("unsupported scheduled control action")
+	}
 }
 
 func (a *App) executeScheduledRestart(ctx context.Context, serverID string, warn bool, warningSeconds int) (string, error) {
@@ -750,7 +809,7 @@ func waitForSchedule(ctx context.Context, delay time.Duration) error {
 }
 
 func scheduleError(status, detail string) string {
-	if status == "success" {
+	if status == "success" || status == "skipped" {
 		return ""
 	}
 	return detail

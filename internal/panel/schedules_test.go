@@ -69,6 +69,125 @@ func TestRestartScheduleRequiresControlAndPersistsWarningSettings(t *testing.T) 
 	}
 }
 
+func TestLifecycleSchedulesRequireControlAndPersistAction(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "lifecycle-schedule-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('lifecycle-schedule-server','Lifecycle test','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO users(id,username,password_hash,role) VALUES('lifecycle-schedule-user','lifecycle-schedule-user','unused-hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	token, err := a.issue(User{ID: "lifecycle-schedule-user", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Router()
+	if _, err = d.Exec(`INSERT INTO permissions(user_id,scope_type,scope_id,perms) VALUES('lifecycle-schedule-user','server','lifecycle-schedule-server','server.schedule')`); err != nil {
+		t.Fatal(err)
+	}
+	denied := testRequest(h, http.MethodPost, "/api/servers/lifecycle-schedule-server/schedules", `{"action":"start","cron":"0 3 * * *"}`, token)
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("lifecycle schedule was created without server.control: %d %s", denied.Code, denied.Body.String())
+	}
+	if _, err = d.Exec(`UPDATE permissions SET perms='server.schedule,server.control' WHERE user_id='lifecycle-schedule-user' AND scope_type='server' AND scope_id='lifecycle-schedule-server'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"start", "stop"} {
+		created := testRequest(h, http.MethodPost, "/api/servers/lifecycle-schedule-server/schedules", `{"action":"`+action+`","cron":"0 3 * * *"}`, token)
+		if created.Code != http.StatusCreated {
+			t.Fatalf("create %s schedule: %d %s", action, created.Code, created.Body.String())
+		}
+		var item backupSchedule
+		if err = json.Unmarshal(created.Body.Bytes(), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.Action != action || item.Name != "Scheduled "+action || !item.Enabled || item.NextRun == "" {
+			t.Fatalf("%s schedule was not persisted correctly: %#v", action, item)
+		}
+	}
+}
+
+func TestLifecycleScheduleRunsAndRecordsSkippedOutcomes(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "lifecycle-run-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('lifecycle-run-server','Lifecycle test','minecraft-java','stopped',1,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, action := range []string{"start", "stop"} {
+		id := "lifecycle-" + action
+		if _, err := d.Exec(`INSERT INTO backup_schedules(id,server_id,name,action,cron,enabled,next_run) VALUES(?,?,?,?,'* * * * *',1,?)`, id, "lifecycle-run-server", "Test "+action, action, scheduleTimestamp(now.Add(-time.Second))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var actions []string
+	a.scheduleControl = func(_ context.Context, _ string, action string) (string, string, error) {
+		actions = append(actions, action)
+		if action == "stop" {
+			return "skipped", "stop skipped because no container exists", nil
+		}
+		return "success", "start initiated", nil
+	}
+	if err := a.processDueBackupSchedules(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 2 || actions[0] != "start" || actions[1] != "stop" {
+		t.Fatalf("scheduled lifecycle actions dispatched in wrong order: %v", actions)
+	}
+	for _, want := range []struct{ id, status, detail string }{
+		{"lifecycle-start", "success", "start initiated"},
+		{"lifecycle-stop", "skipped", "stop skipped because no container exists"},
+	} {
+		var status, detail string
+		if err := d.QueryRow(`SELECT status,detail FROM backup_schedule_runs WHERE schedule_id=?`, want.id).Scan(&status, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if status != want.status || detail != want.detail {
+			t.Fatalf("schedule %s run status=%q detail=%q, want %q %q", want.id, status, detail, want.status, want.detail)
+		}
+		var lastError string
+		if err := d.QueryRow(`SELECT last_error FROM backup_schedules WHERE id=?`, want.id).Scan(&lastError); err != nil {
+			t.Fatal(err)
+		}
+		if want.status == "skipped" && lastError != "" {
+			t.Fatalf("skipped schedule was stored as an error: %q", lastError)
+		}
+	}
+}
+
+func TestScheduledControlHandlesNoopAndUninstalledServers(t *testing.T) {
+	a, d, _ := testApp(t)
+	dataDir := filepath.Join(a.dataRoot, "control-noop-server")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('control-noop-server','Control test','minecraft-java','stopped',0,'{}','{}',?)`, dataDir); err != nil {
+		t.Fatal(err)
+	}
+	status, detail, err := a.executeScheduledControl(context.Background(), "control-noop-server", "stop")
+	if err != nil || status != "skipped" || detail != "stop skipped because no container exists" {
+		t.Fatalf("stop on a server with no container: status=%q detail=%q err=%v", status, detail, err)
+	}
+	status, _, err = a.executeScheduledControl(context.Background(), "control-noop-server", "start")
+	if err == nil || status != "error" || !strings.Contains(err.Error(), "install this server") {
+		t.Fatalf("start of an uninstalled server: status=%q err=%v", status, err)
+	}
+	if _, err = d.Exec(`UPDATE servers SET installed=1,status='running' WHERE id='control-noop-server'`); err != nil {
+		t.Fatal(err)
+	}
+	status, detail, err = a.executeScheduledControl(context.Background(), "control-noop-server", "start")
+	if err != nil || status != "skipped" || !strings.Contains(detail, "already running") {
+		t.Fatalf("start on a running server: status=%q detail=%q err=%v", status, detail, err)
+	}
+}
+
 func TestScheduledRestartCountdownSendsOnlySelectedWarningsInOrder(t *testing.T) {
 	gs := gameskill.Rune{Restart: &gameskill.Restart{Warnings: []gameskill.RestartWarning{
 		{At: "1m", Msg: "say {{server_name}} in {{seconds}} seconds"},
