@@ -26,6 +26,12 @@ gameskill:
       options: [production, maintenance]
       default: production
       required: true
+  update:
+    image: example/app-cli:1
+    label: Update app
+    script: /usr/local/bin/update
+    app_writable:
+      - uploads
   startup:
     exec: [serve]
     done_regex: "ready on"
@@ -84,6 +90,8 @@ gameskill:
 | `variables` | Form fields of type `string`, `int`, `bool`, or `select`; optional default, required, min/max, pattern, secret, and hint. |
 | `config_files` | Up to 64 safe, relative file paths. Existing files appear as shortcuts in the Files tab; `.properties`, `.env`, `.cfg`, and `.conf` support a key/value form and a raw editor. Missing files are skipped. |
 | `install.image`, `install.script` | Optional temporary install container and shell script. The script runs as root with the data mounted at `/data`. |
+| `update.image`, `update.script`, `update.label` | Optional app-update tool container, required shell script when the block is present, and button label (defaults to **Update app**). The image defaults to `docker.image`; the script runs as root with app data mounted at `/data` and declared environment values available. Read secrets from the environment; secret placeholders in the image or script are rejected. The panel captures and redacts declared secrets from output. |
+| `update.app_writable[]` | Optional list of up to 64 clean paths relative to app data. After the update, Docklight changes file ownership to the panel user without changing group ownership, and adds group-write permission only under these paths. The data root itself is ignored. |
 | `startup.command` | Shell string run with `/bin/sh -c` when the image entrypoint is replaced. |
 | `startup.exec` | Argument list for the container command. When `keep_entrypoint` is true these are entrypoint arguments. |
 | `startup.done_regex` | Regular expression searched in recent container output to mark startup ready. |
@@ -105,6 +113,8 @@ gameskill:
 | `anticheat.plugins_recommended` | Optional list of up to 16 plugin names displayed as template guidance only. |
 
 Variable keys that conflict with panel-injected names (including `SERVER_NAME`, `HOME`, `PUID`, `PGID`, `UID`, `GID`, `PUBLIC_URL`, `PORT_*`, and `*_PORT`) are rejected. Secret variables are encrypted at rest and masked in API responses. Password/token/secret/private-key-like variable names are treated as secret even without `secret: true`.
+
+An `update` block adds an admin-only **Update app** action to installed servers and an audited `POST /api/servers/{id}/app-update` endpoint. Docklight stops the main app, runs the tool container, then recreates and starts the app even if the update script exits with an error. For stack templates, the tool joins the server's private network; running sidecars are kept up, and stopped or missing sidecars are started before the tool runs. Scheduled **Update** actions use this app script synchronously and skip stopped servers; templates without the block keep the existing installer-based scheduled server update.
 
 ## Validation and limits
 

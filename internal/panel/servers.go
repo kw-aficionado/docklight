@@ -46,6 +46,7 @@ type Server struct {
 	ErrorMessage        string               `json:"error_message,omitempty"`
 	Permissions         []string             `json:"permissions,omitempty"`
 	StackServices       []StackServiceStatus `json:"stack_services,omitempty"`
+	AppUpdateLabel      string               `json:"app_update_label,omitempty"`
 	CreatedAt           string               `json:"created_at"`
 }
 
@@ -631,8 +632,8 @@ func (a *App) runInstallData(ctx context.Context, s Server, gs rune.Rune, j *ins
 	return secrets, nil
 }
 
-// executeScheduledUpdate refreshes the template image and reruns its installer
-// against the existing data directory before creating a fresh server container.
+// executeScheduledUpdate runs a Rune app-update block when present; otherwise
+// it refreshes the template image and reruns its installer against existing data.
 func (a *App) executeScheduledUpdate(parent context.Context, serverID string) (string, error) {
 	a.dataMu.Lock()
 	defer a.dataMu.Unlock()
@@ -648,12 +649,28 @@ func (a *App) executeScheduledUpdate(parent context.Context, serverID string) (s
 	if !s.Installed {
 		return "", errors.New("install this server before scheduling an update")
 	}
-	if s.Status == "installing" || s.Status == "updating" {
+	if s.Status == "installing" || s.Status == "updating" || s.Status == "starting" {
 		return "", errors.New("server already has an install or update in progress")
 	}
 	gs, err := a.loadRune(s.GameskillID)
 	if err != nil {
 		return "", fmt.Errorf("load server template: %w", err)
+	}
+	if gs.Update != nil {
+		if s.Status != "running" {
+			return "", errScheduledAppUpdateSkipped
+		}
+		if _, err = a.db.Exec(`UPDATE servers SET status='updating',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, serverID); err != nil {
+			return "", fmt.Errorf("record scheduled app update state: %w", err)
+		}
+		job := &installJob{lines: []string{"Scheduled app update started; existing app data will be retained."}, updated: time.Now()}
+		actor := User{Username: "scheduler"}
+		a.audit(actor, "server.app_update.start", "server", serverID, "scheduled=true")
+		if err = a.runAppUpdate(ctx, s, gs, actor, job); err != nil {
+			return "", err
+		}
+		a.resetWatchdog(serverID)
+		return "app update completed; fresh app container start initiated", nil
 	}
 	env, err := a.runtimeEnv(s, gs)
 	if err != nil {
@@ -845,6 +862,12 @@ func (a *App) start(s Server) error {
 }
 
 func (a *App) startWithContext(s Server, parent context.Context) error {
+	return a.startWithContextOnNetwork(s, parent, "")
+}
+
+// startWithContextOnNetwork starts the app on a stack network whose sidecars
+// are already running. An empty network keeps the normal create-sidecars path.
+func (a *App) startWithContextOnNetwork(s Server, parent context.Context, preparedNetwork string) error {
 	if !s.Installed {
 		return errors.New("install this server before starting it")
 	}
@@ -862,8 +885,9 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 	if err = a.pullImage(ctx, image); err != nil {
 		return err
 	}
+	createdStack := false
 	cleanupStartedStack := func(cause error) error {
-		if gs.Stack == nil {
+		if gs.Stack == nil || !createdStack {
 			return cause
 		}
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -912,13 +936,26 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 	cleanupCloudflareCancel()
 	stackNetwork := ""
 	if gs.Stack != nil {
-		stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
-		if err != nil {
-			return fmt.Errorf("prepare private app stack network: %w", err)
+		if preparedNetwork != "" {
+			stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
+			if err != nil {
+				return fmt.Errorf("prepare private app stack network: %w", err)
+			}
+			if preparedNetwork != stackNetwork {
+				return errors.New("prepared private app stack network does not match this server")
+			}
+		} else {
+			stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
+			if err != nil {
+				return fmt.Errorf("prepare private app stack network: %w", err)
+			}
+			createdStack = true
+			if err = a.createStackSidecars(ctx, s, gs, env, stackNetwork, stackResourceLimits(s, gs)); err != nil {
+				return cleanupStartedStack(err)
+			}
 		}
-		if err = a.createStackSidecars(ctx, s, gs, env, stackNetwork, stackResourceLimits(s, gs)); err != nil {
-			return cleanupStartedStack(err)
-		}
+	} else if preparedNetwork != "" {
+		return errors.New("a prepared stack network was supplied for a template without sidecars")
 	}
 	limits := stackResourceLimits(s, gs)
 	cfg, err := a.containerConfigWithStack(s, gs, env, stackNetwork, limits[0])
@@ -1503,26 +1540,34 @@ func (a *App) decorateServer(u User, s Server) Server {
 			s.Permissions = append(s.Permissions, permission)
 		}
 	}
-	if gs, err := a.loadRune(s.GameskillID); err == nil && gs.Stack != nil {
-		type serviceState struct{ status, message string }
-		states := map[string]serviceState{}
-		rows, queryErr := a.db.Query(`SELECT service_name,status,last_error FROM server_sidecars WHERE server_id=?`, s.ID)
-		if queryErr == nil {
-			for rows.Next() {
-				var name, status, message string
-				if rows.Scan(&name, &status, &message) == nil {
-					states[name] = serviceState{status: status, message: message}
-				}
+	if gs, err := a.loadRune(s.GameskillID); err == nil {
+		if gs.Update != nil {
+			s.AppUpdateLabel = strings.TrimSpace(gs.Update.Label)
+			if s.AppUpdateLabel == "" {
+				s.AppUpdateLabel = "Update app"
 			}
-			_ = rows.Close()
 		}
-		s.StackServices = make([]StackServiceStatus, 0, len(gs.Stack.Services))
-		for _, service := range gs.Stack.Services {
-			state := states[service.Name]
-			if state.status == "" {
-				state.status = "stopped"
+		if gs.Stack != nil {
+			type serviceState struct{ status, message string }
+			states := map[string]serviceState{}
+			rows, queryErr := a.db.Query(`SELECT service_name,status,last_error FROM server_sidecars WHERE server_id=?`, s.ID)
+			if queryErr == nil {
+				for rows.Next() {
+					var name, status, message string
+					if rows.Scan(&name, &status, &message) == nil {
+						states[name] = serviceState{status: status, message: message}
+					}
+				}
+				_ = rows.Close()
 			}
-			s.StackServices = append(s.StackServices, StackServiceStatus{Name: service.Name, Status: state.status, ErrorMessage: state.message})
+			s.StackServices = make([]StackServiceStatus, 0, len(gs.Stack.Services))
+			for _, service := range gs.Stack.Services {
+				state := states[service.Name]
+				if state.status == "" {
+					state.status = "stopped"
+				}
+				s.StackServices = append(s.StackServices, StackServiceStatus{Name: service.Name, Status: state.status, ErrorMessage: state.message})
+			}
 		}
 	}
 	return s

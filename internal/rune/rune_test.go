@@ -116,6 +116,45 @@ func TestStackRejectsUnsafeNamesPathsAndUndeclaredVariables(t *testing.T) {
 	}
 }
 
+func TestAppUpdateValidation(t *testing.T) {
+	base := Rune{
+		ID: "updatable", Name: "Updatable", Docker: Docker{Image: "example/app:1", KeepEntrypoint: true},
+		Update: &Update{Script: "./upgrade", Label: "Update app", AppWritable: []string{"uploads", "cache/data"}},
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid update block was rejected: %v", err)
+	}
+	base.Update.AppWritable = []string{"../outside"}
+	if err := base.Validate(); err == nil {
+		t.Fatal("app_writable path escaping the data root was accepted")
+	}
+	base.Update.AppWritable = []string{"cache/data", "cache/data"}
+	if err := base.Validate(); err == nil {
+		t.Fatal("duplicate app_writable path was accepted")
+	}
+	base.Update.AppWritable = nil
+	base.Update.Script = "  "
+	if err := base.Validate(); err == nil {
+		t.Fatal("empty app update script was accepted")
+	}
+	base.Update.Script = "./upgrade"
+	base.Variables = []Variable{{Key: "UPDATE_TAG", Type: "string"}}
+	base.Update.Image = "example/app:{{UPDATE_TAG}}"
+	if err := base.Validate(); err != nil {
+		t.Fatalf("declared image placeholder was rejected: %v", err)
+	}
+	base.Variables = []Variable{{Key: "UPDATE_TOKEN", Type: "string", Secret: true}}
+	base.Update.Image = "example/app:{{UPDATE_TOKEN}}"
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "must not embed secret") {
+		t.Fatalf("secret update image placeholder was accepted: %v", err)
+	}
+	base.Update.Image = ""
+	base.Update.Script = "./upgrade --token {{UPDATE_TOKEN}}"
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "must not embed secret") {
+		t.Fatalf("secret update script placeholder was accepted: %v", err)
+	}
+}
+
 func TestWatcherTemplateValidationAcceptsLegacyActionAndRejectsInvalidPatterns(t *testing.T) {
 	base := Rune{
 		ID: "watcher-template", Name: "Watcher template",

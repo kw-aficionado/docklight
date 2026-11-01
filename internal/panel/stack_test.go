@@ -82,22 +82,23 @@ func readWebSocketFrame(reader *bufio.Reader) (byte, string, error) {
 }
 
 type fakeStackDocker struct {
-	mu             sync.Mutex
-	networkName    string
-	networkID      string
-	serverID       string
-	failStart      string
-	containers     map[string]fakeStackContainer
-	byName         map[string]string
-	configs        map[string]docker.CreateConfig
-	operations     []string
-	nextID         int
-	logsOutput     string
-	healthInspects int
-	execCommand    []string
-	execOutput     string
-	execExitCode   int
-	execCount      int
+	mu                sync.Mutex
+	networkName       string
+	networkID         string
+	serverID          string
+	failStart         string
+	containers        map[string]fakeStackContainer
+	byName            map[string]string
+	configs           map[string]docker.CreateConfig
+	operations        []string
+	nextID            int
+	logsOutput        string
+	healthInspects    int
+	execCommand       []string
+	execOutput        string
+	execExitCode      int
+	execCount         int
+	appUpdateExitCode int
 }
 
 func newFakeStackDocker(serverID, failStart string) *fakeStackDocker {
@@ -169,6 +170,20 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if req.Method == http.MethodPost && strings.HasPrefix(path, "/v1.45/containers/") {
 		parts := strings.Split(strings.TrimPrefix(path, "/v1.45/containers/"), "/")
+		if len(parts) == 2 && parts[1] == "wait" {
+			container, ok := f.containers[parts[0]]
+			if !ok {
+				return respond(http.StatusNotFound, `{"message":"No such container"}`)
+			}
+			container.state = "exited"
+			f.containers[parts[0]] = container
+			code := 0
+			if container.config.Labels[docklightRoleLabel] == "app-update" {
+				code = f.appUpdateExitCode
+			}
+			f.operations = append(f.operations, "container:wait:"+container.name)
+			return respond(http.StatusOK, fmt.Sprintf(`{"StatusCode":%d}`, code))
+		}
 		if len(parts) == 2 && parts[1] == "exec" {
 			container, ok := f.containers[parts[0]]
 			if !ok {

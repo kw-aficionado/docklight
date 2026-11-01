@@ -280,7 +280,7 @@ func (a *App) validateScopedActionTargets(scopeType, scopeID, action string, ski
 		}
 		switch action {
 		case "update":
-			if !server.Installed || server.Status == "installing" || server.Status == "updating" {
+			if !server.Installed || server.Status == "installing" || server.Status == "updating" || server.Status == "starting" {
 				return fmt.Errorf("scheduled updates require every server in scope to be installed and idle; %s is not eligible", server.Name)
 			}
 		case "message":
@@ -685,6 +685,9 @@ func (a *App) executeScopedScheduleTarget(ctx context.Context, item backupSchedu
 			detail, err = a.scheduleUpdate(ctx, serverID)
 		} else {
 			detail, err = a.executeScheduledUpdate(ctx, serverID)
+		}
+		if errors.Is(err, errScheduledAppUpdateSkipped) {
+			return "skipped", err.Error(), nil
 		}
 		if err == nil {
 			if a.scheduleReady != nil {

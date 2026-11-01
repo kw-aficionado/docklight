@@ -249,7 +249,7 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, permission+" permission is required to schedule this action")
 		return
 	}
-	if in.Action == "update" && (!s.Installed || s.Status == "installing" || s.Status == "updating") {
+	if in.Action == "update" && (!s.Installed || s.Status == "installing" || s.Status == "updating" || s.Status == "starting") {
 		writeError(w, http.StatusConflict, "scheduled updates require an installed server with no install or update in progress")
 		return
 	}
@@ -729,7 +729,10 @@ func (a *App) runDueBackupSchedule(ctx context.Context, id string, now time.Time
 				detail, err = a.executeScheduledUpdate(ctx, serverID)
 			}
 			status := "success"
-			if err != nil {
+			if errors.Is(err, errScheduledAppUpdateSkipped) {
+				status = "skipped"
+				detail = err.Error()
+			} else if err != nil {
 				status = "error"
 				detail = err.Error()
 			}

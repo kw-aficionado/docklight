@@ -270,3 +270,11 @@
 - Store only hashes of authorization nonces, codes, access tokens, and refresh tokens. Keep codes short-lived and single-use, rotate refresh credentials, revoke a connection on replay, and let the approving user revoke connections immediately.
 - Preserve the approving account's current server grants and intersect API-token calls with the API token's own scopes. Do not accept ordinary browser sessions as a substitute for MCP consent. Audit tool and control calls as the actual caller.
 - Show the connector's log-data and player-disconnection risks on the consent screen. The public-reachability flag is a hostname heuristic, not a live external probe.
+
+## 2026-11-01: Template app updates
+
+- Keep app updates distinct from installer-based server updates. A Rune `update` block provides the temporary tool image/script, button label, and app-data paths that may receive group-write permission.
+- Restrict manual app updates to administrators and serialize the operation with the shared server data lock. Audit the start and result without writing script output or secrets to audit details.
+- Stop only the main app before its update so working sidecars remain available on the private network. Start stopped or missing sidecars when needed, then attach the update container to that network.
+- Chown updated data to the panel user while preserving group ownership and existing modes; apply group write only to validated `app_writable` paths. Attempt to recreate the app after script failures so the update result does not suppress a deployment attempt.
+- Use the Rune app-update script for scheduled Update actions only while the server is running; keep the legacy installer-based scheduled update for templates without an `update` block.

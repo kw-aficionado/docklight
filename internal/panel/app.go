@@ -436,6 +436,7 @@ func (a *App) Router() http.Handler {
 			priv.Get("/host/mounts", a.admin(a.listHostMountDirectories))
 			priv.Get("/host/browse", a.admin(a.browseHostMountDirectories))
 			priv.Post("/servers/{id}/install", a.installServer)
+			priv.Post("/servers/{id}/app-update", a.admin(a.updateServerApp))
 			priv.Get("/servers/{id}/install/status", a.installStatus)
 			priv.Post("/servers/{id}/start", a.startServer)
 			priv.Post("/servers/{id}/stop", a.stopServer)

@@ -24,6 +24,7 @@ type Rune struct {
 	Docker      Docker       `json:"docker"`
 	Variables   []Variable   `json:"variables,omitempty"`
 	Install     *Install     `json:"install,omitempty"`
+	Update      *Update      `json:"update,omitempty"`
 	Startup     Startup      `json:"startup"`
 	Ports       []Port       `json:"ports,omitempty"`
 	Query       *Query       `json:"query,omitempty"`
@@ -63,6 +64,12 @@ type Variable struct {
 type Install struct {
 	Image  string `json:"image,omitempty"`
 	Script string `json:"script"`
+}
+type Update struct {
+	Image       string   `json:"image,omitempty"`
+	Script      string   `json:"script"`
+	Label       string   `json:"label,omitempty"`
+	AppWritable []string `json:"app_writable,omitempty"`
 }
 type Startup struct {
 	Command     string   `json:"command,omitempty"`
@@ -232,6 +239,46 @@ func (g Rune) Validate() error {
 		}
 		if reservedVariable(v.Key) {
 			return fmt.Errorf("variable %q conflicts with a name injected by the panel", v.Key)
+		}
+	}
+	if g.Update != nil {
+		updateImage := g.Update.Image
+		if strings.TrimSpace(updateImage) == "" {
+			updateImage = g.Docker.Image
+		}
+		if strings.TrimSpace(updateImage) == "" || len(updateImage) > 512 || strings.IndexFunc(updateImage, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+			return errors.New("update.image must contain 1 to 512 printable characters")
+		}
+		if strings.TrimSpace(g.Update.Script) == "" || len(g.Update.Script) > 32768 || strings.ContainsRune(g.Update.Script, '\x00') {
+			return errors.New("update.script must contain 1 to 32768 characters")
+		}
+		if g.Update.Label != "" && (len(g.Update.Label) > 80 || strings.TrimSpace(g.Update.Label) == "" || strings.IndexFunc(g.Update.Label, unicode.IsControl) >= 0) {
+			return errors.New("update.label must contain 1 to 80 printable characters")
+		}
+		if err := validateRuneTemplate("update.image", updateImage, declared); err != nil {
+			return err
+		}
+		if err := rejectSecretRuneTemplate("update.image", updateImage, secretDeclared); err != nil {
+			return err
+		}
+		if err := validateRuneTemplate("update.script", g.Update.Script, declared); err != nil {
+			return err
+		}
+		if err := rejectSecretRuneTemplate("update.script", g.Update.Script, secretDeclared); err != nil {
+			return err
+		}
+		if len(g.Update.AppWritable) > 64 {
+			return errors.New("update.app_writable can contain at most 64 paths")
+		}
+		seen := map[string]bool{}
+		for _, p := range g.Update.AppWritable {
+			if p == "" || len(p) > 1024 || path.IsAbs(p) || path.Clean(p) != p || strings.HasPrefix(p, "..") || strings.ContainsAny(p, "\\\x00\r\n") {
+				return fmt.Errorf("update.app_writable path %q must be a clean relative path", p)
+			}
+			if seen[p] {
+				return fmt.Errorf("update.app_writable path %q is listed more than once", p)
+			}
+			seen[p] = true
 		}
 	}
 	if g.Stack != nil {
