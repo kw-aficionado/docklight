@@ -20,4 +20,4 @@ Run the browser logic checks with Node.js:
 node --test web/*.test.mjs
 ```
 
-The tests cover the app-shell allowlist, cache update and cleanup, offline fallback, and API/status bypass. Confirm the browser's install flow and offline reload on the HTTPS host where you deploy Docklight.
+The tests cover the app-shell allowlist, cache update and cleanup, offline fallback, and API/status bypass. A browser reload after stopping Docklight was smoke-tested on `localhost`; confirm the browser's install flow on the HTTPS host where you deploy Docklight.

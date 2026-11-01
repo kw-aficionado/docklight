@@ -15,7 +15,7 @@ This checkout began empty on 2026-10-31. The product identity is **Docklight** w
 | Operations UI | Login, realm-grouped server list/detail, admin realm management, permission-scoped realm grants, private sidecar state, install status, console, file manager, local and remote encrypted backups and schedules, backup-target settings, private registry credentials, public status-page controls, crash history, query-based automatic recovery, low-disk status, Discord/Telegram/SMTP/JSON notification channels, templates, users, permissions, audit history, TOTP, password changes, and API tokens | Browser smoke covered login, local backups and schedules, webhook setup/test, crash history, disk status, watchdog settings persistence, and crash/disk/watchdog event controls. Channel API and transport behavior have fake HTTP/SMTP coverage; browser and live-service acceptance remain pending |
 | File manager and protocols | Traversal/symlink protection; uploads and downloads; Minecraft Java/Bedrock status, A2S, and Source-compatible RCON | Unit tests; local TCP/UDP fixtures are opt-in because this sandbox denies local socket binds |
 | Install and automation | `install.sh`, systemd unit, amd64/arm64 build CI, annotated-tag release workflow with SHA-256 sums | Shell syntax checked; installer was not run on a fresh Debian/Ubuntu VM; GitHub workflows have not run here |
-| Browser app shell | Install manifest, Docklight SVG icon, and secure-context service worker; network-first app shell with offline fallback | Go route/manifest tests and Node service-worker harness; install prompt and offline browser use still need host acceptance |
+| Browser app shell | Install manifest, Docklight SVG icon, and secure-context service worker; network-first app shell with offline fallback | Go route/manifest tests, Node service-worker harness, and localhost browser reload after stopping the panel; install prompt on a deployed HTTPS host still needs acceptance |
 
 ## Phase 2 backup, scheduling, and notification slices
 
@@ -210,6 +210,6 @@ MCP tests cover discovery metadata, safe dynamic client registration, HTTPS enfo
 - No MinIO or other S3-compatible emulator is available here. The S3 path has deterministic fake-store and signed-request coverage, but credential policy and provider interoperability still need the gated live-object test.
 - The Docklight UI and Backups tab were browser-smoke-tested at the default desktop viewport. Mobile breakpoints still need a separate browser pass.
 - The OAuth consent flow is covered through the HTTP router, but its rendered page and a remote MCP client's discovery/approval handshake still need a reachable HTTPS host for browser acceptance.
-- The PWA manifest and worker pass automated route and cache-boundary checks; installing Docklight and exercising the shell offline in a live browser still needs HTTPS host acceptance.
+- The PWA offline reload was browser-smoke-tested on `localhost` after stopping the temporary panel; the browser install prompt and install flow on a deployed HTTPS host still need acceptance.
 
 Before calling Phase 1 accepted, run the Docker and installer acceptance steps from the user brief on a disposable Debian/Ubuntu host and verify the embedded UI in a browser.
