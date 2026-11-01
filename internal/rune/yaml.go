@@ -290,6 +290,28 @@ func scalar(s string) (any, error) {
 		}
 		return out, nil
 	}
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
+		inside := strings.TrimSpace(s[1 : len(s)-1])
+		out := map[string]any{}
+		if inside == "" {
+			return out, nil
+		}
+		for _, part := range splitInline(inside) {
+			key, value, ok := splitPair(part)
+			if !ok || key == "" {
+				return nil, fmt.Errorf("invalid inline mapping entry %q", part)
+			}
+			if _, exists := out[key]; exists {
+				return nil, fmt.Errorf("duplicate key %q", key)
+			}
+			parsed, err := scalar(value)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = parsed
+		}
+		return out, nil
+	}
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
 		v, e := strconv.Unquote(s)
 		return v, e
@@ -329,10 +351,10 @@ func splitInline(s string) []string {
 			quote = r
 			continue
 		}
-		if r == '[' {
+		if r == '[' || r == '{' {
 			depth++
 		}
-		if r == ']' {
+		if r == ']' || r == '}' {
 			depth--
 		}
 		if r == ',' && depth == 0 {

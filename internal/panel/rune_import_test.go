@@ -131,6 +131,65 @@ func TestXMLImportAcceptsMultipartAndNormalizesPortProtocol(t *testing.T) {
 	}
 }
 
+func TestYggdrasilImportAcceptsMultipartAndDoesNotStoreStaticSecrets(t *testing.T) {
+	app, d, _ := testApp(t)
+	token := runeCatalogAdminToken(t, app, d)
+	yamlRune := `gameskill:
+  id: upstream-app
+  name: Upstream App
+  docker:
+    image: example.test/upstream:1
+  startup:
+    command: exec app
+  services:
+    - name: database
+      image: postgres:17
+      env: { POSTGRES_PASSWORD: "literal-database-secret" }
+      ports: [{ name: web, default: 5432, protocol: tcp }]
+`
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, err := form.CreateFormFile("file", "upstream.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = file.Write([]byte(yamlRune)); err != nil {
+		t.Fatal(err)
+	}
+	if err = form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/gameskills/import-yggdrasil", &body)
+	request.Header.Set("Content-Type", form.FormDataContentType())
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	app.Router().ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("multipart Yggdrasil import returned %d: %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "literal-database-secret") || !strings.Contains(response.Body.String(), "static sensitive environment") || !strings.Contains(response.Body.String(), "publishes ports") {
+		t.Fatalf("Yggdrasil import response leaked a secret or missed conversion notes: %s", response.Body.String())
+	}
+	var stored string
+	if err = d.QueryRow(`SELECT yaml_blob FROM gameskills WHERE id='upstream-app'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored, "literal-database-secret") || !strings.Contains(stored, "stack:") {
+		t.Fatalf("stored Yggdrasil template retained a secret or omitted its stack: %s", stored)
+	}
+	imported, err := rune.Parse(stored)
+	if err != nil {
+		t.Fatalf("stored Yggdrasil template failed Docklight validation: %v", err)
+	}
+	if imported.Stack == nil || len(imported.Stack.Services) != 1 || len(imported.Stack.Services[0].Environment) != 0 {
+		t.Fatalf("Yggdrasil stack was not converted safely: %#v", imported.Stack)
+	}
+	denied := testRequest(app.Router(), http.MethodPost, "/api/gameskills/import-yggdrasil", yamlRune, "")
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated Yggdrasil import returned %d: %s", denied.Code, denied.Body.String())
+	}
+}
+
 func TestExternalRuneImportRejectsBuiltinsAndOversizeFiles(t *testing.T) {
 	app, d, _ := testApp(t)
 	token := runeCatalogAdminToken(t, app, d)

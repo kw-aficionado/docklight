@@ -2,6 +2,10 @@
 
 This checkout began empty on 2026-10-31. The product identity is **Docklight** with an international container-port logo, neutral template terminology, and official domain [docklight.app](https://docklight.app). The Go binary, CLI, service, module, and default paths retain `yggdrasil`; `/api/gameskills` and `gameskill_id` remain for data and API compatibility. The live Docker flows were exercised on Docker Desktop using its Linux/arm64 engine; the installer has not yet been run on a clean Debian or Ubuntu host.
 
+## Yggdrasil Rune import
+
+Added a Yggdrasil Rune upload endpoint, a direct browser for the upstream community catalog, conversion of catalog YAML and update checks, and `services` → Docklight `stack.services` mapping. Unsupported Yggdrasil features and removed static secrets are returned as import notes. The parser now accepts inline YAML mappings. Verification passed: focused and full Go tests, `go vet`, browser tests and syntax checks, documentation generation, and static Linux amd64/arm64 builds. A live browser import and deployment-host acceptance have not been performed. Sidecar port publishing and Yggdrasil-only player, event, admin-log, wipe, and import features remain unsupported and are reported during import.
+
 ## Phase 1 implementation
 
 | Area | Implemented | Verification in this checkout |

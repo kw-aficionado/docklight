@@ -326,6 +326,42 @@ func catalogRuneYAML(version int, id string) string {
 	return fmt.Sprintf("gameskill:\n  id: %s\n  name: Catalog Sample\n  category: Apps\n  version: %d\n  docker:\n    image: example/catalog:%d\n  startup:\n    command: exec app\n", id, version, version)
 }
 
+func TestCatalogRuneConversionCanonicalizesYggdrasilServices(t *testing.T) {
+	input := `gameskill:
+  id: upstream-stack
+  name: Upstream Stack
+  docker:
+    image: example.test/app:1
+  startup:
+    command: exec app
+  services:
+    - name: database
+      image: postgres:17
+      env: { POSTGRES_PASSWORD: "{{DB_PASSWORD}}", POSTGRES_DB: app }
+      ports: [{ name: web, default: 5432, protocol: tcp }]
+  variables:
+    - key: DB_PASSWORD
+      type: string
+      default: plaintext-secret
+`
+	gs, warnings, canonical, err := importCatalogRune([]byte(input))
+	if err != nil {
+		t.Fatalf("catalog conversion failed: %v", err)
+	}
+	if gs.Stack == nil || len(gs.Stack.Services) != 1 || gs.Stack.Services[0].Environment["POSTGRES_PASSWORD"] != "{{DB_PASSWORD}}" {
+		t.Fatalf("catalog services were not converted: %#v", gs.Stack)
+	}
+	if gs.Variables[0].Default != nil || !gs.Variables[0].Secret {
+		t.Fatalf("catalog secret default was not removed: %#v", gs.Variables[0])
+	}
+	if strings.Contains(canonical, "\n    services:") || strings.Contains(canonical, "plaintext-secret") || !strings.Contains(canonical, "stack:") {
+		t.Fatalf("catalog template was not canonicalized safely: %s", canonical)
+	}
+	if len(warnings) != 2 || !strings.Contains(strings.Join(warnings, " "), "publishes ports") || !strings.Contains(strings.Join(warnings, " "), "sensitive variable default") {
+		t.Fatalf("catalog conversion notes are incomplete: %#v", warnings)
+	}
+}
+
 func TestRuneCatalogRejectsUnsafeHostsAndKeepsRepositoryIdentityExact(t *testing.T) {
 	for _, host := range []string{"http://forge.example", "https://user:pass@forge.example", "https://forge.example/a/../b", "https://forge.example?token=x", "https://forge.example#fragment"} {
 		if _, err := normalizeRuneRepo(runeRepoInput{Name: "Invalid", Host: host, Repo: "team/catalog"}); err == nil {

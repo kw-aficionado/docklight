@@ -20,6 +20,10 @@ func (a *App) importXML(w http.ResponseWriter, r *http.Request) {
 	a.importExternalRune(w, r, "XML template", "template.xml_import", runeimport.ImportXML)
 }
 
+func (a *App) importYggdrasilRune(w http.ResponseWriter, r *http.Request) {
+	a.importExternalRune(w, r, "Yggdrasil Rune", "template.yggdrasil_import", runeimport.ImportYggdrasil)
+}
+
 func (a *App) importExternalRune(w http.ResponseWriter, r *http.Request, label, action string, translate func([]byte) (rune.Rune, []string, error)) {
 	if !a.requireAdmin(w, r) {
 		return

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"example.com/yggdrasil-panel/internal/rune"
+	"example.com/yggdrasil-panel/internal/runeimport"
 	"example.com/yggdrasil-panel/internal/security"
 	"github.com/go-chi/chi/v5"
 )
@@ -879,9 +880,9 @@ func (a *App) installCatalogRune(w http.ResponseWriter, r *http.Request, repo ru
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	gs, err := rune.Parse(string(body))
+	gs, warnings, canonical, err := importCatalogRune(body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "catalog YAML failed validation: "+err.Error())
+		writeError(w, http.StatusBadRequest, "catalog Rune could not be imported into Docklight: "+err.Error())
 		return
 	}
 	var builtin int
@@ -898,7 +899,7 @@ func (a *App) installCatalogRune(w http.ResponseWriter, r *http.Request, repo ru
 	_, err = a.db.Exec(`INSERT INTO gameskills(id,name,category,version,yaml_blob,builtin,source_host,source_repo,source_path,source_ref)
 		VALUES(?,?,?,?,?,0,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,version=excluded.version,yaml_blob=excluded.yaml_blob,source_host=excluded.source_host,source_repo=excluded.source_repo,source_path=excluded.source_path,source_ref=excluded.source_ref
-		WHERE gameskills.builtin=0`, gs.ID, gs.Name, gs.Category, gs.Version, string(body), host, repo.Repo, remotePath, repo.Ref)
+		WHERE gameskills.builtin=0`, gs.ID, gs.Name, gs.Category, gs.Version, canonical, host, repo.Repo, remotePath, repo.Ref)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not install template from the catalog")
 		return
@@ -909,7 +910,23 @@ func (a *App) installCatalogRune(w http.ResponseWriter, r *http.Request, repo ru
 		return
 	}
 	a.audit(principal(r), "template.catalog_import", "gameskill", gs.ID, host+" "+repo.Repo+"/"+remotePath)
-	writeJSON(w, http.StatusOK, map[string]any{"id": gs.ID, "name": gs.Name, "version": gs.Version, "source_host": host, "source_repo": repo.Repo, "source_path": remotePath, "source_ref": repo.Ref})
+	writeJSON(w, http.StatusOK, map[string]any{"id": gs.ID, "name": gs.Name, "version": gs.Version, "source_host": host, "source_repo": repo.Repo, "source_path": remotePath, "source_ref": repo.Ref, "warnings": warnings})
+}
+
+func importCatalogRune(body []byte) (rune.Rune, []string, string, error) {
+	gs, warnings, err := runeimport.ImportYggdrasil(body)
+	if err != nil {
+		return rune.Rune{}, nil, "", err
+	}
+	canonical, err := marshalRuneYAML(gs)
+	if err != nil {
+		return rune.Rune{}, nil, "", fmt.Errorf("could not serialize the imported Rune: %w", err)
+	}
+	validated, err := rune.Parse(string(canonical))
+	if err != nil {
+		return rune.Rune{}, nil, "", fmt.Errorf("converted Rune failed Docklight validation: %w", err)
+	}
+	return validated, warnings, string(canonical), nil
 }
 
 func (a *App) runeSourceList() ([]installedRuneSource, error) {
@@ -1023,7 +1040,8 @@ func (a *App) fetchCatalogRune(ctx context.Context, repo runeRepoConfig, remoteP
 	if err != nil {
 		return rune.Rune{}, err
 	}
-	return rune.Parse(string(body))
+	gs, _, _, err := importCatalogRune(body)
+	return gs, err
 }
 
 func (a *App) findUnsourcedRuneUpdate(ctx context.Context, repos []runeRepoConfig, id string) (rune.Rune, runeRepoConfig, string, error) {

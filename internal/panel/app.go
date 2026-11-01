@@ -305,6 +305,7 @@ func (a *App) Router() http.Handler {
 			priv.Post("/gameskills/import-compose", a.importCompose)
 			priv.Post("/gameskills/import-egg", a.importEgg)
 			priv.Post("/gameskills/import-xml", a.importXML)
+			priv.Post("/gameskills/import-yggdrasil", a.importYggdrasilRune)
 			priv.Post("/gameskills/install-from-github", a.admin(a.installGitHubRune))
 			priv.Delete("/gameskills/{id}", a.deleteRune)
 			priv.Get("/rune-repos", a.admin(a.listRuneRepos))
