@@ -29,6 +29,10 @@ jobs:
         run: node --test web/*.test.mjs
       - name: Check browser module syntax
         run: node --check --input-type=module < web/app.js
+      - name: Check packaged service read capability
+        run: |
+          grep -Fq 'AmbientCapabilities=CAP_DAC_READ_SEARCH' install.sh
+          grep -Fq 'AmbientCapabilities=CAP_DAC_READ_SEARCH' deploy/yggdrasil.service
 
   build:
     runs-on: ubuntu-latest

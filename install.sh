@@ -163,6 +163,7 @@ Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=20s
 NoNewPrivileges=true
+AmbientCapabilities=CAP_DAC_READ_SEARCH
 ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true
