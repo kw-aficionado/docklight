@@ -37,7 +37,7 @@ Automatic recovery is opt-in per server and limited to templates with player-que
 
 The UI assets are embedded and have no CDN or frontend package dependency. It is a compact HTML/CSS/JavaScript app rather than the specified Svelte/Tailwind build. It has light and dark themes. Its manifest and service worker make the app shell installable and available offline in supporting secure-context browsers; the worker caches only the static shell and never API responses, status pages, login data, or streams.
 
-The template and config readers intentionally accept a bounded subset of YAML rather than general YAML 1.2. Unknown template fields are ignored. JWT signing and WebSocket framing are implemented locally because the corresponding requested dependencies were unavailable offline. These substitutions are recorded in [DECISIONS.md](DECISIONS.md).
+The template and config readers intentionally accept a bounded subset of YAML rather than general YAML 1.2. Unknown template fields and duplicate mapping keys are rejected. JWT signing and WebSocket framing are implemented locally because the corresponding requested dependencies were unavailable offline. These substitutions are recorded in [DECISIONS.md](DECISIONS.md).
 
 ## Phase 2 private app-stack slice
 
@@ -219,3 +219,11 @@ MCP tests cover discovery metadata, safe dynamic client registration, HTTPS enfo
 - The PWA offline reload was browser-smoke-tested on `localhost` after stopping the temporary panel; the browser install prompt and install flow on a deployed HTTPS host still need acceptance.
 
 Before calling Phase 1 accepted, run the Docker and installer acceptance steps from the user brief on a disposable Debian/Ubuntu host and verify the embedded UI in a browser.
+
+## Steam-enabled template support
+
+Steam metadata is accepted by the bounded Rune parser and requires an install script. Steam runes reserve their declared container port numbers directly on the host, set the app-data directory to mode `0777`, prefix the installer with the required writable-data command, and mount a persistent SteamCMD cache at `/steamcache` with `HOME=/steamcache`. Non-anonymous installs require an authorized account and receive `STEAM_USER`; `app_id` remains template metadata for the install script.
+
+Administrators can authorize a Steam account through the Templates page. Docklight stores only the username and authorization time in SQLite. The password remains in memory for at most five minutes during Guard confirmation, and the password/code are sent to an ephemeral SteamCMD container through stdin rather than its Docker command or environment configuration. The account-removal action revokes authorization and deletes the local sentry cache. The helper explicitly selects `linux/amd64`; ARM hosts need working x86-64 emulation.
+
+Focused panel tests cover Guard success, response/database/config redaction, admin-only routes, cache removal, required authorization errors, installer environment and mounts, writable modes, 1:1 port allocation/binding, and retained tail output. Full Go tests, `go vet`, frontend tests, JavaScript and installer syntax checks, Linux amd64/arm64 builds, and `git diff --check` passed. A planted removal of the installer chmod prefix fails its targeted test. No live Steam, Docker, game-server, or browser acceptance was available; the Mac was locked during the attempted UI review.

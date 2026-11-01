@@ -74,12 +74,16 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 49 {
-		t.Fatalf("expected 49 migrations, got %d", count)
+	if count != 50 {
+		t.Fatalf("expected 50 migrations, got %d", count)
 	}
 	var logBaselineTable int
 	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='assistant_log_volume_baselines'`).Scan(&logBaselineTable); err != nil || logBaselineTable != 1 {
 		t.Fatalf("version 49 log-volume baseline table missing: count=%d err=%v", logBaselineTable, err)
+	}
+	var steamAccountRows int
+	if err = d.QueryRow(`SELECT count(*) FROM steam_account WHERE id=1 AND username='' AND authorized=0 AND authorized_at=''`).Scan(&steamAccountRows); err != nil || steamAccountRows != 1 {
+		t.Fatalf("Steam account migration default row missing: count=%d err=%v", steamAccountRows, err)
 	}
 	var watcherTable, watcherConsentColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='log_watchers'`).Scan(&watcherTable); err != nil {

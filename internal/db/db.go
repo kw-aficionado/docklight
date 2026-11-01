@@ -1723,6 +1723,32 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 50 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS steam_account (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			username TEXT NOT NULL DEFAULT '',
+			authorized INTEGER NOT NULL DEFAULT 0 CHECK(authorized IN (0,1)),
+			authorized_at TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO steam_account(id) VALUES(1)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(50)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

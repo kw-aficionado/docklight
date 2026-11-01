@@ -525,7 +525,12 @@ func (g Rune) Validate() error {
 		}
 	}
 	if g.Steam != nil {
-		return errors.New("gameskill.steam installation metadata is not supported in this release")
+		if g.Install == nil || strings.TrimSpace(g.Install.Script) == "" {
+			return errors.New("gameskill.steam requires an install.script")
+		}
+		if g.Steam.AppID < 0 || uint64(g.Steam.AppID) > uint64(^uint32(0)) {
+			return errors.New("gameskill.steam.app_id must be from 0 to 4294967295")
+		}
 	}
 	return nil
 }
@@ -585,7 +590,7 @@ func SensitiveVariableName(key string) bool {
 
 func reservedVariable(k string) bool {
 	u := strings.ToUpper(k)
-	if u == "SERVER_NAME" || u == "PUBLIC_URL" || u == "HOME" || u == "PUID" || u == "PGID" || u == "UID" || u == "GID" || strings.HasPrefix(u, "PORT_") {
+	if u == "SERVER_NAME" || u == "PUBLIC_URL" || u == "HOME" || u == "PUID" || u == "PGID" || u == "UID" || u == "GID" || u == "STEAM_USER" || strings.HasPrefix(u, "PORT_") {
 		return true
 	}
 	return strings.HasSuffix(u, "_PORT")

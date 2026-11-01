@@ -285,3 +285,10 @@
 - Read Docker output counts for a one-minute window, but never retain or send raw log lines for this check. Cap reads at 8 MiB per server per sample.
 - Learn a per-server exponential baseline after five observations; relearn when it is older than 24 hours. Report only bursts that exceed an absolute 1 MiB floor and both an eight-times-baseline and six-standard-deviation threshold. Exclude outlier samples from the baseline and deduplicate events hourly to reduce noise.
 - Store only the rolling numeric baseline and remove it when its server is deleted. Ignore Docker log access failures rather than treating them as zero output.
+
+## 2026-11-01: Steam account authorization
+
+- Use the upstream `steamcmd/steamcmd:debian-12` image for account verification and request `linux/amd64` explicitly because the published SteamCMD image is x86-64. ARM hosts therefore need Docker x86-64 emulation; game image architecture is independent.
+- Keep the password only in process memory while a Steam Guard code is pending, expire that state after five minutes, and send password/code to the ephemeral helper over its stdin instead of Docker `Cmd` or `Env`.
+- Persist only the username and authorization metadata in SQLite. Keep SteamCMD's sentry cache in the panel data directory and clear it when the account is removed.
+- Preserve Steam template port numbers as host ports so published and container ports match; keep the required writable data-directory behavior scoped to Steam templates.

@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -11,6 +12,49 @@ import (
 	"testing"
 	"time"
 )
+
+type testDuplexStream struct {
+	read    *bytes.Reader
+	written bytes.Buffer
+	closed  bool
+}
+
+func (s *testDuplexStream) Read(p []byte) (int, error)  { return s.read.Read(p) }
+func (s *testDuplexStream) Write(p []byte) (int, error) { return s.written.Write(p) }
+func (s *testDuplexStream) Close() error                { s.closed = true; return nil }
+
+func TestAttachUsesDockerUpgradeAndReturnsBidirectionalStream(t *testing.T) {
+	var requestURI string
+	var connection, upgrade string
+	stream := &testDuplexStream{read: bytes.NewReader([]byte("docker output"))}
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestURI = req.URL.RequestURI()
+		connection = req.Header.Get("Connection")
+		upgrade = req.Header.Get("Upgrade")
+		header := make(http.Header)
+		header.Set("Connection", "Upgrade")
+		header.Set("Upgrade", "tcp")
+		return &http.Response{StatusCode: http.StatusSwitchingProtocols, ProtoMajor: 1, ProtoMinor: 1, Header: header, Body: stream, Request: req}, nil
+	})}
+	e := NewWithHTTPClient("test-socket", "1.45", client)
+	attached, err := e.Attach(context.Background(), "container-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.WriteString(attached, "one-time-input"); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(attached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestURI != "/v1.45/containers/container-123/attach?stderr=1&stdin=1&stdout=1&stream=1" || connection != "Upgrade" || upgrade != "tcp" || string(output) != "docker output" || stream.written.String() != "one-time-input" {
+		t.Fatalf("attach request=%q connection=%q upgrade=%q output=%q input=%q", requestURI, connection, upgrade, output, stream.written.String())
+	}
+	if err = attached.Close(); err != nil || !stream.closed {
+		t.Fatalf("attach stream close failed: closed=%t err=%v", stream.closed, err)
+	}
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 

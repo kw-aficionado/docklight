@@ -273,6 +273,19 @@ curl -sS http://127.0.0.1:8080/api/servers \
 
 `POST /api/tokens` accepts a name and a list of scopes from the permission catalog (`server.view`, `server.control`, `server.console`, `server.files`, `server.backup`, `server.schedule`, `server.create`, `server.delete`). Administrators may also select `admin`. A token's permissions never exceed its account grants.
 
+## Steam account
+
+These routes require an administrator session or administrator API token.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/steam/account` | Return the saved username, authorization state, optional `authorized_at`, and whether a Steam Guard code is currently pending. It never returns a password or code. |
+| `POST /api/steam/send-code` | Accept `{ "username": "…", "password": "…" }`. Runs a SteamCMD login attempt and returns whether a Guard code is needed. The password is held in memory only while the five-minute confirmation is pending; it is never written to SQLite or returned. |
+| `POST /api/steam/authorize` | Accept `{ "code": "…" }` to complete the pending Steam Guard login. The code is not persisted or returned. |
+| `DELETE /api/steam/account` | Revoke the saved authorization and clear the local SteamCMD cache. |
+
+SteamCMD must be able to reach Steam through Docker. Its sentry cache stays in the panel data directory at `steam-cache/` so future logins can reuse the Steam Guard authorization. See the [Steam account guide](guides/steam.md).
+
 ## Files and live streams
 
 | Method and path | Purpose |

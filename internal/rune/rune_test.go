@@ -332,7 +332,7 @@ func TestTemplateReplacesOnlyDeclaredPlaceholders(t *testing.T) {
 	}
 }
 
-func TestValidatedOptionalDockerFeaturesAndUnsupportedMetadata(t *testing.T) {
+func TestValidatedOptionalDockerFeaturesAndSteamMetadata(t *testing.T) {
 	base := Rune{ID: "device-app", Name: "Device App", Docker: Docker{Image: "example/app:1", Capabilities: []string{"net_admin"}, Devices: []string{"/dev/net/tun:/dev/net/tun:rwm"}, Sysctls: map[string]string{"net.ipv4.ip_forward": "1"}}, Startup: Startup{Command: "exec app"}}
 	if err := base.Validate(); err != nil {
 		t.Fatalf("valid constrained Docker features were rejected: %v", err)
@@ -343,10 +343,24 @@ func TestValidatedOptionalDockerFeaturesAndUnsupportedMetadata(t *testing.T) {
 	}
 	base.Docker.Devices = nil
 	base.Steam = &Steam{AppID: 1}
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "requires an install.script") {
+		t.Fatalf("Steam metadata without an installer was accepted: %v", err)
+	}
+	base.Install = &Install{Script: "steamcmd +login anonymous"}
+	base.Steam = &Steam{AppID: 1}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid Steam installation metadata was rejected: %v", err)
+	}
+	base.Steam = &Steam{AppID: -1}
 	if err := base.Validate(); err == nil {
-		t.Fatal("unsupported Steam installation metadata was silently accepted")
+		t.Fatal("negative Steam app ID was accepted")
 	}
 	base.Steam = nil
+	base.Variables = []Variable{{Key: "STEAM_USER", Type: "string"}}
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "injected by the panel") {
+		t.Fatalf("panel-injected Steam username was accepted as a template variable: %v", err)
+	}
+	base.Variables = nil
 	base.ConfigFiles = []string{"app.conf"}
 	if err := base.Validate(); err != nil {
 		t.Fatalf("safe config-file shortcut was rejected: %v", err)

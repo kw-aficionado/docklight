@@ -196,7 +196,7 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "could not create the server data directory; check panel storage permissions")
 		return
 	}
-	ports, err := a.allocatePorts(id, gs.Ports)
+	ports, err := a.allocatePorts(id, gs.Ports, gs.Steam != nil)
 	if err != nil {
 		_ = os.RemoveAll(dataDir)
 		writeError(w, 503, err.Error())
@@ -574,9 +574,22 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 // server data directory. It deliberately does not change server state or start
 // the server, so scheduled updates can run it under the same lifecycle lock.
 func (a *App) runInstallData(ctx context.Context, s Server, gs rune.Rune, j *installJob) ([]string, error) {
+	if gs.Steam != nil {
+		a.steamMu.Lock()
+		defer a.steamMu.Unlock()
+	}
 	secrets := []string{}
 	if gs.Install == nil || strings.TrimSpace(gs.Install.Script) == "" {
 		return secrets, nil
+	}
+	appDataDir := serverAppDataDir(s, gs)
+	if err := os.MkdirAll(appDataDir, 0770); err != nil {
+		return secrets, fmt.Errorf("create app data directory: %w", err)
+	}
+	if gs.Steam != nil {
+		if err := os.Chmod(appDataDir, 0777); err != nil {
+			return secrets, fmt.Errorf("make Steam server data writable: %w", err)
+		}
 	}
 	image := gs.Install.Image
 	if image == "" {
@@ -586,17 +599,28 @@ func (a *App) runInstallData(ctx context.Context, s Server, gs rune.Rune, j *ins
 	if err != nil {
 		return secrets, err
 	}
+	if gs.Steam != nil {
+		env, err = a.steamInstallEnv(gs, env)
+		if err != nil {
+			return secrets, err
+		}
+	}
 	image = rune.ApplyTemplate(image, env)
 	script := rune.ApplyTemplate(gs.Install.Script, env)
 	secrets = runeSecretValues(gs, env)
 	if err = a.pullImage(ctx, image); err != nil {
 		return secrets, err
 	}
-	appDataDir := serverAppDataDir(s, gs)
-	if err = os.MkdirAll(appDataDir, 0770); err != nil {
-		return secrets, fmt.Errorf("create app data directory: %w", err)
+	binds := []string{appDataDir + ":/data"}
+	if gs.Steam != nil {
+		steamCache, cacheErr := a.prepareSteamCache()
+		if cacheErr != nil {
+			return secrets, cacheErr
+		}
+		binds = append(binds, steamCache+":/steamcache")
+		script = "chmod -R a+rwX /data 2>/dev/null || true\n" + script
 	}
-	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: []string{appDataDir + ":/data"}}}
+	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, Env: runtimeEnvList(env), WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: binds}}
 	cid, err := a.engine.Create(ctx, "ygg-install-"+shortID(s.ID), cfg)
 	if err != nil {
 		return secrets, err
@@ -1421,14 +1445,14 @@ func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]st
 func isPanelRuntimeVariable(name string) bool {
 	key := strings.ToUpper(name)
 	switch key {
-	case "SERVER_NAME", "PUBLIC_URL", "HOME", "PUID", "PGID", "UID", "GID":
+	case "SERVER_NAME", "PUBLIC_URL", "HOME", "PUID", "PGID", "UID", "GID", "STEAM_USER":
 		return true
 	default:
 		return strings.HasPrefix(key, "PORT_") || strings.HasSuffix(key, "_PORT")
 	}
 }
 
-func (a *App) allocatePorts(serverID string, definitions []rune.Port) (map[string]int, error) {
+func (a *App) allocatePorts(serverID string, definitions []rune.Port, oneToOne bool) (map[string]int, error) {
 	tx, e := a.db.Begin()
 	if e != nil {
 		return nil, fmt.Errorf("reserve host ports: %w", e)
@@ -1438,27 +1462,53 @@ func (a *App) allocatePorts(serverID string, definitions []rune.Port) (map[strin
 	used := map[int]bool{}
 	for _, p := range definitions {
 		allocated := 0
-		for candidate := a.cfg.Ports.RangeMin; candidate < a.cfg.Ports.RangeMax; candidate++ {
+		if oneToOne {
+			candidate := p.Default
+			if candidate < 1 || candidate > 65535 {
+				return nil, fmt.Errorf("Steam Rune port %q must use a container port from 1 to 65535", p.Name)
+			}
 			if used[candidate] {
-				continue
+				return nil, fmt.Errorf("Steam Rune ports share host port %d; assign each declared port a unique number", candidate)
 			}
 			var exists int
-			if tx.QueryRow(`SELECT count(*) FROM port_allocations WHERE port=?`, candidate).Scan(&exists) != nil || exists != 0 {
-				continue
+			if err := tx.QueryRow(`SELECT count(*) FROM port_allocations WHERE port=?`, candidate).Scan(&exists); err != nil {
+				return nil, fmt.Errorf("check Steam Rune port %d: %w", candidate, err)
 			}
-			available, checkErr := portAvailable(candidate, p.Protocol)
+			if exists != 0 {
+				return nil, fmt.Errorf("Steam Rune needs host port %d for %s, but another server already owns it", candidate, p.Name)
+			}
+			available, checkErr := a.portAvailableCheck(candidate, p.Protocol)
 			if checkErr != nil {
 				return nil, checkErr
 			}
-			if available {
-				allocated = candidate
+			if !available {
+				return nil, fmt.Errorf("Steam Rune needs host port %d for %s, but another process is using it", candidate, p.Name)
 			}
-			if allocated > 0 {
-				break
+			allocated = candidate
+		} else {
+			for candidate := a.cfg.Ports.RangeMin; candidate < a.cfg.Ports.RangeMax; candidate++ {
+				if used[candidate] {
+					continue
+				}
+				var exists int
+				if err := tx.QueryRow(`SELECT count(*) FROM port_allocations WHERE port=?`, candidate).Scan(&exists); err != nil {
+					return nil, fmt.Errorf("check host port %d: %w", candidate, err)
+				}
+				if exists != 0 {
+					continue
+				}
+				available, checkErr := a.portAvailableCheck(candidate, p.Protocol)
+				if checkErr != nil {
+					return nil, checkErr
+				}
+				if available {
+					allocated = candidate
+					break
+				}
 			}
-		}
-		if allocated == 0 {
-			return nil, fmt.Errorf("no free host ports remain in range %d–%d; widen ports.range_min/range_max or free a port", a.cfg.Ports.RangeMin, a.cfg.Ports.RangeMax)
+			if allocated == 0 {
+				return nil, fmt.Errorf("no free host ports remain in range %d–%d; widen ports.range_min/range_max or free a port", a.cfg.Ports.RangeMin, a.cfg.Ports.RangeMax)
+			}
 		}
 		if _, e = tx.Exec(`INSERT INTO port_allocations(port,server_id,name) VALUES(?,?,?)`, allocated, serverID, p.Name); e != nil {
 			return nil, fmt.Errorf("reserve host port %d: %w", allocated, e)

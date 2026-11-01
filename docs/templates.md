@@ -101,6 +101,7 @@ gameskill:
 | `startup.stop_timeout` | Grace period in seconds before Docker kills the container. Defaults to 30. |
 | `restart.warnings[]` | Optional countdown points for scheduled restarts. `at` is a Go duration up to 24 hours; `msg` is a complete console command sent through RCON when available, then stdin. `{{server_name}}`, `{{minutes}}`, and `{{seconds}}` are available. |
 | `ports` | Container ports to publish. Protocol is `tcp`, `udp`, or `tcp+udp`; a free host port is allocated from config. A port named `rcon` binds to loopback. |
+| `steam` | `{ app_id, anonymous }` enables SteamCMD install behavior. Steam ports use the declared container port as the host port (1:1); app data is made writable; the installer receives `/steamcache` as `HOME` and mounts the persistent SteamCMD cache there. With `anonymous: false`, an admin must authorize a Steam account under **Templates → Steam account**; `STEAM_USER` is injected into the installer. The template's script passes `app_id` to SteamCMD itself. |
 | `stack.services[]` | Optional list of 1–8 sidecars started on a dedicated network for this server. Each service requires a DNS-safe `name` and `image`. `data_path` is optional for stateless workers; when present it binds persistent, backup-covered data. `extra_volumes` adds more persistent container paths. `enabled`, `user`, `command`, `env`, and `resource_weight` are optional. |
 | `stack.services[].extra_volumes` | Additional absolute, validated container paths backed by `_stack/<service>/_extra/<path>`; included in server backups and kept outside the main app's file root. Duplicate and protected system paths are rejected. |
 | `stack.services[].enabled` | Optional templated boolean. Empty means enabled; true/1/yes/on and false/0/no/off are accepted. An unresolved placeholder disables the service so new opt-in services stay off for older servers. |
@@ -115,6 +116,8 @@ gameskill:
 | `anticheat.plugins_recommended` | Optional list of up to 16 plugin names displayed as template guidance only. |
 
 Variable keys that conflict with panel-injected names (including `SERVER_NAME`, `HOME`, `PUID`, `PGID`, `UID`, `GID`, `PUBLIC_URL`, `PORT_*`, and `*_PORT`) are rejected. Secret variables are encrypted at rest and masked in API responses. Password/token/secret/private-key-like variable names are treated as secret even without `secret: true`.
+
+The Steam-specific variable `STEAM_USER` is reserved and cannot be declared by a template. Steam account setup and cache behavior are described in the [Steam account guide](guides/steam.md).
 
 An `update` block adds an admin-only **Update app** action to installed servers and an audited `POST /api/servers/{id}/app-update` endpoint. Docklight stops the main app, runs the tool container, then recreates and starts the app even if the update script exits with an error. For stack templates, the tool joins the server's private network; running sidecars are kept up, and stopped or missing sidecars are started before the tool runs. Scheduled **Update** actions use this app script synchronously and skip stopped servers; templates without the block keep the existing installer-based scheduled server update.
 

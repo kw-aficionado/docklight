@@ -127,6 +127,9 @@ type App struct {
 	passkeyMu                sync.Mutex
 	passkeyCeremonies        map[string]passkeyCeremony
 	passkeyIPs               map[string][]time.Time
+	steamMu                  sync.Mutex
+	steamPending             *steamPendingLogin
+	portAvailableCheck       func(int, string) (bool, error)
 	passwordResetSender      func(context.Context, notificationChannelConfig, string, string) error
 	passwordResetWG          sync.WaitGroup
 	jobsMu                   sync.RWMutex
@@ -163,7 +166,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, oauthRegisterIPs: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}, violationHits: map[string][]time.Time{}, violationWatches: map[string]violationLogWatch{}, violationActions: make(chan violationAction, 128), assistantPlans: map[string]assistantActionGrant{}, assistantWatcherStreams: map[string]assistantWatcherStream{}, assistantWatcherHits: map[string][]time.Time{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, oauthRegisterIPs: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, portAvailableCheck: portAvailable, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}, violationHits: map[string][]time.Time{}, violationWatches: map[string]violationLogWatch{}, violationActions: make(chan violationAction, 128), assistantPlans: map[string]assistantActionGrant{}, assistantWatcherStreams: map[string]assistantWatcherStream{}, assistantWatcherHits: map[string][]time.Time{}}
 }
 
 func (a *App) SetBuildVersion(version string) {
@@ -480,6 +483,10 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/dayz/reset", a.resetDayZEconomy)
 			priv.Get("/settings/dayz/steam-key", a.admin(a.getDayZSteamKey))
 			priv.Put("/settings/dayz/steam-key", a.admin(a.updateDayZSteamKey))
+			priv.Get("/steam/account", a.admin(a.getSteamAccount))
+			priv.Delete("/steam/account", a.admin(a.deleteSteamAccount))
+			priv.Post("/steam/send-code", a.admin(a.sendSteamCode))
+			priv.Post("/steam/authorize", a.admin(a.authorizeSteamAccount))
 			priv.Get("/audit", a.auditList)
 			priv.Get("/users", a.admin(a.listUsers))
 			priv.Post("/users", a.admin(a.createUser))

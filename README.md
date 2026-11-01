@@ -38,7 +38,7 @@ A release repository is not configured in this source checkout. Until binaries a
 4. The status changes to **Running** only after the server is ready; web apps must also answer on their published web port.
 5. Use **Console**, **Files**, **Backups**, **Schedules**, and **Settings** on the server page. Stop a server before creating, restoring, or scheduling a backup.
 
-The built-in templates are Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. WordPress and its database run as one server on a private network; only the WordPress web port is published. See the [app-stack guide](docs/guides/stacks.md). Minecraft Java RCON is bound to loopback on the host. The panel allocates ports from `ports.range_min` through `ports.range_max`.
+The built-in templates are Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. WordPress and its database run as one server on a private network; only the WordPress web port is published. See the [app-stack guide](docs/guides/stacks.md). Minecraft Java RCON is bound to loopback on the host. Steam-enabled templates can use an admin-authorized Steam account; see the [Steam account guide](docs/guides/steam.md). The panel allocates ordinary template ports from `ports.range_min` through `ports.range_max`; Steam template ports preserve their declared ports.
 
 ## Service and CLI
 
@@ -54,7 +54,7 @@ The CLI also provides:
 - `reset-password USER [--config PATH]` — root-only break-glass password reset; generates a password unless one is supplied.
 - `reset-2fa USER [--config PATH]` — root-only break-glass authenticator reset.
 
-See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [offline app shell](docs/guides/offline-pwa.md), [Assistant setup](docs/guides/assistant.md), [anti-cheat guidance](docs/guides/anti-cheat.md), [moderation](docs/guides/moderation.md), [panel updates](docs/guides/updates.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [networking](docs/guides/networking.md), [monitoring](docs/guides/monitoring.md), [public status page](docs/guides/status-page.md), [beacon and privacy](docs/guides/beacon.md), [realms and access](docs/guides/realms.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
+See [brand direction](docs/brand.md), [configuration](docs/configuration.md), [getting started](docs/getting-started.md), [HTTP API](docs/api.md), [offline app shell](docs/guides/offline-pwa.md), [Assistant setup](docs/guides/assistant.md), [anti-cheat guidance](docs/guides/anti-cheat.md), [Steam account setup](docs/guides/steam.md), [moderation](docs/guides/moderation.md), [panel updates](docs/guides/updates.md), [server backups](docs/guides/backups.md), [app stacks](docs/guides/stacks.md), [networking](docs/guides/networking.md), [monitoring](docs/guides/monitoring.md), [public status page](docs/guides/status-page.md), [beacon and privacy](docs/guides/beacon.md), [realms and access](docs/guides/realms.md), [notifications](docs/guides/notifications.md), and the [template schema](docs/templates.md).
 
 ## Network and security
 

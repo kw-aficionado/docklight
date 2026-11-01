@@ -141,7 +141,7 @@ func (e *Engine) Ping(ctx context.Context) error {
 }
 
 func (e *Engine) Pull(ctx context.Context, image string) error {
-	return e.pull(ctx, image, nil)
+	return e.pull(ctx, image, nil, "")
 }
 
 // RegistryAuthConfig is sent only with a single pull request. The Engine does
@@ -153,11 +153,18 @@ type RegistryAuthConfig struct {
 }
 
 func (e *Engine) PullWithAuth(ctx context.Context, image string, auth RegistryAuthConfig) error {
-	return e.pull(ctx, image, &auth)
+	return e.pull(ctx, image, &auth, "")
 }
 
-func (e *Engine) pull(ctx context.Context, image string, auth *RegistryAuthConfig) error {
+func (e *Engine) PullPlatform(ctx context.Context, image, platform string) error {
+	return e.pull(ctx, image, nil, platform)
+}
+
+func (e *Engine) pull(ctx context.Context, image string, auth *RegistryAuthConfig, platform string) error {
 	q := url.Values{"fromImage": {image}}
+	if platform != "" {
+		q.Set("platform", platform)
+	}
 	headers := make(http.Header)
 	if auth != nil {
 		payload, err := json.Marshal(auth)
@@ -228,6 +235,7 @@ type DeviceMapping struct {
 }
 type CreateConfig struct {
 	Image            string              `json:"Image"`
+	Entrypoint       []string            `json:"Entrypoint,omitempty"`
 	Cmd              []string            `json:"Cmd,omitempty"`
 	Env              []string            `json:"Env,omitempty"`
 	WorkingDir       string              `json:"WorkingDir,omitempty"`
@@ -242,6 +250,41 @@ type CreateConfig struct {
 	HostConfig       HostConfig          `json:"HostConfig"`
 	NetworkingConfig *NetworkingConfig   `json:"NetworkingConfig,omitempty"`
 }
+
+// Attach opens a Docker container's bidirectional stdin/stdout stream. Docker
+// requires an HTTP upgrade for attach; the returned body owns that connection.
+func (e *Engine) Attach(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	if id == "" {
+		return nil, errors.New("Docker attach needs a container ID")
+	}
+	q := url.Values{"stream": {"1"}, "stdin": {"1"}, "stdout": {"1"}, "stderr": {"1"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint("/containers/"+url.PathEscape(id)+"/attach?"+q.Encode()), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "tcp")
+	resp, err := e.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("attach to Docker container: %w", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		defer resp.Body.Close()
+		var detail apiError
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&detail)
+		if detail.Message == "" {
+			detail.Message = http.StatusText(resp.StatusCode)
+		}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: detail.Message}
+	}
+	stream, ok := resp.Body.(io.ReadWriteCloser)
+	if !ok {
+		_ = resp.Body.Close()
+		return nil, errors.New("Docker attach did not provide a bidirectional stream")
+	}
+	return stream, nil
+}
+
 type NetworkingConfig struct {
 	EndpointsConfig map[string]EndpointSettings `json:"EndpointsConfig"`
 }
@@ -333,7 +376,14 @@ func (e *Engine) ListContainers(ctx context.Context, all bool, labels map[string
 }
 
 func (e *Engine) Create(ctx context.Context, name string, c CreateConfig) (string, error) {
+	return e.CreateWithPlatform(ctx, name, c, "")
+}
+
+func (e *Engine) CreateWithPlatform(ctx context.Context, name string, c CreateConfig, platform string) (string, error) {
 	q := url.Values{"name": {name}}
+	if platform != "" {
+		q.Set("platform", platform)
+	}
 	r, err := e.do(ctx, http.MethodPost, "/containers/create?"+q.Encode(), c)
 	if err != nil {
 		return "", err
