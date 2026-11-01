@@ -136,3 +136,12 @@
 - Resolve symlinks before applying the source denylist; also exclude Docklight data and backup roots. Validate sources again at container start.
 - Keep mounts read-only unless `write` is explicitly enabled. Store container selection so a stack mount is only shared with the chosen sidecar; an empty service targets the primary container. Apply saved changes on the next start.
 - Docker Engine bind sources are interpreted on the daemon host, so the panel's browse results are useful only when the daemon sees the same absolute path.
+
+## 2026-11-01: UPnP router port forwarding
+
+- Keep UPnP disabled globally on fresh installs; new and migrated servers keep a separate per-server auto-forward preference enabled by default. Only the admin can change the global gate.
+- Implement only the IPv4 UPnP IGD WANIPConnection v1/v2 and WANPPPConnection v1 actions Docklight needs, using the Go standard library so offline builds do not acquire another network dependency.
+- Restrict SSDP `LOCATION` to the private IPv4 address that sent the response, prohibit redirects, cap description/SOAP bodies, and require service control URLs to stay on the discovered router authority.
+- Check the exact external port/protocol before adding a rule. Persist Docklight's intended target and marker before changing the router; cleanup re-reads the current rule and deletes only if the remote host, protocol, ports, LAN client, and marker still match.
+- Use permanent leases as requested. Skip RCON and names that indicate admin, management, or console ports. A router outage leaves mapping records for retry; uncertain container state never triggers rule deletion.
+- A real router and public-NAT path were not available in the sandbox, so protocol fixtures verify SOAP/SSDP handling and fake gateways verify mapping ownership and lifecycle policy.

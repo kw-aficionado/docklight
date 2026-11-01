@@ -22,6 +22,7 @@ import (
 	"example.com/yggdrasil-panel/internal/docker"
 	"example.com/yggdrasil-panel/internal/rune"
 	"example.com/yggdrasil-panel/internal/security"
+	"example.com/yggdrasil-panel/internal/upnp"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -63,10 +64,12 @@ type App struct {
 	statusCache           []byte
 	statusCacheUntil      time.Time
 	networkMu             sync.Mutex
+	upnpMu                sync.Mutex
 	networkDetected       string
 	networkDetectedAt     time.Time
 	networkAttemptAt      time.Time
 	networkHTTPClient     *http.Client
+	upnpDiscover          func(context.Context) (upnp.Gateway, error)
 	reachabilityMu        sync.Mutex
 	reachabilityCache     map[string]reachabilityCacheEntry
 	reachabilityProbe     func(context.Context, string, int, rune.Rune) error
@@ -277,6 +280,8 @@ func (a *App) Router() http.Handler {
 			priv.Get("/servers/{id}/schedules/{scheduleID}/runs", a.listBackupScheduleRuns)
 			priv.Get("/servers/{id}/crashes", a.listServerCrashes)
 			priv.Put("/servers/{id}/watchdog", a.updateWatchdogSettings)
+			priv.Get("/servers/{id}/upnp", a.getServerUPnPSettingsHandler)
+			priv.Put("/servers/{id}/upnp", a.updateServerUPnPSettings)
 			priv.Get("/notifications", a.admin(a.getNotificationSettings))
 			priv.Put("/notifications", a.admin(a.updateNotificationSettings))
 			priv.Post("/notifications/test", a.admin(a.testNotification))
@@ -288,6 +293,9 @@ func (a *App) Router() http.Handler {
 			priv.Put("/settings/status-page", a.admin(a.updateStatusPageSettings))
 			priv.Get("/settings/network", a.getNetworkSettings)
 			priv.Put("/settings/network", a.admin(a.updateNetworkSettings))
+			priv.Get("/settings/upnp", a.admin(a.getUPnPSettings))
+			priv.Put("/settings/upnp", a.admin(a.updateUPnPSettings))
+			priv.Get("/upnp/status", a.admin(a.getUPnPStatus))
 			priv.Get("/backups/target/status", a.backupTargetStatus)
 			priv.Get("/backups/target", a.admin(a.getBackupTarget))
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))
@@ -913,14 +921,15 @@ func (a *App) getServer(id string) (Server, error) {
 	var s Server
 	var env, ports, hostMounts string
 	var installed int
-	var watchdogEnabled, watchdogQuarantined int
-	err := a.db.QueryRow(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined,host_mounts FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined, &hostMounts)
+	var watchdogEnabled, watchdogQuarantined, autoForward int
+	err := a.db.QueryRow(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined,host_mounts,auto_forward FROM servers WHERE id=?`, id).Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &env, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined, &hostMounts, &autoForward)
 	if err != nil {
 		return s, err
 	}
 	s.Installed = installed != 0
 	s.WatchdogEnabled = watchdogEnabled != 0
 	s.WatchdogQuarantined = watchdogQuarantined != 0
+	s.AutoForward = autoForward != 0
 	if json.Unmarshal([]byte(env), &s.Env) != nil {
 		s.Env = map[string]string{}
 	}

@@ -42,6 +42,7 @@ type Server struct {
 	MemoryLimitMB       int                  `json:"memory_limit_mb"`
 	WatchdogEnabled     bool                 `json:"watchdog_enabled"`
 	WatchdogQuarantined bool                 `json:"watchdog_quarantined"`
+	AutoForward         bool                 `json:"auto_forward"`
 	ErrorMessage        string               `json:"error_message,omitempty"`
 	Permissions         []string             `json:"permissions,omitempty"`
 	StackServices       []StackServiceStatus `json:"stack_services,omitempty"`
@@ -72,7 +73,7 @@ type installJob struct {
 
 func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 	u := principal(r)
-	rows, e := a.db.Query(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined FROM servers ORDER BY created_at DESC`)
+	rows, e := a.db.Query(`SELECT id,name,gameskill_id,realm_id,status,installed,env_json,ports_json,data_dir,container_id,cpu_limit,memory_limit_mb,created_at,error_message,watchdog_enabled,watchdog_quarantined,auto_forward FROM servers ORDER BY created_at DESC`)
 	if e != nil {
 		writeError(w, 500, "could not list servers")
 		return
@@ -81,13 +82,14 @@ func (a *App) listServers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var s Server
 		var in, ports string
-		var installed, watchdogEnabled, watchdogQuarantined int
-		if rows.Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &in, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined) != nil {
+		var installed, watchdogEnabled, watchdogQuarantined, autoForward int
+		if rows.Scan(&s.ID, &s.Name, &s.GameskillID, &s.RealmID, &s.Status, &installed, &in, &ports, &s.DataDir, &s.ContainerID, &s.CPULimit, &s.MemoryLimitMB, &s.CreatedAt, &s.ErrorMessage, &watchdogEnabled, &watchdogQuarantined, &autoForward) != nil {
 			continue
 		}
 		s.Installed = installed != 0
 		s.WatchdogEnabled = watchdogEnabled != 0
 		s.WatchdogQuarantined = watchdogQuarantined != 0
+		s.AutoForward = autoForward != 0
 		_ = json.Unmarshal([]byte(in), &s.Env)
 		_ = json.Unmarshal([]byte(ports), &s.Ports)
 		out = append(out, s)
@@ -361,6 +363,17 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "app stack cleanup failed: "+err.Error())
 		return
 	}
+	if _, err := a.db.Exec(`UPDATE servers SET container_id='',status='stopped',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, s.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Docker resources were removed but the stopped server state could not be recorded")
+		return
+	}
+	upnpCtx, upnpCancel := context.WithTimeout(r.Context(), upnpRequestTimeout)
+	if err := a.removeServerUPnPMappings(upnpCtx, s.ID, nil); err != nil {
+		upnpCancel()
+		writeError(w, 503, "Docker resources are stopped and the server data is retained, but its recorded router mappings could not be safely cleared: "+err.Error())
+		return
+	}
+	upnpCancel()
 	if err := a.removeServerBackups(s.ID); err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -385,6 +398,7 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 	a.resetWatchdog(s.ID)
 	a.releasePorts(s.ID)
 	_, _ = a.db.Exec(`DELETE FROM permissions WHERE scope_type='server' AND scope_id=?`, s.ID)
+	_, _ = a.db.Exec(`DELETE FROM server_upnp_state WHERE server_id=?`, s.ID)
 	_, _ = a.db.Exec(`DELETE FROM servers WHERE id=?`, s.ID)
 	a.audit(u, "server.delete", "server", s.ID, "data_removed=true")
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -813,6 +827,12 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 			return e
 		}
 	}
+	cleanupUPnPCtx, cleanupUPnPCancel := context.WithTimeout(parent, upnpRequestTimeout)
+	if err = a.removeServerUPnPMappings(cleanupUPnPCtx, s.ID, nil); err != nil {
+		cleanupUPnPCancel()
+		return fmt.Errorf("clear previous router mappings before starting: %w", err)
+	}
+	cleanupUPnPCancel()
 	stackNetwork := ""
 	if gs.Stack != nil {
 		stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
@@ -850,6 +870,11 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 	a.clearRuntimePending(s.ID)
 	s.ContainerID = cid
 	s.Status = "starting"
+	upnpCtx, upnpCancel := context.WithTimeout(parent, upnpRequestTimeout)
+	if mappingErr := a.openServerUPnPMappings(upnpCtx, s); mappingErr != nil {
+		a.audit(User{Username: "system"}, "server.upnp_error", "server", s.ID, mappingErr.Error())
+	}
+	upnpCancel()
 	go a.watchReady(s, gs)
 	return nil
 }
@@ -897,6 +922,11 @@ func (a *App) stop(s Server) error {
 			return err
 		}
 	}
+	upnpCtx, upnpCancel := context.WithTimeout(context.Background(), upnpRequestTimeout)
+	if mappingErr := a.removeServerUPnPMappings(upnpCtx, s.ID, nil); mappingErr != nil {
+		a.audit(User{Username: "system"}, "server.upnp_cleanup_error", "server", s.ID, mappingErr.Error())
+	}
+	upnpCancel()
 	var stack *rune.Rune
 	if loadErr == nil {
 		stack = &gs
@@ -933,6 +963,11 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 			return
 		}
 		if !ins.State.Running {
+			upnpCtx, upnpCancel := context.WithTimeout(context.Background(), upnpRequestTimeout)
+			if mappingErr := a.removeServerUPnPMappings(upnpCtx, s.ID, nil); mappingErr != nil {
+				a.audit(User{Username: "system"}, "server.upnp_cleanup_error", "server", s.ID, mappingErr.Error())
+			}
+			upnpCancel()
 			message := fmt.Sprintf("Container exited before readiness with code %d; review its logs and template startup settings.", ins.State.ExitCode)
 			if err = a.recordServerCrash(s, "container_exited", ins.State.ExitCode, message); err != nil {
 				log.Printf("could not record startup exit for server %s", s.ID)

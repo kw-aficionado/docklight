@@ -183,11 +183,16 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
   async function renderNetworkSettings(){
     const view=document.querySelector('#view');
     const breadcrumb=document.querySelector('.breadcrumbs b');if(breadcrumb)breadcrumb.textContent='Network';
-    view.innerHTML=`<div class="page-heading"><div><div class="eyebrow">PUBLIC CONNECTION</div><h1>Network</h1><p>Set the host address players use to reach this panel’s servers.</p></div></div><div class="network-settings-grid"><section class="panel-card network-settings-card"><div class="panel-head"><div><h2>Public hostname</h2><p>Used for server connection checks and address display.</p></div></div><form id="network-settings-form"><label>Hostname<input name="public_hostname" maxlength="253" autocomplete="url" placeholder="play.example.com"><small>Optional. A hostname or http(s) URL is accepted; the scheme and trailing slash are removed. Server ports come from each template.</small></label><div id="network-settings-error" class="form-error" role="alert"></div><div class="form-actions"><span class="muted-copy">Only administrators can change this host.</span><button class="button primary" type="submit">Save hostname</button></div></form></section><section class="panel-card network-facts"><div class="panel-head"><div><h2>Detected connection</h2><p>Fallback address when no hostname is saved.</p></div></div><div class="network-fact"><span>Detected public IP</span><b data-network-detected>Loading…</b></div><div class="network-fact"><span>Effective host</span><code data-network-effective>Loading…</code></div><p class="network-detection-note">Docklight asks ipify for this host’s public IP once per hour. The last successful address is kept if detection temporarily fails.</p></section></div>`;
+    view.innerHTML=`<div class="page-heading"><div><div class="eyebrow">PUBLIC CONNECTION</div><h1>Network</h1><p>Set the host address players use to reach this panel’s servers.</p></div></div><div class="network-settings-grid"><section class="panel-card network-settings-card"><div class="panel-head"><div><h2>Public hostname</h2><p>Used for server connection checks and address display.</p></div></div><form id="network-settings-form"><label>Hostname<input name="public_hostname" maxlength="253" autocomplete="url" placeholder="play.example.com"><small>Optional. A hostname or http(s) URL is accepted; the scheme and trailing slash are removed. Server ports come from each template.</small></label><div id="network-settings-error" class="form-error" role="alert"></div><div class="form-actions"><span class="muted-copy">Only administrators can change this host.</span><button class="button primary" type="submit">Save hostname</button></div></form></section><section class="panel-card network-facts"><div class="panel-head"><div><h2>Detected connection</h2><p>Fallback address when no hostname is saved.</p></div></div><div class="network-fact"><span>Detected public IP</span><b data-network-detected>Loading…</b></div><div class="network-fact"><span>Effective host</span><code data-network-effective>Loading…</code></div><p class="network-detection-note">Docklight asks ipify for this host’s public IP once per hour. The last successful address is kept if detection temporarily fails.</p></section><section class="panel-card upnp-settings-card"><div class="panel-head"><div><h2>Router port forwarding</h2><p>Map eligible game ports through a compatible UPnP Internet Gateway.</p></div><span data-upnp-badge class="status-badge muted"><i></i>Checking router</span></div><form id="upnp-settings-form"><label class="checkline"><input type="checkbox" name="enabled">Enable automatic router forwarding</label><p class="muted-copy">Off by default. Each server also has its own forwarding switch. RCON and administrative ports are never exposed. Existing rules are removed only after Docklight verifies their ownership.</p><div class="upnp-facts"><div><span>Host LAN address</span><b data-upnp-lan>—</b></div><div><span>Router WAN address</span><b data-upnp-wan>—</b></div><div><span>Docklight mappings</span><b data-upnp-mappings>0</b></div><div><span>Cleanup pending</span><b data-upnp-pending>0</b></div></div><div id="upnp-settings-message" class="form-error" role="status"></div><div class="form-actions"><span class="muted-copy">UPnP must also be enabled on your router.</span><button class="button primary" type="submit">Save forwarding</button></div></form></section></div>`;
     const form=view.querySelector('#network-settings-form'),error=view.querySelector('#network-settings-error');
     const updateView=data=>{form.elements.public_hostname.value=data.public_hostname||'';view.querySelector('[data-network-detected]').textContent=data.detected?`${data.detected}${data.detected_stale?' · last known':''}`:'Unavailable';view.querySelector('[data-network-effective]').textContent=data.effective||'your-host';const note=view.querySelector('.network-detection-note');if(data.detection_message)note.textContent=data.detection_message;};
-    try{updateView(await api('/api/settings/network'))}catch(err){error.textContent=err.message;return}
+    try{updateView(await api('/api/settings/network'))}catch(err){error.textContent=err.message;form.querySelector('[type="submit"]').disabled=true}
     form.onsubmit=async event=>{event.preventDefault();const submit=form.querySelector('[type="submit"]');submit.disabled=true;error.textContent='';try{updateView(await api('/api/settings/network',{method:'PUT',body:JSON.stringify({public_hostname:form.elements.public_hostname.value})}));toast('Public hostname saved','success')}catch(err){error.textContent=err.message}finally{submit.disabled=false}};
+    const upnpForm=view.querySelector('#upnp-settings-form'),upnpMessage=view.querySelector('#upnp-settings-message');
+    const updateUPnP=(settings,status)=>{upnpForm.elements.enabled.checked=Boolean(settings.enabled);view.querySelector('[data-upnp-lan]').textContent=status.lan_ip||'Unavailable';view.querySelector('[data-upnp-wan]').textContent=status.wan_ip||'Unavailable';view.querySelector('[data-upnp-mappings]').textContent=String(status.owned_mappings||0);view.querySelector('[data-upnp-pending]').textContent=String(status.pending_cleanup||0);const badge=view.querySelector('[data-upnp-badge]');badge.className=`status-badge ${status.available?'good':'muted'}`;badge.innerHTML=`<i></i>${status.available?'Router found':'Router unavailable'}`;upnpMessage.textContent=status.message||''};
+    const refreshUPnP=async()=>{const [settings,status]=await Promise.all([api('/api/settings/upnp'),api('/api/upnp/status')]);updateUPnP(settings,status)};
+    try{await refreshUPnP()}catch(err){upnpMessage.textContent=err.message;upnpForm.querySelector('[type="submit"]').disabled=true}
+    upnpForm.onsubmit=async event=>{event.preventDefault();const submit=upnpForm.querySelector('[type="submit"]');submit.disabled=true;upnpMessage.textContent='';try{const saved=await api('/api/settings/upnp',{method:'PUT',body:JSON.stringify({enabled:upnpForm.elements.enabled.checked})});await refreshUPnP();if(saved.message)upnpMessage.textContent=saved.message;toast(saved.message?'Forwarding preference saved with a warning':'Forwarding settings saved',saved.message?'error':'success')}catch(err){upnpMessage.textContent=err.message}finally{submit.disabled=false}};
   }
 
   async function renderPublicStatusSettings(){
@@ -488,9 +493,10 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
   }
 
   function renderWatchdogSettings(s,r){
-    if(!r?.query)return;
     const grid=document.querySelector('#detail-body .settings-grid');
     if(!grid)return;
+    renderServerUPnPSettings(s,grid);
+    if(!r?.query)return;
     const card=document.createElement('section');
     card.className='panel-card settings-card watchdog-card';
     card.style.gridColumn='1 / -1';
@@ -506,6 +512,30 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
         await refresh();state.selected=state.servers.find(x=>x.id===s.id);render();
       }catch(err){error.textContent=err.message;button.disabled=false}
     };
+  }
+
+  async function renderServerUPnPSettings(s,grid){
+    const card=document.createElement('section');
+    card.className='panel-card settings-card upnp-server-card';
+    card.style.gridColumn='1 / -1';
+    card.innerHTML='<div class="files-empty">Loading router forwarding settings…</div>';
+    grid.append(card);
+    const render=data=>{
+      const mappings=data.mappings||[];
+      card.innerHTML=`<div class="panel-head"><div><h2>Router port forwarding</h2><p>Choose whether Docklight should expose this server’s game ports through UPnP.</p></div><span class="status-badge ${data.global_enabled?'good':'muted'}"><i></i>${data.global_enabled?'Global forwarding on':'Global forwarding off'}</span></div><form id="server-upnp-form"><label class="checkline"><input type="checkbox" name="auto_forward" ${data.auto_forward?'checked':''}>Forward eligible ports automatically</label><p class="muted-copy">This server setting is on by default, but the administrator must also enable forwarding on the Network page. RCON, admin, management, and console ports are excluded.</p><div class="upnp-mapping-list">${mappings.length?mappings.map(mapping=>`<div><span>${esc(mapping.port_name)}</span><code>${esc(mapping.protocol)}/${fmt(mapping.external_port)}</code><small>→ ${esc(mapping.internal_client)}:${fmt(mapping.internal_port)}</small></div>`).join(''):'<span class="muted-copy">No Docklight-owned router mappings are recorded.</span>'}</div><div id="server-upnp-error" class="form-error" role="status">${esc(data.last_error||'')}</div><div class="form-actions"><span class="muted-copy">Only mappings matching Docklight’s saved router target can be removed.</span><button class="button primary" type="submit">Save forwarding</button></div></form>`;
+      const form=card.querySelector('#server-upnp-form');
+      form.onsubmit=async event=>{
+        event.preventDefault();
+        const button=form.querySelector('button[type="submit"]'),error=card.querySelector('#server-upnp-error');
+        button.disabled=true;error.textContent='';
+        try{
+          const saved=await api(`/api/servers/${s.id}/upnp`,{method:'PUT',body:JSON.stringify({auto_forward:form.elements.auto_forward.checked})});
+          render(saved);
+          toast(saved.last_error?'Preference saved with a forwarding warning':'Server forwarding preference saved',saved.last_error?'error':'success');
+        }catch(err){error.textContent=err.message;button.disabled=false}
+      };
+    };
+    try{render(await api(`/api/servers/${s.id}/upnp`))}catch(err){card.innerHTML=`<div class="panel-head"><div><h2>Router port forwarding</h2></div></div><div class="form-error">${esc(err.message)}</div>`}
   }
 
   async function renderCrashHistory(s){const b=document.querySelector('#detail-body');b.innerHTML=`<section class="panel-card crash-history"><div class="panel-head"><div><h2>Container incidents</h2><p>Confirmed exits and missing containers recorded by Docklight.</p></div></div><div class="crash-list" id="crash-list"><div class="files-empty">Loading history…</div></div></section>`;const host=b.querySelector('#crash-list');try{const rows=await api(`/api/servers/${s.id}/crashes`);host.innerHTML=rows.length?rows.map(item=>`<article class="crash-row"><div><b>${item.reason==='container_missing'?'Container missing':'Unexpected container exit'}</b><small>${esc(new Date(item.detected_at).toLocaleString())} · ${item.exit_code>=0?`exit code ${item.exit_code}`:'exit code unavailable'}</small></div><p>${esc(item.message)}</p></article>`).join(''):'<div class="files-empty">No unexpected container exits have been recorded.</div>'}catch(e){host.innerHTML=`<div class="files-empty error-text">${esc(e.message)}</div>`}}

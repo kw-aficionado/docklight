@@ -901,6 +901,59 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 29 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "servers", "auto_forward") {
+			if _, err = tx.Exec(`ALTER TABLE servers ADD COLUMN auto_forward INTEGER NOT NULL DEFAULT 1`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS upnp_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO upnp_settings(id,enabled) VALUES(1,0)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_upnp_mappings (
+			server_id TEXT NOT NULL,
+			port_name TEXT NOT NULL,
+			external_port INTEGER NOT NULL,
+			protocol TEXT NOT NULL,
+			internal_port INTEGER NOT NULL,
+			internal_client TEXT NOT NULL,
+			description TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY(server_id,external_port,protocol)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_upnp_state (
+			server_id TEXT PRIMARY KEY,
+			last_error TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(29)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -207,6 +207,11 @@ func (a *App) recordServerCrash(s Server, reason string, exitCode int, message s
 		return fmt.Errorf("could not commit server crash history")
 	}
 	a.clearRuntimePending(s.ID)
+	upnpCtx, upnpCancel := context.WithTimeout(context.Background(), upnpRequestTimeout)
+	if mappingErr := a.removeServerUPnPMappings(upnpCtx, s.ID, nil); mappingErr != nil {
+		a.audit(User{Username: "system"}, "server.upnp_cleanup_error", "server", s.ID, mappingErr.Error())
+	}
+	upnpCancel()
 	detail := fmt.Sprintf("reason=%s exit_code=%d", reason, exitCode)
 	a.audit(User{Username: "runtime monitor"}, "server.container_crash", "server", s.ID, detail)
 	a.dispatchWebhookNotification(notificationServerCrash, &webhookServer{ID: s.ID, Name: s.Name}, message)

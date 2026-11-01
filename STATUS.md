@@ -68,6 +68,12 @@ The admin-only Network page stores an optional public hostname. Without one, Doc
 
 Tests cover migration 28, user-visible/admin-writable settings, hostname normalization, the ipify request and stale-value fallback, target port/protocol selection, 30-second result caching, stopped-server suppression, and loopback refusal. Live DNS, router/NAT behavior, and visual UI review remain host acceptance work.
 
+## Phase 3 UPnP router port forwarding
+
+UPnP IGD forwarding has an administrator-controlled master switch that starts off, plus a per-server preference that defaults on. Docklight discovers an IPv4 gateway, reports the host LAN and router WAN addresses, maps declared TCP/UDP game ports to their allocated host ports, and excludes RCON, admin, management, and console ports. Router rules use permanent leases and a `Docklight:` description. Before creating or removing a mapping, Docklight checks its current protocol, ports, LAN client, and description; unknown rules are left untouched. Mapping ownership records survive router outages for later cleanup. Stop, confirmed container exit, per-server opt-out, global opt-out, and deletion trigger cleanup; deletion preserves server data and allocated host ports if recorded mappings cannot be safely cleared.
+
+Tests cover UPnP defaults and admin authorization, per-server control permission, TCP/UDP expansion and excluded ports, mapping idempotence, foreign-rule conflicts, exact ownership verification on cleanup, uncertain AddPortMapping responses, SSDP location restrictions, control-URL origin checks, and SOAP XML escaping. No physical router was available for discovery/NAT acceptance; the Network and per-server forwarding UI could not be visually exercised because the sandbox blocks the local panel listener.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -104,7 +110,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: UPnP, UniFi forwarding, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
+- Phase 3: UniFi forwarding, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
