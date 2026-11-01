@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -33,24 +34,27 @@ type backupTargetConfig struct {
 	AccessKey     string
 	SecretKey     string
 	HostKeySHA256 string
+	AuthMode      string
 	Prefix        string
 }
 
 type backupTargetSummary struct {
-	Type                string `json:"type"`
-	Enabled             bool   `json:"enabled"`
-	Configured          bool   `json:"configured"`
-	Endpoint            string `json:"endpoint,omitempty"`
-	Host                string `json:"host,omitempty"`
-	Port                int    `json:"port,omitempty"`
-	Bucket              string `json:"bucket,omitempty"`
-	Share               string `json:"share,omitempty"`
-	Region              string `json:"region,omitempty"`
-	Prefix              string `json:"prefix,omitempty"`
-	AccessKeyConfigured bool   `json:"access_key_configured"`
-	UsernameConfigured  bool   `json:"username_configured"`
-	SecretConfigured    bool   `json:"secret_key_configured"`
-	HostKeySHA256       string `json:"host_key_sha256,omitempty"`
+	Type                  string `json:"type"`
+	Enabled               bool   `json:"enabled"`
+	Configured            bool   `json:"configured"`
+	Endpoint              string `json:"endpoint,omitempty"`
+	Host                  string `json:"host,omitempty"`
+	Port                  int    `json:"port,omitempty"`
+	Bucket                string `json:"bucket,omitempty"`
+	Share                 string `json:"share,omitempty"`
+	Region                string `json:"region,omitempty"`
+	Prefix                string `json:"prefix,omitempty"`
+	AccessKeyConfigured   bool   `json:"access_key_configured"`
+	UsernameConfigured    bool   `json:"username_configured"`
+	SecretConfigured      bool   `json:"secret_key_configured"`
+	HostKeySHA256         string `json:"host_key_sha256,omitempty"`
+	AccountNameConfigured bool   `json:"account_name_configured"`
+	AuthMode              string `json:"auth_mode,omitempty"`
 }
 
 func (t backupTargetConfig) configured() bool {
@@ -61,6 +65,8 @@ func (t backupTargetConfig) configured() bool {
 		return t.Endpoint != "" && t.AccessKey != "" && t.SecretKey != "" && t.HostKeySHA256 != ""
 	case "smb":
 		return t.Endpoint != "" && t.Bucket != "" && t.AccessKey != "" && t.SecretKey != ""
+	case "azure":
+		return t.Bucket != "" && t.AccessKey != "" && t.SecretKey != "" && (t.AuthMode == "key" || t.AuthMode == "sas")
 	default:
 		return false
 	}
@@ -77,7 +83,7 @@ func (a *App) readBackupTarget() (backupTargetConfig, error) {
 	var enabled int
 	var endpointEnc, accessKeyEnc, secretKeyEnc string
 	var target backupTargetConfig
-	err := a.db.QueryRow(`SELECT enabled,protocol,port,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,host_key_sha256 FROM backup_target_settings WHERE id=1`).Scan(&enabled, &target.Type, &target.Port, &endpointEnc, &target.Bucket, &target.Region, &accessKeyEnc, &secretKeyEnc, &target.Prefix, &target.HostKeySHA256)
+	err := a.db.QueryRow(`SELECT enabled,protocol,port,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,host_key_sha256,auth_mode FROM backup_target_settings WHERE id=1`).Scan(&enabled, &target.Type, &target.Port, &endpointEnc, &target.Bucket, &target.Region, &accessKeyEnc, &secretKeyEnc, &target.Prefix, &target.HostKeySHA256, &target.AuthMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return backupTargetConfig{}, nil
 	}
@@ -127,19 +133,23 @@ func (a *App) backupTargetStatus(w http.ResponseWriter, _ *http.Request) {
 func summarizeBackupTarget(target backupTargetConfig) backupTargetSummary {
 	protocol := target.protocol()
 	summary := backupTargetSummary{
-		Type:                protocol,
-		Enabled:             target.Enabled,
-		Configured:          target.configured(),
-		AccessKeyConfigured: protocol == "s3" && target.AccessKey != "",
-		UsernameConfigured:  protocol != "s3" && target.AccessKey != "",
-		SecretConfigured:    target.SecretKey != "",
-		Port:                target.Port,
-		Prefix:              target.Prefix,
+		Type:                  protocol,
+		Enabled:               target.Enabled,
+		Configured:            target.configured(),
+		AccessKeyConfigured:   protocol == "s3" && target.AccessKey != "",
+		UsernameConfigured:    protocol != "s3" && protocol != "azure" && target.AccessKey != "",
+		SecretConfigured:      target.SecretKey != "",
+		Port:                  target.Port,
+		Prefix:                target.Prefix,
+		AccountNameConfigured: protocol == "azure" && target.AccessKey != "",
+		AuthMode:              target.AuthMode,
 	}
-	if protocol == "s3" {
+	if protocol == "s3" || protocol == "azure" {
 		summary.Endpoint = target.Endpoint
 		summary.Bucket = target.Bucket
-		summary.Region = target.Region
+		if protocol == "s3" {
+			summary.Region = target.Region
+		}
 	} else {
 		summary.Host = target.Endpoint
 		if protocol == "sftp" {
@@ -157,7 +167,7 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		Enabled       *bool   `json:"enabled"`
 		Type          string  `json:"type"`
 		Protocol      string  `json:"protocol"`
-		Endpoint      string  `json:"endpoint"`
+		Endpoint      *string `json:"endpoint"`
 		Host          string  `json:"host"`
 		Port          *int    `json:"port"`
 		Bucket        string  `json:"bucket"`
@@ -167,6 +177,8 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		Username      string  `json:"username"`
 		SecretKey     string  `json:"secret_key"`
 		HostKeySHA256 *string `json:"host_key_sha256"`
+		AccountName   string  `json:"account_name"`
+		AuthMode      string  `json:"auth_mode"`
 		Prefix        *string `json:"prefix"`
 		ClearTarget   bool    `json:"clear_target"`
 	}
@@ -203,21 +215,23 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	if requestedType == "" {
 		requestedType = current.protocol()
 	}
-	if requestedType != "s3" && requestedType != "sftp" && requestedType != "smb" {
-		writeError(w, http.StatusBadRequest, "backup target type must be s3, sftp, or smb")
+	if requestedType != "s3" && requestedType != "sftp" && requestedType != "smb" && requestedType != "azure" {
+		writeError(w, http.StatusBadRequest, "backup target type must be s3, sftp, smb, or azure")
 		return
 	}
 	next := current
 	if requestedType != current.protocol() {
 		next = backupTargetConfig{Type: requestedType}
+		if requestedType == "azure" {
+			next.AuthMode = "key"
+		}
 	} else {
 		next.Type = requestedType
 	}
 	host := strings.TrimSpace(in.Host)
-	if host == "" {
-		host = strings.TrimSpace(in.Endpoint)
-	}
-	if host != "" {
+	if in.Endpoint != nil {
+		next.Endpoint = strings.TrimSpace(*in.Endpoint)
+	} else if host != "" {
 		next.Endpoint = host
 	}
 	if in.Port != nil {
@@ -231,10 +245,15 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	if in.Region != "" {
 		next.Region = strings.TrimSpace(in.Region)
 	}
-	if in.Username != "" {
+	if in.AccountName != "" {
+		next.AccessKey = strings.TrimSpace(in.AccountName)
+	} else if in.Username != "" {
 		next.AccessKey = strings.TrimSpace(in.Username)
 	} else if in.AccessKey != "" {
 		next.AccessKey = strings.TrimSpace(in.AccessKey)
+	}
+	if in.AuthMode != "" {
+		next.AuthMode = strings.TrimSpace(in.AuthMode)
 	}
 	if in.SecretKey != "" {
 		next.SecretKey = in.SecretKey
@@ -270,7 +289,7 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not check existing remote backups before updating the target")
 		return
 	} else if count != 0 && !sameBackupTargetIdentity(current, next) {
-		writeError(w, http.StatusConflict, "delete the existing remote backups before changing the protocol, host, port, bucket, share, region, or prefix")
+		writeError(w, http.StatusConflict, "delete the existing remote backups before changing the protocol, account, host or endpoint, port, bucket or container, share, region, or prefix")
 		return
 	}
 	endpointEnc, accessKeyEnc, secretKeyEnc := "", "", ""
@@ -295,8 +314,8 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,protocol,port,host_key_sha256,updated_at)
-		VALUES(1,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,endpoint_enc=excluded.endpoint_enc,bucket=excluded.bucket,region=excluded.region,access_key_enc=excluded.access_key_enc,secret_key_enc=excluded.secret_key_enc,prefix=excluded.prefix,protocol=excluded.protocol,port=excluded.port,host_key_sha256=excluded.host_key_sha256,updated_at=CURRENT_TIMESTAMP`, boolInt(next.Enabled), endpointEnc, next.Bucket, next.Region, accessKeyEnc, secretKeyEnc, next.Prefix, next.protocol(), next.Port, next.HostKeySHA256); err != nil {
+	if _, err = a.db.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,protocol,port,host_key_sha256,auth_mode,updated_at)
+		VALUES(1,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,endpoint_enc=excluded.endpoint_enc,bucket=excluded.bucket,region=excluded.region,access_key_enc=excluded.access_key_enc,secret_key_enc=excluded.secret_key_enc,prefix=excluded.prefix,protocol=excluded.protocol,port=excluded.port,host_key_sha256=excluded.host_key_sha256,auth_mode=excluded.auth_mode,updated_at=CURRENT_TIMESTAMP`, boolInt(next.Enabled), endpointEnc, next.Bucket, next.Region, accessKeyEnc, secretKeyEnc, next.Prefix, next.protocol(), next.Port, next.HostKeySHA256, next.AuthMode); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save remote backup target settings")
 		return
 	}
@@ -310,6 +329,8 @@ func incompleteTargetMessage(protocol string) string {
 		return "enter the SFTP host, username, password, and verified SHA-256 host-key fingerprint before enabling the target"
 	case "smb":
 		return "enter the SMB host, share, username, and password before saving the target"
+	case "azure":
+		return "enter the Azure account name, container, and account key or SAS token before saving the target"
 	default:
 		return "enter the S3 endpoint, bucket, region, access key, and secret key before saving the target"
 	}
@@ -326,8 +347,11 @@ func validateBackupTarget(target backupTargetConfig) error {
 	case "smb":
 		_, err := backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
 		return err
+	case "azure":
+		_, err := backup.NewAzureClient(target.Endpoint, target.AccessKey, target.Bucket, target.AuthMode, target.SecretKey, nil)
+		return err
 	default:
-		return errors.New("backup target type must be s3, sftp, or smb")
+		return errors.New("backup target type must be s3, sftp, smb, or azure")
 	}
 }
 
@@ -353,16 +377,19 @@ func normalizeBackupPrefix(value string) (string, error) {
 }
 
 func anyBackupTargetValue(target backupTargetConfig) bool {
-	return target.Endpoint != "" || target.Port != 0 || target.Bucket != "" || target.Region != "" || target.AccessKey != "" || target.SecretKey != "" || target.HostKeySHA256 != "" || target.Prefix != ""
+	return target.Endpoint != "" || target.Port != 0 || target.Bucket != "" || target.Region != "" || target.AccessKey != "" || target.SecretKey != "" || target.HostKeySHA256 != "" || target.AuthMode != "" || target.Prefix != ""
 }
 
 func sameBackupTargetIdentity(first, second backupTargetConfig) bool {
-	return first.protocol() == second.protocol() && first.Endpoint == second.Endpoint && first.Port == second.Port && first.Bucket == second.Bucket && first.Region == second.Region && first.Prefix == second.Prefix
+	if first.protocol() != second.protocol() || first.Endpoint != second.Endpoint || first.Port != second.Port || first.Bucket != second.Bucket || first.Region != second.Region || first.Prefix != second.Prefix {
+		return false
+	}
+	return first.protocol() != "azure" || first.AccessKey == second.AccessKey
 }
 
 func (a *App) remoteBackupCount() (int, error) {
 	var count int
-	err := a.db.QueryRow(`SELECT count(*) FROM server_backups WHERE storage IN ('s3','sftp','smb')`).Scan(&count)
+	err := a.db.QueryRow(`SELECT count(*) FROM server_backups WHERE storage IN ('s3','sftp','smb','azure')`).Scan(&count)
 	return count, err
 }
 
@@ -390,8 +417,10 @@ func (a *App) newRemoteBackupStore(target backupTargetConfig) (backupObjectStore
 		return backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, target.HostKeySHA256, "")
 	case "smb":
 		return backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
+	case "azure":
+		return backup.NewAzureClient(target.Endpoint, target.AccessKey, target.Bucket, target.AuthMode, target.SecretKey, nil)
 	default:
-		return nil, errors.New("backup target type must be s3, sftp, or smb")
+		return nil, errors.New("backup target type must be s3, sftp, smb, or azure")
 	}
 }
 
@@ -414,6 +443,17 @@ func (a *App) testBackupTarget(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if lister, ok := store.(interface {
+		List(context.Context, string) error
+	}); ok {
+		listCtx, listCancel := context.WithTimeout(r.Context(), 30*time.Second)
+		listErr := lister.List(listCtx, target.Prefix)
+		listCancel()
+		if listErr != nil {
+			writeError(w, http.StatusBadGateway, explainRemoteBackupError(target.protocol(), "list", listErr))
+			return
+		}
 	}
 	id, err := newID()
 	if err != nil {
@@ -442,6 +482,12 @@ func (a *App) testBackupTarget(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not prepare the remote connectivity test file")
 		return
 	}
+	if _, err = path.Seek(0, io.SeekStart); err != nil {
+		_ = path.Close()
+		_ = os.Remove(path.Name())
+		writeError(w, http.StatusInternalServerError, "could not rewind the remote connectivity test file")
+		return
+	}
 	key := backupObjectKey(target.Prefix, "connectivity-checks", id)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	uploadErr := store.PutFile(ctx, key, path)
@@ -455,6 +501,24 @@ func (a *App) testBackupTarget(w http.ResponseWriter, r *http.Request) {
 		message := explainRemoteBackupError(target.protocol(), "upload", uploadErr)
 		if cleanupErr != nil {
 			message += "; a partial test object may remain at " + key + " and could not be removed"
+		}
+		writeError(w, http.StatusBadGateway, message)
+		return
+	}
+	var readback bytes.Buffer
+	readCtx, readCancel := context.WithTimeout(r.Context(), 30*time.Second)
+	readErr := store.GetObject(readCtx, key, &readback)
+	readCancel()
+	if readErr != nil || readback.String() != "Docklight remote backup connectivity check\n" {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupErr := store.DeleteObject(cleanupCtx, key)
+		cleanupCancel()
+		message := "remote destination accepted a test upload but returned unexpected data when Docklight read it back"
+		if readErr != nil {
+			message = explainRemoteBackupError(target.protocol(), "download", readErr)
+		}
+		if cleanupErr != nil {
+			message += "; a test object may remain at " + key + " and could not be removed"
 		}
 		writeError(w, http.StatusBadGateway, message)
 		return
@@ -507,6 +571,15 @@ func explainRemoteBackupError(protocol, action string, err error) string {
 		return explainS3BackupError(action, err)
 	}
 	message := err.Error()
+	if protocol == "azure" {
+		if strings.Contains(message, "ContainerNotFound") {
+			return "Azure container does not exist; create it before retrying"
+		}
+		if strings.Contains(message, "HTTP 401") || strings.Contains(message, "HTTP 403") || strings.Contains(message, "AuthenticationFailed") || strings.Contains(message, "AuthorizationFailure") {
+			return "Azure Blob access was denied; check the account key or SAS permissions for the container"
+		}
+		return fmt.Sprintf("Azure Blob %s failed: %s", action, message)
+	}
 	if strings.Contains(message, "no such host") {
 		return strings.ToUpper(protocol) + " host could not be resolved; check the host name and panel-host DNS"
 	}

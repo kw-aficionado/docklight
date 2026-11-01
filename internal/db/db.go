@@ -1768,6 +1768,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 52 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "backup_target_settings", "auth_mode") {
+			if _, err = tx.Exec(`ALTER TABLE backup_target_settings ADD COLUMN auth_mode TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(52)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

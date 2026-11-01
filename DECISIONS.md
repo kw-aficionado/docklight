@@ -306,3 +306,11 @@
 - Require the administrator to enter the SFTP server's SHA-256 host-key fingerprint from an authenticated, out-of-band source. Do not learn trust from the same network connection being verified.
 - Verify the SSH host key before password authentication and fail closed on a mismatch. Expose the public fingerprint in the admin target summary while keeping the existing credential-encryption behavior.
 - Leave upgraded SFTP settings and backup records in place, but treat a legacy target without a pin as unconfigured until an administrator supplies the verified fingerprint. Do not rewrite remote backup rows during migration.
+
+## 2026-11-01: Azure Blob backup target
+
+- Implement Azure Blob with the in-repository REST client so large archive uploads can stream as bounded 16 MiB blocks without buffering the complete object or adding a cloud SDK dependency.
+- Support Shared Key account credentials and SAS tokens; encrypt the account name and secret material at rest, redact both from API responses, and refuse HTTP except for loopback endpoint tests.
+- Use a fixed Blob REST API version, pin endpoint redirects off, and ensure request failures never include the SAS-bearing URL. Accept a custom account endpoint for sovereign clouds and derive the standard Azure endpoint when the field is blank.
+- Lock the account, endpoint, container, and prefix while Azure backup records remain, while allowing credential and authentication-mode rotation. Keep Azure settings in a numbered migration that preserves existing remote-target rows.
+- Keep Azure live-account acceptance separate from request-fixture and fake-store tests; no live account is available in the local environment.

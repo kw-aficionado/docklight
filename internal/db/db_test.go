@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 51 {
-		t.Fatalf("expected 51 migrations, got %d", count)
+	if count != 52 {
+		t.Fatalf("expected 52 migrations, got %d", count)
 	}
 	var logBaselineTable int
 	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='assistant_log_volume_baselines'`).Scan(&logBaselineTable); err != nil || logBaselineTable != 1 {
@@ -127,7 +127,7 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT auto_forward FROM servers WHERE id='legacy-public-server'`).Scan(&autoForward); err != nil || autoForward != 1 {
 		t.Fatalf("UPnP per-server default should be enabled for migrated servers: value=%d err=%v", autoForward, err)
 	}
-	for _, column := range []string{"protocol", "port", "host_key_sha256"} {
+	for _, column := range []string{"protocol", "port", "host_key_sha256", "auth_mode"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_target_settings') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("backup target migration is missing %q: count=%d err=%v", column, found, err)
@@ -319,6 +319,43 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	}
 }
 
+func TestBackupTargetAuthModeMigrationPreservesExistingSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "panel.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,protocol,port,host_key_sha256) VALUES(1,1,'encrypted-endpoint','bucket','region','encrypted-access','encrypted-secret','prefix','s3',0,'')`); err != nil {
+		d.Close()
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`ALTER TABLE backup_target_settings DROP COLUMN auth_mode`); err != nil {
+		d.Close()
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`DELETE FROM schema_migrations WHERE version=52`); err != nil {
+		d.Close()
+		t.Fatal(err)
+	}
+	if err = d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var protocol, endpoint, access, secret, authMode string
+	var enabled int
+	if err = d.QueryRow(`SELECT enabled,protocol,endpoint_enc,access_key_enc,secret_key_enc,auth_mode FROM backup_target_settings WHERE id=1`).Scan(&enabled, &protocol, &endpoint, &access, &secret, &authMode); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 1 || protocol != "s3" || endpoint != "encrypted-endpoint" || access != "encrypted-access" || secret != "encrypted-secret" || authMode != "" {
+		t.Fatalf("auth-mode migration changed the existing target: enabled=%d protocol=%q endpoint=%q access=%q secret=%q mode=%q", enabled, protocol, endpoint, access, secret, authMode)
+	}
+}
+
 func TestBackupTargetHostKeyMigrationPreservesExistingSFTPSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "panel.db")
 	d, err := Open(path)
@@ -333,7 +370,7 @@ func TestBackupTargetHostKeyMigrationPreservesExistingSFTPSettings(t *testing.T)
 		d.Close()
 		t.Fatal(err)
 	}
-	if _, err = d.Exec(`DELETE FROM schema_migrations WHERE version=51`); err != nil {
+	if _, err = d.Exec(`DELETE FROM schema_migrations WHERE version IN (51,52)`); err != nil {
 		d.Close()
 		t.Fatal(err)
 	}

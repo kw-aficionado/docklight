@@ -200,16 +200,16 @@ For remote or hosted MCP clients, the panel needs a publicly reachable HTTPS ori
 | `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. Successful queries refresh the public status page's player sample. |
 | `GET /api/servers/{id}/reachability` | Requires `server.view`; check a running or starting server's allocated game/query port at the effective public host. Results are cached for 30 seconds, and loopback targets are refused. |
 | `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |
-| `GET /api/servers/{id}/backups` | List encrypted backups and their `storage` (`local`, `s3`, `sftp`, or `smb`) without exposing remote object keys; requires `server.backup`. |
-| `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; optional `destination` is `local`, `s3`, `sftp`, or `smb`. Verifies the saved copy before recording it; defaults to local. |
+| `GET /api/servers/{id}/backups` | List encrypted backups and their `storage` (`local`, `s3`, `azure`, `sftp`, or `smb`) without exposing remote object keys; requires `server.backup`. |
+| `POST /api/servers/{id}/backups` | Create a backup while the server is stopped; optional `destination` is `local`, `s3`, `azure`, `sftp`, or `smb`. Verifies the saved copy before recording it; defaults to local. |
 | `POST /api/servers/{id}/backups/prune` | Apply configured retention or a JSON `keep` count from 1 to 100. |
 | `POST /api/servers/{id}/backups/{backupID}/verify` | Verify the checksum, encryption, and archive structure. |
 | `POST /api/servers/{id}/backups/{backupID}/restore` | Restore after verifying; server must be stopped. |
-| `DELETE /api/servers/{id}/backups/{backupID}` | Delete the local file or recorded S3, SFTP, or SMB object and its metadata. |
+| `DELETE /api/servers/{id}/backups/{backupID}` | Delete the local file or recorded S3, Azure Blob, SFTP, or SMB object and its metadata. |
 | `GET /api/backups/target/status` | Authenticated summary with `enabled`, `configured`, and the selected remote `type`. |
-| `GET /api/backups/target` | Admin only; return the redacted remote target summary. S3 returns endpoint, bucket, and region; SFTP/SMB return host and port, SMB also returns share, and SFTP returns its public `host_key_sha256` pin. |
-| `PUT /api/backups/target` | Admin only; configure `type` as `s3`, `sftp`, or `smb`, update the matching host or endpoint and credentials, enable/disable, or clear with `{"clear_target":true}`. An enabled SFTP target requires `host_key_sha256` in `SHA256:…` form, verified out of band; the pin can be rotated without deleting backup records. Secret values are never returned. |
-| `POST /api/backups/target/test` | Admin only; upload and delete a temporary object or file to check the configured remote destination. |
+| `GET /api/backups/target` | Admin only; return the redacted remote target summary. S3 returns endpoint, bucket, and region; Azure returns endpoint, container, and `auth_mode`; SFTP/SMB return host and port, SMB also returns share, and SFTP returns its public `host_key_sha256` pin. Account names and secret values are never returned. |
+| `PUT /api/backups/target` | Admin only; configure `type` as `s3`, `azure`, `sftp`, or `smb`, update the matching host or endpoint and credentials, enable/disable, or clear with `{"clear_target":true}`. Azure accepts `account_name`, `bucket`, optional `endpoint`, `auth_mode` (`key` or `sas`), and `secret_key`. An enabled SFTP target requires `host_key_sha256` in `SHA256:…` form, verified out of band; the pin can be rotated without deleting backup records. Secret values are never returned. |
+| `POST /api/backups/target/test` | Admin only; list the Azure container, then upload, read back, and delete a temporary object or file to check remote access. |
 | `GET /api/message-templates` | List message templates; command bodies are returned only to administrators. |
 | `POST /api/message-templates` | Admin only; create a one-line console-command template. |
 | `PUT /api/message-templates/{id}` | Admin only; edit a custom message template. Built-ins are protected. |

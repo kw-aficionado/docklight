@@ -89,8 +89,8 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	if in.Destination == "" {
 		in.Destination = "local"
 	}
-	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" {
-		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, or smb")
+	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" && in.Destination != "azure" {
+		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, smb, or azure")
 		return
 	}
 	a.dataMu.Lock()
@@ -137,7 +137,7 @@ type backupOperationError struct {
 func (e *backupOperationError) Error() string { return e.message }
 
 func isRemoteBackupStorage(storage string) bool {
-	return storage == "s3" || storage == "sftp" || storage == "smb"
+	return storage == "s3" || storage == "sftp" || storage == "smb" || storage == "azure"
 }
 
 func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupRecord, int, string, error) {
@@ -145,14 +145,14 @@ func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupReco
 	if len(destinations) != 0 && strings.TrimSpace(destinations[0]) != "" {
 		destination = strings.TrimSpace(destinations[0])
 	}
-	if destination == "s3" || destination == "sftp" || destination == "smb" {
+	if isRemoteBackupStorage(destination) {
 		return a.createRemoteBackupSnapshot(s, destination)
 	}
 	fail := func(status int, message string) (backupRecord, int, string, error) {
 		return backupRecord{}, 0, "", &backupOperationError{status: status, message: message}
 	}
 	if destination != "local" {
-		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, or smb")
+		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, or azure")
 	}
 	if pathsOverlap(s.DataDir, a.backupRoot) {
 		return fail(http.StatusConflict, "backup directory overlaps this server's data directory; set backups.path outside the servers directory")
@@ -742,7 +742,7 @@ func (a *App) removeServerBackups(serverID string) error {
 	if !safePathSegment(serverID) {
 		return errors.New("server identifier is invalid; backup cleanup was stopped")
 	}
-	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb') ORDER BY created_at,id`, serverID)
+	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb','azure') ORDER BY created_at,id`, serverID)
 	if err != nil {
 		return errors.New("could not read remote backup records before deleting the server")
 	}
