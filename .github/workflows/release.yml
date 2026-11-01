@@ -16,7 +16,12 @@ jobs:
         with:
           fetch-depth: 0
       - name: Require an annotated tag
-        run: test "$(git cat-file -t "$GITHUB_REF_NAME")" = tag
+        run: |
+          tag_ref="refs/tags/${GITHUB_REF_NAME}"
+          verify_ref="refs/verify-tags/${GITHUB_REF_NAME}"
+          git fetch --no-tags origin "+${tag_ref}:${verify_ref}"
+          test "$(git cat-file -t "${verify_ref}")" = tag
+          test "$(git rev-parse "${verify_ref}^{commit}")" = "$GITHUB_SHA"
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
