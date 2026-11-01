@@ -131,7 +131,7 @@ func TestAssistantProactiveAnomaliesDetectLogVolumeBurstWithoutSavingLogText(t *
 		}
 		return currentBytes, currentBytes / 100, false, nil
 	}
-	start := time.Now().UTC().Truncate(time.Minute)
+	start := time.Now().UTC().Truncate(time.Hour).Add(53 * time.Minute)
 	for i := 0; i < assistantLogVolumeWarmup; i++ {
 		a.scanAssistantProactiveLogVolume(t.Context(), start.Add(time.Duration(i)*time.Minute+time.Second))
 	}

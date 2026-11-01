@@ -423,6 +423,14 @@ func (a *App) scanAssistantProactiveLogVolume(ctx context.Context, now time.Time
 
 		threshold := math.Max(float64(assistantLogVolumeMinBytes), math.Max(mean*8, mean+6*math.Sqrt(math.Max(variance, 0))))
 		if samples >= assistantLogVolumeWarmup && float64(current) >= threshold {
+			var recentEvent int
+			if err = a.db.QueryRowContext(ctx, `SELECT 1 FROM assistant_proactive_events
+				WHERE server_id=? AND event_type='anomalies' AND source_key LIKE 'anomaly:log_volume:%'
+				AND created_at>=datetime('now','-5 minutes') LIMIT 1`, server.id).Scan(&recentEvent); err == nil {
+				continue
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
 			bucket := now.UTC().Format("2006-01-02T15")
 			ratio := 0.0
 			if mean > 0 {
