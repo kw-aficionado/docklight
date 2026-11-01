@@ -1264,6 +1264,33 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 37 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS panel_update_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			auto_enabled INTEGER NOT NULL DEFAULT 0,
+			auto_hour INTEGER NOT NULL DEFAULT 4,
+			last_auto_day TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO panel_update_settings(id) VALUES(1)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(37)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

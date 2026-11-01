@@ -36,13 +36,32 @@ source_dir="${YGG_SOURCE_DIR:-}"
 if [[ -z "$source_dir" && -f "$(pwd)/go.mod" && -d "$(pwd)/cmd/yggdrasil" ]]; then
   source_dir="$(pwd)"
 fi
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+release_repo="${YGG_REPO:-}"
+if [[ -z "$release_repo" && -n "$source_dir" ]]; then
+  remote_url="$(git -C "$source_dir" remote get-url origin 2>/dev/null || true)"
+  remote_path=""
+  case "$remote_url" in
+    https://github.com/*) remote_path="${remote_url#https://github.com/}" ;;
+    git@github.com:*) remote_path="${remote_url#git@github.com:}" ;;
+  esac
+  remote_path="${remote_path%.git}"
+  if [[ "$remote_path" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    release_repo="$remote_path"
+  fi
+fi
+if [[ -n "$release_repo" && ! "$release_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  die "YGG_REPO must be a GitHub owner/repository name"
+fi
 tmp_binary="$(mktemp /tmp/yggdrasil.XXXXXX)"
 checksums_file=""
 trap 'rm -f "$tmp_binary"; [[ -z "$checksums_file" ]] || rm -f "$checksums_file"' EXIT
 if [[ -n "$source_dir" && -f "$source_dir/go.mod" ]]; then
   command -v go >/dev/null 2>&1 || die "Go 1.27 or newer is required when installing from source; provide YGG_BINARY_URL or YGG_REPO instead"
   log "Building Yggdrasil from $source_dir for linux/$arch"
-  (cd "$source_dir" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags='-s -w' -o "$tmp_binary" ./cmd/yggdrasil)
+  ldflags='-s -w'
+  [[ -z "$release_repo" ]] || ldflags+=" -X main.repository=$release_repo"
+  (cd "$source_dir" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="$ldflags" -o "$tmp_binary" ./cmd/yggdrasil)
 elif [[ -n "${YGG_BINARY_FILE:-}" ]]; then
   [[ -f "$YGG_BINARY_FILE" ]] || die "YGG_BINARY_FILE does not exist: $YGG_BINARY_FILE"
   install -m 0755 "$YGG_BINARY_FILE" "$tmp_binary"
@@ -80,6 +99,12 @@ else
 fi
 chmod 0755 "$tmp_binary"
 install -m 0755 "$tmp_binary" /usr/local/bin/yggdrasil
+if [[ -z "$release_repo" ]]; then
+  release_repo="$(/usr/local/bin/yggdrasil release-repo 2>/dev/null || true)"
+fi
+if [[ -n "$release_repo" && ! "$release_repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  release_repo=""
+fi
 
 if ! getent group yggdrasil >/dev/null; then
   groupadd --system yggdrasil
@@ -95,6 +120,19 @@ fi
 usermod -aG docker yggdrasil
 install -d -o yggdrasil -g yggdrasil -m 0750 /var/lib/yggdrasil
 install -d -o root -g yggdrasil -m 0750 /etc/yggdrasil
+
+if [[ -x "$script_dir/deploy/yggdrasil-update" && -f "$script_dir/deploy/yggdrasil-update.service" && -f "$script_dir/deploy/yggdrasil-update.path" ]]; then
+  install -o root -g root -m 0755 "$script_dir/deploy/yggdrasil-update" /usr/local/bin/yggdrasil-update
+  install -o root -g root -m 0644 "$script_dir/deploy/yggdrasil-update.service" /etc/systemd/system/yggdrasil-update.service
+  install -o root -g root -m 0644 "$script_dir/deploy/yggdrasil-update.path" /etc/systemd/system/yggdrasil-update.path
+  if [[ -n "$release_repo" ]]; then
+    printf 'YGG_REPO=%s\n' "$release_repo" >/etc/yggdrasil/update.conf
+    chown root:root /etc/yggdrasil/update.conf
+    chmod 0644 /etc/yggdrasil/update.conf
+  fi
+else
+  log "Self-update helper assets are absent; panel self-update will remain unavailable."
+fi
 
 first_install=0
 bootstrap_output=""
@@ -138,6 +176,9 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable yggdrasil.service
+if [[ -x /usr/local/bin/yggdrasil-update && -f /etc/systemd/system/yggdrasil-update.path ]]; then
+  systemctl enable --now yggdrasil-update.path
+fi
 
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [[ -n "$ip" ]] || ip="<server-ip>"

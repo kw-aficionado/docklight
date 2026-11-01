@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+request_file=/var/lib/yggdrasil/.update-request
+status_file=/var/lib/yggdrasil/.update-status
+binary=/usr/local/bin/yggdrasil
+repo="${YGG_REPO:-}"
+tmp_binary=""
+tmp_sums=""
+rollback=""
+candidate=""
+
+write_status() {
+  local state="$1" tag="$2" message="$3" at tmp
+  at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  tmp="$(mktemp /var/lib/yggdrasil/.update-status.XXXXXX)" || return 1
+  printf '{"state":"%s","tag":"%s","message":"%s","at":"%s"}\n' "$state" "$tag" "$message" "$at" >"$tmp" || { rm -f "$tmp"; return 1; }
+  chown yggdrasil:yggdrasil "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod 0640 "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$status_file"
+}
+
+cleanup() {
+  [[ -z "$tmp_binary" ]] || rm -f "$tmp_binary"
+  [[ -z "$tmp_sums" ]] || rm -f "$tmp_sums"
+  [[ -z "$rollback" ]] || rm -f "$rollback"
+  [[ -z "$candidate" ]] || rm -f "$candidate"
+}
+trap cleanup EXIT
+
+fail() {
+  local code="$1" tag="$2" message="$3"
+  write_status error "$tag" "$message" || true
+  exit "$code"
+}
+
+if [[ "$EUID" -ne 0 ]]; then
+  exit 1
+fi
+[[ -e "$request_file" || -L "$request_file" ]] || exit 0
+if [[ -L "$request_file" || ! -f "$request_file" ]]; then
+  rm -f -- "$request_file" || true
+  fail 2 "" "The update request is not a regular file."
+fi
+request_size="$(stat -c '%s' -- "$request_file" 2>/dev/null || true)"
+if [[ ! "$request_size" =~ ^[0-9]+$ || "$request_size" -gt 64 ]]; then
+  rm -f -- "$request_file" || true
+  fail 2 "" "The update request is too large."
+fi
+
+requested=""
+IFS= read -r requested <"$request_file" || true
+tag="$requested"
+if ! rm -f -- "$request_file"; then
+  fail 4 "$tag" "The update request could not be removed."
+fi
+
+if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  tag="${tag//[^A-Za-z0-9_.-]/}"
+  tag="${tag:0:64}"
+  fail 2 "$tag" "The requested release tag is invalid."
+fi
+if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  fail 4 "$tag" "The GitHub release repository is not configured."
+fi
+
+case "$(uname -m)" in
+  x86_64|amd64) arch=amd64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  *) fail 3 "$tag" "This system architecture is not supported by the release updater." ;;
+esac
+
+current_output="$("$binary" version 2>/dev/null)" || fail 6 "$tag" "The installed panel binary did not pass its version check."
+current_tag="${current_output#yggdrasil }"
+if [[ "$current_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  lowest="$(printf '%s\n%s\n' "$current_tag" "$tag" | sort -V | head -n1)"
+  if [[ "$tag" == "$current_tag" || "$lowest" != "$current_tag" ]]; then
+    write_status done "$tag" "Skipped the request because it is not newer than the installed release."
+    exit 0
+  fi
+fi
+
+write_status running "$tag" "Downloading and verifying the official release."
+tmp_binary="$(mktemp /tmp/yggdrasil-update.XXXXXX)" || fail 4 "$tag" "Could not create a temporary binary file."
+tmp_sums="$(mktemp /tmp/yggdrasil-sums.XXXXXX)" || fail 4 "$tag" "Could not create a temporary checksum file."
+release="https://github.com/${repo}/releases/download/${tag}"
+if ! curl --proto '=https' --proto-redir '=https' --max-filesize 268435456 -fL --retry 3 --connect-timeout 15 --max-time 180 "$release/yggdrasil-linux-${arch}" -o "$tmp_binary"; then
+  fail 4 "$tag" "The release binary could not be downloaded."
+fi
+if ! curl --proto '=https' --proto-redir '=https' --max-filesize 1048576 -fL --retry 3 --connect-timeout 15 --max-time 60 "$release/SHA256SUMS" -o "$tmp_sums"; then
+  fail 4 "$tag" "The release checksums could not be downloaded."
+fi
+expected="$(awk -v file="yggdrasil-linux-${arch}" '$2 == file {print $1}' "$tmp_sums" | head -n1)"
+if [[ ! "$expected" =~ ^[A-Fa-f0-9]{64}$ ]] || ! printf '%s  %s\n' "$expected" "$tmp_binary" | sha256sum --check --status; then
+  fail 5 "$tag" "The downloaded release failed its SHA-256 check."
+fi
+if ! chmod 0755 "$tmp_binary" || ! output="$("$tmp_binary" --version 2>/dev/null)" || [[ "$output" != "yggdrasil $tag" ]]; then
+  fail 6 "$tag" "The downloaded binary did not pass its version check."
+fi
+
+rollback="$(mktemp /usr/local/bin/.yggdrasil-rollback.XXXXXX)" || fail 6 "$tag" "Could not prepare a rollback copy."
+if ! cp -p "$binary" "$rollback"; then
+  fail 6 "$tag" "Could not save the current binary for rollback."
+fi
+candidate="$(mktemp /usr/local/bin/.yggdrasil-update.XXXXXX)" || fail 6 "$tag" "Could not prepare the new binary for atomic installation."
+if ! install -m 0755 "$tmp_binary" "$candidate" || ! mv -f "$candidate" "$binary"; then
+  fail 6 "$tag" "The verified release could not be installed."
+fi
+candidate=""
+if ! systemctl restart yggdrasil.service; then
+  candidate="$(mktemp /usr/local/bin/.yggdrasil-rollback.XXXXXX)" || fail 7 "$tag" "The service restart failed and a rollback candidate could not be created."
+  if install -m 0755 "$rollback" "$candidate" && mv -f "$candidate" "$binary"; then
+    candidate=""
+  fi
+  if [[ -z "$candidate" ]] && systemctl restart yggdrasil.service; then
+    fail 7 "$tag" "The service restart failed; the previous binary was restored."
+  fi
+  fail 7 "$tag" "The service restart failed and automatic rollback could not restore service health."
+fi
+write_status done "$tag" "The verified release was installed and the panel restarted."

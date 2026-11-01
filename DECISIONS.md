@@ -195,3 +195,11 @@
 - Use `https://beacon.docklight.app/api/beacon` as the Docklight-branded default collector instead of the original Yggdrasil domain in the brief. The collector stores instance ID, version, timestamps, and a ping count; it does not persist source IP addresses.
 - Keep collection and publication independent: the receiver is off by default, and the public count is a second opt-in with a minimum population threshold. Do not ship panel analytics.
 - Schedule the first check 30 seconds after startup and subsequent checks every 30 minutes. Record a day only after a successful response, retry failures, and bypass the daily limit only when a build version changes or an administrator explicitly opts back in.
+
+## 2026-11-01: Docklight panel self-update
+
+- Keep privilege separation explicit: the sandboxed panel may create one validated version request in the standard data directory, while a dedicated root oneshot performs network retrieval, checksum/version validation, installation, and service restart.
+- Embed the GitHub repository into official release builds and allow `YGG_REPO` or a GitHub source remote to configure an installation. Do not infer a repository from an arbitrary binary URL.
+- Restrict requests to strictly newer stable `vX.Y.Z` tags. Follow only HTTPS redirects to GitHub release assets, verify the release `SHA256SUMS`, and run the downloaded binary's `--version` before replacing the installed binary.
+- Save a rollback copy before installation and attempt to restore and restart it if the new panel fails to restart. Keep atomic status for the admin UI and make automatic updates opt-in, host-local-hour based, and limited to one queue per day.
+- The current source checkout has no GitHub release owner configured, and no Debian/Ubuntu systemd host was available for live updater acceptance.

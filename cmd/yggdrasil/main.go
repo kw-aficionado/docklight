@@ -22,6 +22,7 @@ import (
 )
 
 var version = "dev"
+var repository = ""
 
 const defaultConfig = "/etc/yggdrasil/config.yaml"
 
@@ -40,6 +41,9 @@ func run(args []string) error {
 	switch command {
 	case "version", "--version", "-v":
 		fmt.Printf("yggdrasil %s\n", version)
+		return nil
+	case "release-repo":
+		fmt.Println(repository)
 		return nil
 	case "help", "-h", "--help":
 		usage()
@@ -72,6 +76,7 @@ func usage() {
 Usage:
   yggdrasil [--config PATH] [serve]
   yggdrasil version
+  yggdrasil release-repo
   yggdrasil gen-config [PATH]
   yggdrasil reset-password USER [--config PATH] [--password VALUE]
   yggdrasil reset-2fa USER [--config PATH]
@@ -135,6 +140,7 @@ func serve(args []string) error {
 	}
 	app := panel.New(c, path, d)
 	app.SetBuildVersion(version)
+	app.SetReleaseRepository(repository)
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	app.StartScheduleWorker(workerCtx)
@@ -145,6 +151,7 @@ func serve(args []string) error {
 	app.StartDiskMonitor(workerCtx)
 	app.StartWatchdogMonitor(workerCtx)
 	app.StartBeaconWorker(workerCtx)
+	app.StartPanelUpdateWorker(workerCtx)
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	errs := make(chan error, 1)

@@ -112,6 +112,12 @@ The sender transmits exactly a random per-installation UUID and the Docklight bu
 
 The same binary can receive beacons when its separate receiver switch is enabled. It upserts by instance ID and stores version, first/last seen, and ping count; it does not store request IP addresses. Public count is an independent opt-in, defaults off, and returns `null` below its configurable minimum of 25. The admin Beacon page shows collector totals, activity, and active versions. The default receiver URL follows Docklight's `docklight.app` domain. Build and JavaScript syntax checks passed; no tests, live collector or visual browser acceptance were run in this slice.
 
+## Phase 3 panel self-update
+
+The admin Panel updates screen checks the configured GitHub repository for the latest stable `vX.Y.Z` release, shows current/update state and the last helper status, and provides manual release checks and queueing. A release build embeds its owner/repository; the installer can also set `YGG_REPO` or detect the GitHub origin for a source checkout. The sandboxed panel writes only a validated tag request into `/var/lib/yggdrasil/.update-request`; an independent root systemd path unit starts the oneshot helper. The helper accepts only strictly newer stable tags, downloads the architecture-matched official GitHub release asset and `SHA256SUMS` over HTTPS, verifies SHA-256 and `--version`, saves a rollback binary, installs, restarts, and records an atomic status file. Restart failure attempts rollback and reports whether service health was recovered.
+
+Automatic panel updates default off. Admins can opt in and select a host-local hour; the panel checks every 20 minutes and queues at most one release per day. Game containers continue running. Version and admin update APIs are documented in [the API reference](docs/api.md), and installation behavior is in [the updates guide](docs/guides/updates.md). Go build, JavaScript syntax, installer/updater shell syntax, and whitespace checks passed; no tests or live GitHub/systemd host acceptance were run. A release owner is still unconfigured in this source checkout, so a normal source install does not enable self-update unless `YGG_REPO` or a GitHub origin is supplied.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -148,7 +154,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: self-update and cross-server ban automation.
+- Phase 3: cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

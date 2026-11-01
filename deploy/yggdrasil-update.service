@@ -1,0 +1,19 @@
+[Unit]
+Description=Install a verified Docklight panel release
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+TimeoutStartSec=20min
+EnvironmentFile=-/etc/yggdrasil/update.conf
+ExecStart=/usr/local/bin/yggdrasil-update
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/usr/local/bin /var/lib/yggdrasil
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0027

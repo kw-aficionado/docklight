@@ -32,6 +32,7 @@ type App struct {
 	db                    *sql.DB
 	engine                *docker.Engine
 	dataRoot              string
+	updateDir             string
 	backupRoot            string
 	backupStoreFactory    func(backupTargetConfig) (backupObjectStore, error)
 	booted                time.Time
@@ -64,6 +65,10 @@ type App struct {
 	statusCache           []byte
 	statusCacheUntil      time.Time
 	version               string
+	releaseRepo           string
+	releaseMu             sync.Mutex
+	releaseCache          releaseCacheEntry
+	updateRequestMu       sync.Mutex
 	beaconSendMu          sync.Mutex
 	beaconMu              sync.Mutex
 	beaconCountCache      *beaconCountResponse
@@ -132,7 +137,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}}
 }
 
 func (a *App) SetBuildVersion(version string) {
@@ -216,9 +221,7 @@ func (a *App) Router() http.Handler {
 		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]string{"status": "ok", "version": a.version})
 		})
-		api.Get("/version", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, 200, map[string]any{"version": a.version, "panel_name": "Docklight"})
-		})
+		api.Get("/version", a.getVersionInfo)
 		api.Post("/login", a.login)
 		api.Post("/auth/login", a.login)
 		api.Post("/auth/forgot", a.forgotPassword)
@@ -321,6 +324,11 @@ func (a *App) Router() http.Handler {
 			priv.Post("/settings/beacon/notice", a.admin(a.ackBeaconNotice))
 			priv.Post("/settings/beacon/test", a.admin(a.testBeacon))
 			priv.Get("/beacon/stats", a.admin(a.beaconStats))
+			priv.Get("/system/update-status", a.admin(a.getPanelUpdateStatus))
+			priv.Post("/system/update", a.admin(a.requestPanelUpdateHandler))
+			priv.Post("/system/check-update", a.admin(a.checkPanelUpdateNow))
+			priv.Get("/system/auto-update", a.admin(a.getAutoUpdateSettings))
+			priv.Put("/system/auto-update", a.admin(a.updateAutoUpdateSettings))
 			priv.Get("/settings/network", a.getNetworkSettings)
 			priv.Put("/settings/network", a.admin(a.updateNetworkSettings))
 			priv.Get("/settings/upnp", a.admin(a.getUPnPSettings))

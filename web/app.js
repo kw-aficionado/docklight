@@ -3,7 +3,7 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
 (() => {
   const app = document.querySelector('#app');
   const toastRegion = document.querySelector('#toast-region');
-  let state = { user: null, servers: [], runes: [], realms: [], selected: null, route: 'servers', stats: null, socket: null, filePath: '', fileRows: [], users: [], beaconNoticeChecked: false };
+  let state = { user: null, servers: [], runes: [], realms: [], selected: null, route: 'servers', stats: null, socket: null, filePath: '', fileRows: [], users: [], beaconNoticeChecked: false, releaseInfo: null };
   const icon = (name) => ({ grid:'▦', server:'◉', rune:'▤', storage:'▥', user:'♙', log:'⌘', notify:'◈', status:'◉', folder:'▱', plus:'+', close:'×', settings:'⚙', moon:'◐', sun:'☼', arrow:'↗', play:'▶', stop:'■', rotate:'↻', trash:'⌫', download:'↓', upload:'↑', refresh:'⟳', shield:'◇', check:'✓', warn:'!' }[name] || '•');
   const api = async (path, options = {}) => {
     const headers = new Headers(options.headers || {});
@@ -45,7 +45,7 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
 
   async function boot() {
     if (new URLSearchParams(location.search).has('reset')) { renderLogin(); return; }
-    try { state.user = await api('/api/me'); await refresh(); render(); maybeShowBeaconNotice(); }
+    try { state.user = await api('/api/me'); await refresh(); render(); maybeShowBeaconNotice(); loadReleaseNotice(); }
     catch { renderLogin(); }
   }
   async function refresh() {
@@ -77,7 +77,7 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
     document.querySelectorAll('[data-login-back]').forEach(button => button.onclick = showLogin);
     loginForm.addEventListener('submit', async (e) => {
       e.preventDefault(); const data = Object.fromEntries(new FormData(e.currentTarget)); const error = document.querySelector('#login-error'); error.textContent = '';
-      try { const out = await api('/api/login', {method:'POST',body:JSON.stringify(data)}); state.user = out.user; await refresh(); render(); maybeShowBeaconNotice(); }
+      try { const out = await api('/api/login', {method:'POST',body:JSON.stringify(data)}); state.user = out.user; await refresh(); render(); maybeShowBeaconNotice(); loadReleaseNotice(); }
       catch (err) { error.textContent = err.message; if (/authenticator|six-digit|code/i.test(err.message)) { document.querySelector('#totp-row').classList.remove('hidden'); document.querySelector('[name="totp"]').focus(); } }
     });
     passkeyButton.addEventListener('click', async () => {
@@ -87,7 +87,7 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
         const assertion = await navigator.credentials.get({publicKey:credentialRequestOptions(begin.options)});
         if (!assertion) throw new Error('Passkey sign-in was canceled.');
         const out = await api('/api/auth/passkey/login/finish', {method:'POST',body:JSON.stringify({session_id:begin.session_id,credential:credentialJSON(assertion)})});
-        state.user = out.user; await refresh(); render(); maybeShowBeaconNotice();
+        state.user = out.user; await refresh(); render(); maybeShowBeaconNotice(); loadReleaseNotice();
       } catch (err) { error.textContent = err.name === 'NotAllowedError' ? 'Passkey sign-in was canceled or did not finish.' : err.message; }
     });
     forgotForm.addEventListener('submit', async event => {
@@ -122,17 +122,31 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
       layer.querySelector('#beacon-keep-on').onclick=()=>choose(true);
     }catch(err){state.beaconNoticeChecked=false;toast(`Beacon disclosure could not be loaded: ${err.message}`,'error')}
   }
+  async function loadReleaseNotice(){
+    if(state.user?.role!=='admin')return;
+    try{state.releaseInfo=await api('/api/version');mountUpdateBanner(state.releaseInfo)}catch{}
+  }
+  function mountUpdateBanner(info){
+    document.querySelector('#panel-update-banner')?.remove();
+    if(!info?.update_available||state.user?.role!=='admin'||state.route==='updates')return;
+    const banner=document.createElement('section');banner.id='panel-update-banner';banner.className='panel-update-banner';
+    banner.innerHTML=`<span class="update-spark">↗</span><div><b>Docklight ${esc(info.latest_release)} is ready</b><small>Review the release before installing it.</small></div><button class="button subtle" type="button">Panel updates</button>`;
+    banner.querySelector('button').onclick=()=>{state.selected=null;state.route='updates';render()};
+    document.querySelector('#view')?.before(banner);
+  }
   function render() {
     if (!state.user) return renderLogin();
     const active = state.selected;
     app.innerHTML = `<div class="layout"><aside class="sidebar"><a href="#" class="brand-lockup" data-action="home"><img class="brand-logo" src="/brand.svg" alt=""><span>Docklight</span></a><div class="side-label">PANEL</div><button class="nav-item ${!active&&state.route==='servers'?'active':''}" data-action="home"><span>${icon('grid')}</span><span>Servers</span><b>${state.servers.length}</b></button><button class="nav-item ${!active&&state.route==='runes'?'active':''}" data-action="runes"><span>${icon('rune')}</span><span>Templates</span></button><button class="nav-item ${!active&&state.route==='domains'?'active':''}" data-action="domains"><span>${icon('status')}</span><span>Domains</span></button>${state.user.role==='admin'?`<div class="side-label side-spacer">MANAGE</div><button class="nav-item ${!active&&state.route==='realms'?'active':''}" data-action="realms"><span>${icon('server')}</span><span>Realms</span></button><button class="nav-item ${!active&&state.route==='schedules'?'active':''}" data-action="schedules"><span>${icon('rotate')}</span><span>Schedules</span></button><button class="nav-item ${!active&&state.route==='storage'?'active':''}" data-action="storage"><span>${icon('storage')}</span><span>Backup storage</span></button><button class="nav-item ${!active&&state.route==='status'?'active':''}" data-action="status"><span>${icon('status')}</span><span>Public status</span></button><button class="nav-item ${state.route==='users'?'active':''}" data-action="users"><span>${icon('user')}</span><span>Users & access</span></button><button class="nav-item ${state.route==='audit'?'active':''}" data-action="audit"><span>${icon('log')}</span><span>Audit history</span></button><button class="nav-item ${state.route==='notifications'?'active':''}" data-action="notifications"><span>${icon('notify')}</span><span>Notifications</span></button>`:''}<div class="sidebar-bottom"><div class="instance-card"><span class="dot green"></span><span><b>Panel online</b><small>Single host</small></span><span class="instance-menu">···</span></div><button class="profile" data-action="profile"><span class="avatar">${esc(state.user.username[0]?.toUpperCase())}</span><span><b>${esc(state.user.username)}</b><small>${state.user.role==='admin'?'Administrator':'Panel user'}</small></span><span class="more">⌄</span></button></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs"><span>Panel</span><span class="crumb-sep">/</span><b>${active?esc(active.name):esc(state.route==='users'?'Users & access':state.route==='audit'?'Audit history':state.route==='notifications'?'Notifications':state.route==='storage'?'Backup storage':state.route==='status'?'Public status':state.route==='domains'?'Domains':state.route==='realms'?'Realms':state.route==='schedules'?'Schedules':state.route==='beacon'?'Beacon':state.route==='runes'?'Templates':'Servers')}</b></div><div class="top-actions"><button class="icon-button theme-toggle" title="Toggle light or dark theme" data-action="theme">${icon('moon')}</button><span class="top-divider"></span><button class="user-chip" data-action="profile"><span class="avatar small">${esc(state.user.username[0]?.toUpperCase())}</span><span>${esc(state.user.username)}</span><span class="chevron">⌄</span></button></div></header><div class="content" id="view"></div></main></div>`;
-    if (active) renderDetail(active); else if (state.route==='users') renderUsers(); else if (state.route==='audit') renderAudit(); else if (state.route==='notifications') renderNotifications(); else if (state.route==='storage'&&state.user.role==='admin') renderBackupStorage(); else if (state.route==='status'&&state.user.role==='admin') renderPublicStatusSettings(); else if (state.route==='network'&&state.user.role==='admin') renderNetworkSettings(); else if (state.route==='blocks'&&state.user.role==='admin') renderIPBlocks(); else if(state.route==='beacon'&&state.user.role==='admin')renderBeaconSettings();else if (state.route==='domains') renderDomains(); else if (state.route==='realms'&&state.user.role==='admin') renderRealms(); else if (state.route==='schedules'&&state.user.role==='admin') renderAdminSchedules(); else if (state.route==='runes') renderRunes(); else renderServers();
+    if (active) renderDetail(active); else if (state.route==='users') renderUsers(); else if (state.route==='audit') renderAudit(); else if (state.route==='notifications') renderNotifications(); else if (state.route==='storage'&&state.user.role==='admin') renderBackupStorage(); else if (state.route==='status'&&state.user.role==='admin') renderPublicStatusSettings(); else if (state.route==='network'&&state.user.role==='admin') renderNetworkSettings(); else if (state.route==='blocks'&&state.user.role==='admin') renderIPBlocks(); else if(state.route==='beacon'&&state.user.role==='admin')renderBeaconSettings();else if(state.route==='updates'&&state.user.role==='admin')renderPanelUpdates();else if (state.route==='domains') renderDomains(); else if (state.route==='realms'&&state.user.role==='admin') renderRealms(); else if (state.route==='schedules'&&state.user.role==='admin') renderAdminSchedules(); else if (state.route==='runes') renderRunes(); else renderServers();
     bindShell();
+    mountUpdateBanner(state.releaseInfo);
   }
   function bindShell() {
     if(state.user?.role==='admin'&&!document.querySelector('[data-action="network"]')){const statusLink=document.querySelector('[data-action="status"]');if(statusLink){const networkLink=document.createElement('button');networkLink.className=`nav-item ${!state.selected&&state.route==='network'?'active':''}`;networkLink.dataset.action='network';networkLink.innerHTML=`<span>${icon('status')}</span><span>Network</span>`;statusLink.after(networkLink)}}
     if(state.user?.role==='admin'&&!document.querySelector('[data-action="blocks"]')){const networkLink=document.querySelector('[data-action="network"]');if(networkLink){const blocksLink=document.createElement('button');blocksLink.className=`nav-item ${!state.selected&&state.route==='blocks'?'active':''}`;blocksLink.dataset.action='blocks';blocksLink.innerHTML=`<span>${icon('log')}</span><span>IP blocking</span>`;networkLink.after(blocksLink)}}
     if(state.user?.role==='admin'&&!document.querySelector('[data-action="beacon"]')){const blocksLink=document.querySelector('[data-action="blocks"]');if(blocksLink){const beaconLink=document.createElement('button');beaconLink.className=`nav-item ${!state.selected&&state.route==='beacon'?'active':''}`;beaconLink.dataset.action='beacon';beaconLink.innerHTML=`<span>${icon('notify')}</span><span>Beacon</span>`;blocksLink.after(beaconLink)}}
+    if(state.user?.role==='admin'&&!document.querySelector('[data-action="updates"]')){const beaconLink=document.querySelector('[data-action="beacon"]');if(beaconLink){const updatesLink=document.createElement('button');updatesLink.className=`nav-item ${!state.selected&&state.route==='updates'?'active':''}`;updatesLink.dataset.action='updates';updatesLink.innerHTML=`<span>${icon('refresh')}</span><span>Panel updates</span>`;beaconLink.after(updatesLink)}}
     document.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', async (e) => { e.preventDefault(); const action=el.dataset.action;
       if(action==='home'){state.selected=null;state.route='servers';await refresh();render();}
       if(action==='runes'){state.selected=null;state.route='runes';render();}
@@ -145,6 +159,7 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
       if(action==='network'&&state.user.role==='admin'){state.selected=null;state.route='network';render();}
       if(action==='blocks'&&state.user.role==='admin'){state.selected=null;state.route='blocks';render();}
       if(action==='beacon'&&state.user.role==='admin'){state.selected=null;state.route='beacon';render();}
+      if(action==='updates'&&state.user.role==='admin'){state.selected=null;state.route='updates';render();}
       if(action==='realms'&&state.user.role==='admin'){state.selected=null;state.route='realms';render();}
       if(action==='schedules'&&state.user.role==='admin'){state.selected=null;state.route='schedules';render();}
       if(action==='profile') showProfile();
@@ -266,6 +281,30 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
       await drawStats(settings);
     };
     try{await load()}catch(err){configCard.innerHTML=`<div class="files-empty error-text">${esc(err.message)}</div>`;statsCard.innerHTML='<div class="files-empty">Collector statistics are unavailable.</div>'}
+  }
+
+  async function renderPanelUpdates(){
+    const view=document.querySelector('#view');
+    const breadcrumb=document.querySelector('.breadcrumbs b');if(breadcrumb)breadcrumb.textContent='Panel updates';
+    view.innerHTML='<div class="page-heading"><div><div class="eyebrow">DOCKLIGHT RELEASES</div><h1>Panel updates</h1><p>Check official releases and choose whether this host may update the panel automatically.</p></div></div><div class="panel-updates-grid"><section class="panel-card" id="panel-release-card"><div class="files-empty">Checking the official release…</div></section><section class="panel-card" id="panel-auto-update-card"><div class="files-empty">Loading update schedule…</div></section></div>';
+    const releaseCard=view.querySelector('#panel-release-card'),autoCard=view.querySelector('#panel-auto-update-card');
+    const dateLabel=value=>{if(!value)return 'Not run yet';const date=new Date(value);return Number.isNaN(date.getTime())?esc(value):esc(date.toLocaleString())};
+    const load=async()=>{
+      const [info,status,auto]=await Promise.all([api('/api/version'),api('/api/system/update-status'),api('/api/system/auto-update')]);
+      state.releaseInfo=info;mountUpdateBanner(info);
+      const stateTone={idle:'muted',running:'warn',done:'good',error:'bad'}[status.state]||'muted';
+      const updateState=status.state==='idle'?'No update has run':status.state==='running'?`Installing ${status.tag}`:status.state==='done'?`Last update · ${status.tag}`:`Update failed · ${status.tag}`;
+      const isReleaseBuild=/^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/.test(info.version||'');
+      releaseCard.innerHTML=`<div class="panel-head"><div><h2>Release status</h2><p>${info.update_available?`Docklight ${esc(info.latest_release)} is newer than this build.`:info.update_error?'GitHub release information is unavailable.':'This build is current.'}</p></div><span class="status-badge ${info.update_available?'warn':'good'}"><i></i>${info.update_available?'UPDATE AVAILABLE':info.update_error?'CHECK FAILED':'UP TO DATE'}</span></div><div class="release-facts"><div><span>Installed build</span><b>${esc(info.version||'unknown')}</b></div><div><span>Latest stable release</span><b>${esc(info.latest_release||'Unavailable')}</b></div><div><span>Release repository</span><b>${esc(info.repo||'Not configured')}</b></div></div>${info.update_error?`<p class="error-text">${esc(info.update_error)}</p>`:''}<div class="update-status-box"><div class="panel-head"><div><h3>Last update</h3><p>${esc(status.message||'')}</p></div><span class="status-badge ${stateTone}"><i></i>${esc(updateState)}</span></div>${status.at?`<small>${dateLabel(status.at)}</small>`:''}</div>${!info.self_update_possible?`<div class="update-manual"><b>Automatic installation is unavailable</b><p>${esc(info.self_update_reason||'This installation does not include the updater helper.')} Install manually from a trusted checkout or official release. An installer run can add the systemd updater when a GitHub repository is configured.</p></div>`:''}${info.update_available&&info.self_update_possible?'':'<div class="form-error" role="status" id="release-message"></div>'}<div class="form-actions"><button class="button subtle" type="button" id="check-panel-update">Check now</button><button class="button primary" type="button" id="install-panel-update" ${info.update_available&&info.self_update_possible?'':'disabled'}>Install ${esc(info.latest_release||'update')}</button><button class="button subtle" type="button" id="refresh-update-status">Refresh status</button></div>`;
+      if(!info.update_available){const summary=releaseCard.querySelector('.panel-head p'),badge=releaseCard.querySelector('.panel-head .status-badge');if(info.update_error){badge.className='status-badge bad';badge.innerHTML='<i></i>CHECK FAILED'}else if(!isReleaseBuild){if(summary)summary.textContent='This development build is not tied to a release tag.';badge.className='status-badge muted';badge.innerHTML='<i></i>DEVELOPMENT BUILD'}}
+      autoCard.innerHTML=`<div class="panel-head"><div><h2>Automatic updates</h2><p>When enabled, Docklight checks every 20 minutes and queues an update after this host’s chosen hour.</p></div><span class="status-badge ${auto.enabled?'good':'muted'}"><i></i>${auto.enabled?'ON':'OFF'}</span></div><form id="auto-update-form"><label class="checkline"><input type="checkbox" name="enabled" ${auto.enabled?'checked':''}>Allow automatic panel updates</label><label>Update after local hour<input name="hour" type="number" min="0" max="23" value="${auto.hour??4}"><small>Uses this server’s local time. It queues at most one release per day; game containers remain running.</small></label><div class="network-fact"><span>Last automatic queue</span><b>${esc(auto.last_auto_day||'Not queued')}</b></div><div id="auto-update-error" class="form-error" role="alert"></div><div class="form-actions"><button class="button primary" type="submit">Save auto-update settings</button></div></form><p class="muted-copy">Automatic updates are opt-in. A release must be newer, use a stable <code>vX.Y.Z</code> tag, and pass the helper’s SHA-256 and binary checks before installation.</p>`;
+      releaseCard.querySelector('#check-panel-update').onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{await api('/api/system/check-update',{method:'POST',body:'{}'});toast('Official release check complete','success');await load()}catch(err){const message=releaseCard.querySelector('#release-message');if(message)message.textContent=err.message;toast(err.message,'error')}finally{button.disabled=false}};
+      releaseCard.querySelector('#refresh-update-status').onclick=async event=>{event.currentTarget.disabled=true;try{await load()}catch(err){toast(err.message,'error')}finally{event.currentTarget.disabled=false}};
+      releaseCard.querySelector('#install-panel-update').onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{const queued=await api('/api/system/update',{method:'POST',body:'{}'});const statusBox=releaseCard.querySelector('.update-status-box .panel-head p');if(statusBox)statusBox.textContent=queued.message;toast('Verified release update queued','success');setTimeout(()=>load().catch(()=>{}),3000)}catch(err){button.disabled=false;toast(err.message,'error')}};
+      const form=autoCard.querySelector('#auto-update-form'),error=form.querySelector('#auto-update-error');
+      form.onsubmit=async event=>{event.preventDefault();const submit=form.querySelector('[type="submit"]');submit.disabled=true;error.textContent='';try{await api('/api/system/auto-update',{method:'PUT',body:JSON.stringify({enabled:form.elements.enabled.checked,hour:Number(form.elements.hour.value)})});toast('Automatic update settings saved','success');await load()}catch(err){error.textContent=err.message}finally{submit.disabled=false}};
+    };
+    try{await load()}catch(err){releaseCard.innerHTML=`<div class="files-empty error-text">${esc(err.message)}</div>`;autoCard.innerHTML='<div class="files-empty">Automatic update settings are unavailable.</div>'}
   }
 
   async function renderNetworkSettings(){

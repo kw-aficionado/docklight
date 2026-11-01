@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p dist
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/yggdrasil-linux-${arch}" ./cmd/yggdrasil
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME} -X main.repository=${GITHUB_REPOSITORY}" -o "dist/yggdrasil-linux-${arch}" ./cmd/yggdrasil
           done
           (cd dist && sha256sum yggdrasil-linux-amd64 yggdrasil-linux-arm64 > SHA256SUMS)
       - name: Publish release
