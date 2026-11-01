@@ -179,7 +179,7 @@
 - Prefer a zone-scoped Cloudflare IP Access Rule and use its note as Docklight ownership proof. Never delete a rule solely because its IP matches; require the Docklight marker and verify the saved address and `block` mode. Reject pre-existing foreign IP rules instead of claiming them.
 - Make host nftables opt-in and bind it to the Docklight-marked `inet yggdrasil` table only. Drop web ingress TCP 80/443 without touching SSH or game ports; require explicit `CAP_NET_ADMIN`, and refuse an unmarked existing table.
 - Keep expiration and external state in SQLite and reconcile at startup and every minute. Persist pending Cloudflare intent before API creation so a timeout can be recovered by ownership note rather than creating duplicates.
-- The `off`/`propose`/`auto` mode is reserved for the planned Kvasir workflow; manual blocks are the only source implemented here. No Cloudflare account or privileged host-firewall acceptance was available.
+- The `off`/`propose`/`auto` mode is reserved for future Assistant workflows; manual blocks are the only source implemented here. No Cloudflare account or privileged host-firewall acceptance was available.
 
 ## 2026-11-01: additional server hostnames
 
@@ -238,3 +238,10 @@
 - Use the `meta.cpp` name when present, sanitize it into a mission directory, preserve the path inside the mod folder, and flag Expansion by its displayed name or folder token without preventing import.
 - Copy into the mission and register through `cfgeconomycore.xml`; persist source/target mappings with Economy settings. During successful install/update recovery, restore only missing copies before rewriting registrations, globals, and the lifetime floor. Reset removes saved automation only and does not delete imported mission files.
 - No built-in DayZ Rune or live DayZ acceptance is available. This implementation is bounded to compatible templates and the mod content already installed by their Rune.
+
+## 2026-11-01: Docklight Assistant provider setup
+
+- Use **Assistant** as the neutral, international product label. Keep provider setup administrator-only and the feature off by default until chat, scopes, data controls, and action confirmations are implemented.
+- Support Anthropic Messages and OpenAI-compatible endpoints for OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, and custom providers. Store keys encrypted with the panel secret and return only a configured flag and fixed mask.
+- Let administrators test saved settings while Assistant is off. Send one fixed prompt without panel context, discard the model response, avoid audit logging, refuse redirects, bound timeout/response size, and do not expose provider error bodies.
+- This slice only establishes provider storage and a connection check. The assistant's chat, advisory functions, action proposals, proactive monitoring, and MCP connector remain outstanding.

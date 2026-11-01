@@ -74,8 +74,16 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 41 {
-		t.Fatalf("expected 41 migrations, got %d", count)
+	if count != 42 {
+		t.Fatalf("expected 42 migrations, got %d", count)
+	}
+	var assistantEnabled int
+	var assistantProvider, assistantModel, assistantURL, assistantKey string
+	if err = d.QueryRow(`SELECT enabled,provider,model,base_url,api_key_enc FROM assistant_config WHERE id=1`).Scan(&assistantEnabled, &assistantProvider, &assistantModel, &assistantURL, &assistantKey); err != nil {
+		t.Fatalf("read default Assistant provider config: %v", err)
+	}
+	if assistantEnabled != 0 || assistantProvider != "" || assistantModel != "" || assistantURL != "" || assistantKey != "" {
+		t.Fatalf("Assistant must start disabled and unconfigured: enabled=%d provider=%q model=%q url=%q key=%q", assistantEnabled, assistantProvider, assistantModel, assistantURL, assistantKey)
 	}
 	var hostMountColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='host_mounts'`).Scan(&hostMountColumn); err != nil || hostMountColumn != 1 {

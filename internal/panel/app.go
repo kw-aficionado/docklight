@@ -46,6 +46,7 @@ type App struct {
 	scheduleWait          func(context.Context, time.Duration) error
 	scheduleCommand       func(context.Context, Server, string) error
 	notificationClient    *http.Client
+	assistantHTTPClient   *http.Client
 	runeCatalogHTTPClient *http.Client
 	runeCatalogMu         sync.Mutex
 	runeCatalogCache      map[string]runeCatalogCacheEntry
@@ -325,6 +326,9 @@ func (a *App) Router() http.Handler {
 			priv.Put("/notifications/{id}", a.admin(a.updateNotificationChannel))
 			priv.Delete("/notifications/{id}", a.admin(a.deleteNotificationChannel))
 			priv.Post("/notifications/{id}/test", a.admin(a.testNotificationChannel))
+			priv.Get("/ai/config", a.admin(a.getAssistantConfig))
+			priv.Put("/ai/config", a.admin(a.updateAssistantConfig))
+			priv.Post("/ai/config/test", a.admin(a.testAssistantConnection))
 			priv.Get("/settings/status-page", a.admin(a.getStatusPageSettings))
 			priv.Put("/settings/status-page", a.admin(a.updateStatusPageSettings))
 			priv.Get("/settings/beacon", a.admin(a.getBeaconSettings))

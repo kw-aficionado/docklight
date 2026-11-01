@@ -66,6 +66,16 @@ Blocking starts off. Cloudflare is selected when a configured zone is available 
 | `POST /api/settings/beacon/test` | Admin only; while the sender is on, send the exact payload to the URL currently in the request body without saving that URL or changing the scheduled-ping record. A disabled sender returns `409`; a collector `404` explains how to check the receiver path and switch. |
 | `GET /api/beacon/stats` | Admin only; collector totals, 7/30-day activity, and versions received in the last 30 days. |
 
+## Assistant provider
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/ai/config` | Admin only; return whether the Assistant is enabled, provider, model, base URL, and whether an API key is configured. The key is never returned; only a fixed mask is shown. |
+| `PUT /api/ai/config` | Admin only; save `{ "provider": "openai", "model": "…", "base_url": "…", "api_key": "…", "clear_api_key": false }`. Supported providers: Anthropic, OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, and custom OpenAI-compatible. Blank `api_key` or the returned fixed mask keeps the saved key; `clear_api_key` removes it. Hosted-provider keys are encrypted with `auth.secret_key`. This does not enable the Assistant. |
+| `POST /api/ai/config/test` | Admin only; send the saved model a single short connection prompt and discard its response. Does not include panel data and is not added to audit history. Redirects are not followed; provider error bodies are not returned. |
+
+See [Assistant setup](guides/assistant.md) for provider URL and data-handling details. Chat, digests, operational tools, proposals, proactive monitoring, and MCP are not available in this provider-setup slice.
+
 ## Templates and servers
 
 | Method and path | Purpose |

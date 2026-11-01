@@ -100,7 +100,7 @@ The admin **IP blocking** page manages one public IPv4 or IPv6 address per rule.
 
 Blocking is off by default. Administrators can maintain up to 256 protected IPs or CIDR ranges. Docklight also rejects private, local, link-local, Cloudflare, CGNAT/Tailscale, documentation, benchmark, and reserved ranges, plus addresses used by administrators in the last 30 days. Admin connection addresses are retained in SQLite for that 30-day safety window. The configured Cloudflare API token needs the zone-level **Firewall Services → Edit** permission. Host nftables requires the systemd service to have `CAP_NET_ADMIN`; the installer does not grant it. Cloudflare ranges are embedded from Cloudflare's published IPv4/IPv6 lists as of 2026-11-01; IANA special-use prefixes are also embedded. Update the protected-range lists when those sources change.
 
-Startup and once-per-minute reconciliation repair managed Cloudflare and nftables rules and remove expired entries. The feature compiled and the browser script syntax checked in this checkout; no Cloudflare account, privileged host firewall, or end-to-end admin browser acceptance was available. The `off`/`propose`/`auto` setting is stored for the planned Kvasir workflow; only manual blocks are active in this slice.
+Startup and once-per-minute reconciliation repair managed Cloudflare and nftables rules and remove expired entries. The feature compiled and the browser script syntax checked in this checkout; no Cloudflare account, privileged host firewall, or end-to-end admin browser acceptance was available. The `off`/`propose`/`auto` setting is reserved for future Assistant workflows; only manual blocks are active in this slice.
 
 ## Phase 3 additional server hostnames
 
@@ -170,13 +170,19 @@ Tests cover identical responses for unknown accounts, accounts without email, an
 
 Users can add, rename, and remove their own passkeys from Account. Passkey sign-in is discoverable and usernameless; registration and sign-in require user verification and a resident credential. Ceremony state stays server-side, is single-use, and expires after five minutes. The RP ID follows the request hostname, the origin honors `X-Forwarded-Proto`, and the browser must use HTTPS or localhost. Credential records are encrypted with the panel secret; names, added time, and last-used time are shown in the account panel. API, origin, timeout, storage, and rate-limit tests cover the server paths. A live authenticator/browser ceremony still needs device-level acceptance.
 
+## Phase 4 Assistant provider setup
+
+Administrators can configure Anthropic Messages or an OpenAI-compatible provider (OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, or custom). Provider, model, and endpoint settings are saved in SQLite; an API key is encrypted with `auth.secret_key`, masked in API responses, and retained when a save leaves the key blank. Assistant stays off by default. Connection testing is available while it is off and sends a single fixed prompt without panel data; the response is discarded and the test is not audited. Requests have a 12-second timeout, do not follow redirects, and limit provider response reads to 1 MiB.
+
+Tests cover administrator-only access, disabled/unconfigured defaults, encrypted storage, key masking/preservation/removal, URL validation, Anthropic and OpenAI-compatible request formats, redirect refusal, timeout and response-size bounds, redacted provider errors, and the no-audit test path. The admin page and JavaScript syntax are implemented; live provider credentials and visual browser acceptance are not available in this environment. Setup details are in [the Assistant guide](docs/guides/assistant.md).
+
 ## Not implemented
 
 - Built-in DayZ server template. DayZ Economy and Mods features require a compatible imported Rune; Workshop management additionally requires its `MODS` setting.
-- Phase 4: Docklight Assistant and MCP connector.
+- Remaining Phase 4 work: Assistant chat, digests, advisors, panel data tools, proposals, proactive monitoring/actions, and the MCP connector.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
-The remaining items have no active controls in the UI.
+Other than Assistant provider setup, the remaining items have no active controls in the UI.
 
 ## Environment limits and remaining acceptance work
 
