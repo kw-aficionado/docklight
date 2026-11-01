@@ -321,3 +321,12 @@
 - Encrypt the complete service-account JSON with `auth.secret_key`; keep short-lived access tokens in memory only. Use 16 MiB resumable chunks so archive pipes stay bounded, validate the persisted byte range, cancel incomplete sessions, and enforce Google's 5 TiB object limit.
 - Require an existing bucket and lock its name and object prefix while GCS backup records remain. Allow service-account key rotation, and keep GCS credentials in the existing encrypted backup-target schema without a database migration.
 - Keep live Google Cloud acceptance separate from request-fixture and fake-store tests; no project credentials are available in the local environment.
+
+## 2026-11-01: Docklight backup targets for rclone and Proxmox Backup Server
+
+- Keep rclone configuration and refreshed provider credentials encrypted with `auth.secret_key`; run all provider operations in the pinned rclone helper.
+- Use PBS native `.pxar` snapshots in per-server `host/<slug>-<short-id>` groups to preserve chunk deduplication. Require amd64, default to port 8007, and allow an optional SHA-256 TLS fingerprint for self-signed servers.
+- Grant `DatastorePowerUser` to both the PBS user and API token. Encrypt token secrets in panel storage and allow token/fingerprint rotation without changing backup identity.
+- Do not download or panel-verify PBS snapshots. Use PBS verification jobs and map Docklight retention to both `--keep-last` and `--keep-daily`; list snapshots after pruning before deleting stale panel rows.
+- Restore PBS data into a private staging directory, reject symlinks and special files, then use the existing rollback-capable overlay. Keep the server stopped for manual start.
+- Do not add Docklight client-side archive encryption to PBS; its chunk store and PBS datastore security remain available for their respective storage/transport controls.

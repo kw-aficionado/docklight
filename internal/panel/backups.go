@@ -89,8 +89,8 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	if in.Destination == "" {
 		in.Destination = "local"
 	}
-	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" && in.Destination != "azure" && in.Destination != "gcs" {
-		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, smb, azure, or gcs")
+	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" && in.Destination != "azure" && in.Destination != "gcs" && in.Destination != "rclone" && in.Destination != "pbs" {
+		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, smb, azure, gcs, rclone, or pbs")
 		return
 	}
 	a.dataMu.Lock()
@@ -121,7 +121,11 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	u := principal(r)
 	a.audit(u, "server.backup.create", "backup", item.ID, fmt.Sprintf("server=%s files=%d bytes=%d", s.ID, item.Files, item.DataBytes))
-	a.dispatchBackupNotification(notificationBackupSuccess, s.ID, s.Name, "A manual backup completed and passed integrity verification.")
+	message := "A manual backup completed and passed integrity verification."
+	if item.Storage == "pbs" {
+		message = "A manual Proxmox backup completed and is stored in the configured repository."
+	}
+	a.dispatchBackupNotification(notificationBackupSuccess, s.ID, s.Name, message)
 	response := map[string]any{"backup": item, "pruned": pruned}
 	if warning != "" {
 		response["warning"] = warning
@@ -137,7 +141,7 @@ type backupOperationError struct {
 func (e *backupOperationError) Error() string { return e.message }
 
 func isRemoteBackupStorage(storage string) bool {
-	return storage == "s3" || storage == "sftp" || storage == "smb" || storage == "azure" || storage == "gcs"
+	return storage == "s3" || storage == "sftp" || storage == "smb" || storage == "azure" || storage == "gcs" || storage == "rclone" || storage == "pbs"
 }
 
 func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupRecord, int, string, error) {
@@ -152,7 +156,7 @@ func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupReco
 		return backupRecord{}, 0, "", &backupOperationError{status: status, message: message}
 	}
 	if destination != "local" {
-		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, azure, or gcs")
+		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, azure, gcs, or rclone")
 	}
 	if pathsOverlap(s.DataDir, a.backupRoot) {
 		return fail(http.StatusConflict, "backup directory overlaps this server's data directory; set backups.path outside the servers directory")
@@ -250,6 +254,9 @@ func (a *App) createRemoteBackupSnapshot(s Server, protocol string) (backupRecor
 	}
 	if !target.Enabled {
 		return fail(http.StatusBadRequest, "enable and configure the "+strings.ToUpper(protocol)+" backup target in Backup storage before selecting it")
+	}
+	if protocol == "pbs" {
+		return a.createPBSBackupSnapshot(s, store)
 	}
 	if err = ensureBackupDirectory(a.dataRoot); err != nil {
 		return fail(http.StatusInternalServerError, "panel server-data storage is missing or is not a real directory")
@@ -389,6 +396,10 @@ func (a *App) verifyBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "backup not found")
 		return
 	}
+	if item.Storage == "pbs" {
+		writeError(w, http.StatusConflict, "Docklight does not download or verify Proxmox snapshots; schedule a verification job in Proxmox Backup Server")
+		return
+	}
 	filePath, cleanup, err := a.materializeBackupFile(item, filePath)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, explainRemoteBackupError(item.Storage, "download", err))
@@ -427,6 +438,10 @@ func (a *App) restoreBackup(w http.ResponseWriter, r *http.Request) {
 	item, filePath, err := a.backupFileRecord(s.ID, chi.URLParam(r, "backupID"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "backup not found")
+		return
+	}
+	if item.Storage == "pbs" {
+		a.restorePBSBackup(w, r, s, item)
 		return
 	}
 	filePath, cleanup, err := a.materializeBackupFile(item, filePath)
@@ -489,6 +504,69 @@ func (a *App) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		response["warning"] = cleanupWarning
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (a *App) restorePBSBackup(w http.ResponseWriter, r *http.Request, server Server, item backupRecord) {
+	store, target, err := a.backupStoreForRemote()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "restore stopped before changing server data: "+explainRemoteBackupError("pbs", "connect", err))
+		return
+	}
+	if target.protocol() != "pbs" {
+		writeError(w, http.StatusConflict, "restore stopped before changing server data: the saved Proxmox destination is no longer configured")
+		return
+	}
+	pbsStore, ok := store.(*pbsBackupStore)
+	if !ok {
+		writeError(w, http.StatusBadGateway, "restore stopped before changing server data: Proxmox Backup Server destination could not be prepared")
+		return
+	}
+	group, _, err := parsePBSStorageKey(item.StorageKey)
+	if err != nil || !strings.HasSuffix(group, "-"+shortID(server.ID)) {
+		writeError(w, http.StatusConflict, "restore stopped before changing server data: snapshot does not belong to this server")
+		return
+	}
+	stage, err := pbsRestoreStage(filepath.Dir(server.DataDir))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not prepare a secure Proxmox restore staging directory; check panel storage permissions and free space")
+		return
+	}
+	defer os.RemoveAll(stage)
+	ctx, cancel := context.WithTimeout(r.Context(), 24*time.Hour)
+	err = pbsStore.RestoreDirectory(ctx, item.StorageKey, stage)
+	cancel()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "restore stopped before changing server data: "+explainRemoteBackupError("pbs", "restore", err))
+		return
+	}
+	summary, err := backup.Summarize(stage)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "restore stopped before changing server data: Proxmox returned unsafe or unreadable files: "+err.Error())
+		return
+	}
+	_, statErr := os.Lstat(server.DataDir)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		writeError(w, http.StatusInternalServerError, "could not inspect current server data before restore")
+		return
+	}
+	warning := "Proxmox restored the snapshot. Schedule a verification job in Proxmox Backup Server before starting the server."
+	if os.IsNotExist(statErr) {
+		if err = os.Rename(stage, server.DataDir); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not activate restored server data; check panel storage permissions")
+			return
+		}
+	} else {
+		if _, err = backup.Overlay(stage, server.DataDir); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, backup.ErrOverlayConflict) {
+				status = http.StatusConflict
+			}
+			writeError(w, status, "Proxmox restore overlay failed: "+err.Error())
+			return
+		}
+	}
+	a.audit(principal(r), "server.backup.restore", "backup", item.ID, fmt.Sprintf("server=%s files=%d bytes=%d", server.ID, summary.Files, summary.Bytes))
+	writeJSON(w, http.StatusOK, map[string]any{"restored": true, "files": summary.Files, "directories": summary.Directories, "bytes": summary.Bytes, "warning": warning})
 }
 
 func (a *App) deleteBackup(w http.ResponseWriter, r *http.Request) {
@@ -564,6 +642,13 @@ func (a *App) backupFileRecord(serverID, backupID string) (backupRecord, string,
 		target, targetErr := a.readBackupTarget()
 		if targetErr != nil || target.protocol() != item.Storage {
 			return backupRecord{}, "", errors.New("remote target settings do not match this backup; restore the saved destination configuration before using it")
+		}
+		if item.Storage == "pbs" {
+			group, _, parseErr := parsePBSStorageKey(item.StorageKey)
+			if parseErr != nil || !strings.HasSuffix(group, "-"+shortID(serverID)) {
+				return backupRecord{}, "", errors.New("Proxmox backup metadata contains an invalid snapshot key")
+			}
+			return item, "", nil
 		}
 		wantKey := backupObjectKey(target.Prefix, serverID, backupID)
 		if item.StorageKey != wantKey || !safeRemoteBackupObjectKey(item.StorageKey) {
@@ -700,6 +785,11 @@ func (a *App) verifyBackupFile(item backupRecord, filePath string) (backup.Summa
 }
 
 func (a *App) pruneServerBackups(serverID string, keep int) (int, int, error) {
+	if target, err := a.readBackupTarget(); err != nil {
+		return 0, 0, errors.New("could not read backup target settings before retention cleanup")
+	} else if target.protocol() == "pbs" {
+		return a.prunePBSBackups(serverID, keep)
+	}
 	rows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? ORDER BY created_at DESC,id DESC`, serverID)
 	if err != nil {
 		return 0, 0, errors.New("could not read backup retention records")
@@ -738,11 +828,85 @@ func (a *App) pruneServerBackups(serverID string, keep int) (int, int, error) {
 	return removed, len(ids) - removed, nil
 }
 
+func (a *App) prunePBSBackups(serverID string, keep int) (int, int, error) {
+	if keep < 1 || keep > 100 {
+		return 0, 0, errors.New("Proxmox retention value must be from 1 to 100")
+	}
+	rows, err := a.db.Query(`SELECT id,storage_key FROM server_backups WHERE server_id=? AND storage='pbs' ORDER BY created_at DESC,id DESC`, serverID)
+	if err != nil {
+		return 0, 0, errors.New("could not read Proxmox backup retention records")
+	}
+	type record struct{ id, key string }
+	records := []record{}
+	groups := []string{}
+	seen := map[string]bool{}
+	for rows.Next() {
+		var item record
+		if err = rows.Scan(&item.id, &item.key); err != nil {
+			_ = rows.Close()
+			return 0, 0, errors.New("could not read Proxmox backup retention records")
+		}
+		group, _, parseErr := parsePBSStorageKey(item.key)
+		if parseErr != nil || !strings.HasSuffix(group, "-"+shortID(serverID)) {
+			_ = rows.Close()
+			return 0, 0, errors.New("a Proxmox backup record has an invalid snapshot key")
+		}
+		records = append(records, item)
+		if !seen[group] {
+			seen[group] = true
+			groups = append(groups, group)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, 0, errors.New("could not read Proxmox backup retention records")
+	}
+	_ = rows.Close()
+	if len(records) == 0 {
+		return 0, 0, nil
+	}
+	store, target, err := a.backupStoreForRemote()
+	if err != nil || target.protocol() != "pbs" {
+		return 0, len(records), errors.New("restore the configured Proxmox destination before running retention")
+	}
+	pbsStore, ok := store.(*pbsBackupStore)
+	if !ok {
+		return 0, len(records), errors.New("Proxmox backup destination could not be prepared")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	remoteSnapshots := map[string]struct{}{}
+	for _, group := range groups {
+		if err = pbsStore.PruneGroup(ctx, group, keep); err != nil {
+			return 0, len(records), fmt.Errorf("Proxmox retention failed for group %s: %s", group, explainRemoteBackupError("pbs", "prune", err))
+		}
+		var snapshots map[string]struct{}
+		snapshots, err = pbsStore.Snapshots(ctx, group)
+		if err != nil {
+			return 0, len(records), fmt.Errorf("could not list Proxmox snapshots after pruning group %s: %s", group, explainRemoteBackupError("pbs", "list", err))
+		}
+		for key := range snapshots {
+			remoteSnapshots[key] = struct{}{}
+		}
+	}
+	removed := 0
+	for _, item := range records {
+		if _, exists := remoteSnapshots[item.key]; exists {
+			continue
+		}
+		if _, err = a.db.Exec(`DELETE FROM server_backups WHERE id=? AND server_id=? AND storage='pbs'`, item.id, serverID); err != nil {
+			return removed, len(records) - removed, errors.New("Proxmox snapshot was pruned but its panel metadata could not be deleted")
+		}
+		removed++
+	}
+	return removed, len(records) - removed, nil
+}
+
 func (a *App) removeServerBackups(serverID string) error {
 	if !safePathSegment(serverID) {
 		return errors.New("server identifier is invalid; backup cleanup was stopped")
 	}
-	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb','azure','gcs') ORDER BY created_at,id`, serverID)
+	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb','azure','gcs','rclone','pbs') ORDER BY created_at,id`, serverID)
 	if err != nil {
 		return errors.New("could not read remote backup records before deleting the server")
 	}

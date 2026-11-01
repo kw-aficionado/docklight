@@ -254,10 +254,20 @@ type CreateConfig struct {
 // Attach opens a Docker container's bidirectional stdin/stdout stream. Docker
 // requires an HTTP upgrade for attach; the returned body owns that connection.
 func (e *Engine) Attach(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	return e.attach(ctx, id, true, true, true)
+}
+
+// AttachOutput opens a Docker stream that carries stdout only. It is useful
+// when stdout contains binary data and stderr must not be mixed into it.
+func (e *Engine) AttachOutput(ctx context.Context, id string) (io.ReadWriteCloser, error) {
+	return e.attach(ctx, id, false, true, false)
+}
+
+func (e *Engine) attach(ctx context.Context, id string, stdin, stdout, stderr bool) (io.ReadWriteCloser, error) {
 	if id == "" {
 		return nil, errors.New("Docker attach needs a container ID")
 	}
-	q := url.Values{"stream": {"1"}, "stdin": {"1"}, "stdout": {"1"}, "stderr": {"1"}}
+	q := url.Values{"stream": {"1"}, "stdin": {strconv.FormatBool(stdin)}, "stdout": {strconv.FormatBool(stdout)}, "stderr": {strconv.FormatBool(stderr)}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint("/containers/"+url.PathEscape(id)+"/attach?"+q.Encode()), nil)
 	if err != nil {
 		return nil, err
@@ -513,6 +523,40 @@ func CopyLogs(dst io.Writer, src io.Reader) error {
 		}
 		if _, err := io.CopyN(dst, br, n); err != nil {
 			return err
+		}
+	}
+}
+
+// CopyStream strips Docker's multiplex headers and copies only the requested
+// stream (1 is stdout, 2 is stderr), discarding any other frames.
+func CopyStream(dst io.Writer, src io.Reader, stream byte) error {
+	if stream != 1 && stream != 2 {
+		return errors.New("Docker stream must be stdout (1) or stderr (2)")
+	}
+	br := bufio.NewReader(src)
+	for {
+		hdr := make([]byte, 8)
+		if _, err := io.ReadFull(br, hdr); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if hdr[1] != 0 || hdr[2] != 0 || hdr[3] != 0 {
+			return errors.New("Docker sent an invalid stream frame")
+		}
+		n := int64(hdr[4])<<24 | int64(hdr[5])<<16 | int64(hdr[6])<<8 | int64(hdr[7])
+		if n < 0 || n > 16*1024*1024 {
+			return errors.New("Docker sent an invalid stream frame")
+		}
+		if hdr[0] == stream {
+			if _, err := io.CopyN(dst, br, n); err != nil {
+				return err
+			}
+		} else {
+			if _, err := io.CopyN(io.Discard, br, n); err != nil {
+				return err
+			}
 		}
 	}
 }

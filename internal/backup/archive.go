@@ -115,6 +115,62 @@ func Create(dst io.Writer, root string, key []byte) (Summary, error) {
 	return summary, nil
 }
 
+// Summarize validates the server data tree and counts regular files without
+// constructing a Docklight archive. Proxmox Backup Client reads this same tree
+// directly so its chunk store can deduplicate unchanged file content.
+func Summarize(root string) (Summary, error) {
+	var summary Summary
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return summary, fmt.Errorf("open server data for backup: %w", err)
+	}
+	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
+		return summary, errors.New("server data path must be a real directory")
+	}
+	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("read server data for backup: %w", walkErr)
+		}
+		if filePath == root {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return fmt.Errorf("inspect server data %q: %w", filePath, infoErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("backup stopped because server data contains a symbolic link: %s", filepath.Base(filePath))
+		}
+		if !info.IsDir() && !info.Mode().IsRegular() {
+			return fmt.Errorf("backup stopped because server data contains an unsupported file type: %s", filepath.Base(filePath))
+		}
+		if info.IsDir() {
+			summary.Directories++
+			return nil
+		}
+		file, openErr := os.Open(filePath)
+		if openErr != nil {
+			return fmt.Errorf("open server file %q for backup: %w", filepath.Base(filePath), openErr)
+		}
+		openedInfo, statErr := file.Stat()
+		closeErr := file.Close()
+		if statErr != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+			return fmt.Errorf("server file %q changed while the backup was being prepared", filepath.Base(filePath))
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close server file %q after backup: %w", filepath.Base(filePath), closeErr)
+		}
+		finalInfo, statErr := os.Stat(filePath)
+		if statErr != nil || finalInfo.Size() != info.Size() || !finalInfo.ModTime().Equal(info.ModTime()) {
+			return fmt.Errorf("server file %q changed while the backup was being prepared", filepath.Base(filePath))
+		}
+		summary.Files++
+		summary.Bytes += info.Size()
+		return nil
+	})
+	return summary, err
+}
+
 // Verify authenticates the complete archive, checks the gzip/tar structure,
 // and rejects unsafe or unsupported paths without restoring any files.
 func Verify(src io.Reader, key []byte) (Summary, error) {

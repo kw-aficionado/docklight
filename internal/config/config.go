@@ -29,8 +29,10 @@ type Config struct {
 		Password string
 	}
 	Docker struct {
-		Socket     string
-		APIVersion string
+		Socket         string
+		APIVersion     string
+		RcloneImage    string
+		PBSClientImage string
 	}
 	Backups struct {
 		Path      string
@@ -49,6 +51,8 @@ func Defaults() Config {
 	c.Auth.SessionTTLHours = 168
 	c.Admin.Username = "admin"
 	c.Docker.Socket, c.Docker.APIVersion = "unix:///var/run/docker.sock", "v1.45"
+	c.Docker.RcloneImage = "rclone/rclone:1.75.2"
+	c.Docker.PBSClientImage = "ghcr.io/docklight/pbs-client:4.2.8"
 	c.Backups.Retention = 10
 	c.Ports.RangeMin, c.Ports.RangeMax = 25000, 30000
 	return c
@@ -122,6 +126,10 @@ func Load(path string) (Config, error) {
 			setString(&c.Docker.Socket)
 		case "docker.api_version":
 			setString(&c.Docker.APIVersion)
+		case "docker.rclone_image":
+			setString(&c.Docker.RcloneImage)
+		case "docker.pbs_client_image":
+			setString(&c.Docker.PBSClientImage)
 		case "backups.path":
 			setString(&c.Backups.Path)
 		case "backups.retention":
@@ -208,7 +216,7 @@ func Save(path string, c Config) error {
 	if c.Admin.Password != "" {
 		s += fmt.Sprintf("  password: %s\n", c.Admin.Password)
 	}
-	s += fmt.Sprintf("docker:\n  socket: %s\n  api_version: %s\nbackups:\n  path: %s\n  retention: %d\nports:\n  range_min: %d\n  range_max: %d\n", c.Docker.Socket, c.Docker.APIVersion, c.Backups.Path, c.Backups.Retention, c.Ports.RangeMin, c.Ports.RangeMax)
+	s += fmt.Sprintf("docker:\n  socket: %s\n  api_version: %s\n  rclone_image: %s\n  pbs_client_image: %s\nbackups:\n  path: %s\n  retention: %d\nports:\n  range_min: %d\n  range_max: %d\n", c.Docker.Socket, c.Docker.APIVersion, c.Docker.RcloneImage, c.Docker.PBSClientImage, c.Backups.Path, c.Backups.Retention, c.Ports.RangeMin, c.Ports.RangeMax)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(s), 0600); err != nil {
 		return err

@@ -16,6 +16,8 @@ The config reader supports scalar block-style YAML for these keys. Unknown keys 
 | `admin.password` | generated on first config | One-time bootstrap password. It is removed from the config after the administrator is created. |
 | `docker.socket` | `unix:///var/run/docker.sock` | Docker Engine Unix socket. The daemon account must have permission to use it. |
 | `docker.api_version` | `v1.45` | Versioned Docker Engine HTTP API prefix. |
+| `docker.rclone_image` | `rclone/rclone:1.75.2` | Pinned helper image used for rclone cloud-drive backup targets. |
+| `docker.pbs_client_image` | `ghcr.io/docklight/pbs-client:4.2.8` | Linux/amd64 helper image containing the Proxmox Backup Client. Build and publish the image from `deploy/pbs-client/` or point this setting at your own compatible image. |
 | `backups.path` | `<database directory>/backups` | Local encrypted backup directory. Relative paths resolve against the database directory. Keep it outside `servers/`. |
 | `backups.retention` | `10` | Number of recent local and remote backups retained per server; from 1 through 100. |
 | `ports.range_min` | `25000` | First host port eligible for allocation; minimum is 1024. |
@@ -40,6 +42,8 @@ admin:
 docker:
   socket: unix:///var/run/docker.sock
   api_version: v1.45
+  rclone_image: rclone/rclone:1.75.2
+  pbs_client_image: ghcr.io/docklight/pbs-client:4.2.8
 backups:
   path: /var/lib/yggdrasil/backups
   retention: 10

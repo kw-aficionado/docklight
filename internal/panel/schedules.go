@@ -232,8 +232,8 @@ func (a *App) createBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	if destination == "" {
 		destination = "local"
 	}
-	if destination != "local" && destination != "s3" && destination != "sftp" && destination != "smb" && destination != "azure" && destination != "gcs" {
-		writeError(w, http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, azure, or gcs")
+	if destination != "local" && destination != "s3" && destination != "sftp" && destination != "smb" && destination != "azure" && destination != "gcs" && destination != "rclone" && destination != "pbs" {
+		writeError(w, http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, azure, gcs, rclone, or pbs")
 		return
 	}
 	if in.Action != "backup" && destination != "local" {
