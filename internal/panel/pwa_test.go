@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	yggdrasil "example.com/yggdrasil-panel"
 )
 
 func TestDocklightInstallableAppShellRoutes(t *testing.T) {
@@ -65,5 +67,18 @@ func TestDocklightInstallableAppShellRoutes(t *testing.T) {
 	api := testRequest(h, http.MethodGet, "/api/health", "", "")
 	if api.Code != http.StatusOK || api.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("API cache policy: %d, cache=%q", api.Code, api.Header().Get("Cache-Control"))
+	}
+}
+
+func TestEmbeddedWebFSContainsRuntimeAssetsButNotNodeTests(t *testing.T) {
+	for _, path := range []string{"web/index.html", "web/app.js", "web/ui-utils.mjs", "web/style.css", "web/config-editor.css", "web/brand.svg", "web/service-worker.js", "web/status.html", "web/status.js"} {
+		if _, err := yggdrasil.WebFS.ReadFile(path); err != nil {
+			t.Errorf("runtime asset %s was not embedded: %v", path, err)
+		}
+	}
+	for _, path := range []string{"web/service-worker.test.mjs", "web/ui-utils.test.mjs"} {
+		if _, err := yggdrasil.WebFS.ReadFile(path); err == nil {
+			t.Errorf("development test harness %s was included in the product binary", path)
+		}
 	}
 }
