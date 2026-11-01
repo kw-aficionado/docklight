@@ -98,8 +98,8 @@ func (a *App) createScopedSchedule(w http.ResponseWriter, r *http.Request) {
 	if destination == "" {
 		destination = "local"
 	}
-	if destination != "local" && destination != "s3" && destination != "sftp" && destination != "smb" && destination != "azure" {
-		writeError(w, http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, or azure")
+	if destination != "local" && destination != "s3" && destination != "sftp" && destination != "smb" && destination != "azure" && destination != "gcs" {
+		writeError(w, http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, azure, or gcs")
 		return
 	}
 	if in.Action != "backup" && destination != "local" {

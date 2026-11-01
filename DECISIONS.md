@@ -314,3 +314,10 @@
 - Use a fixed Blob REST API version, pin endpoint redirects off, and ensure request failures never include the SAS-bearing URL. Accept a custom account endpoint for sovereign clouds and derive the standard Azure endpoint when the field is blank.
 - Lock the account, endpoint, container, and prefix while Azure backup records remain, while allowing credential and authentication-mode rotation. Keep Azure settings in a numbered migration that preserves existing remote-target rows.
 - Keep Azure live-account acceptance separate from request-fixture and fake-store tests; no live account is available in the local environment.
+
+## 2026-11-01: Google Cloud Storage backup target
+
+- Use the native Cloud Storage JSON API and service-account JWT OAuth exchange rather than the S3 interoperability endpoint or a cloud SDK. Pin the OAuth token endpoint, disable redirects, and validate resumable session URLs against Google's HTTPS API hosts; never send OAuth headers to the session URL because that URL is itself a bearer token.
+- Encrypt the complete service-account JSON with `auth.secret_key`; keep short-lived access tokens in memory only. Use 16 MiB resumable chunks so archive pipes stay bounded, validate the persisted byte range, cancel incomplete sessions, and enforce Google's 5 TiB object limit.
+- Require an existing bucket and lock its name and object prefix while GCS backup records remain. Allow service-account key rotation, and keep GCS credentials in the existing encrypted backup-target schema without a database migration.
+- Keep live Google Cloud acceptance separate from request-fixture and fake-store tests; no project credentials are available in the local environment.

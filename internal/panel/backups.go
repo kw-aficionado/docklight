@@ -89,8 +89,8 @@ func (a *App) createBackup(w http.ResponseWriter, r *http.Request) {
 	if in.Destination == "" {
 		in.Destination = "local"
 	}
-	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" && in.Destination != "azure" {
-		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, smb, or azure")
+	if in.Destination != "local" && in.Destination != "s3" && in.Destination != "sftp" && in.Destination != "smb" && in.Destination != "azure" && in.Destination != "gcs" {
+		writeError(w, http.StatusBadRequest, "destination must be local, s3, sftp, smb, azure, or gcs")
 		return
 	}
 	a.dataMu.Lock()
@@ -137,7 +137,7 @@ type backupOperationError struct {
 func (e *backupOperationError) Error() string { return e.message }
 
 func isRemoteBackupStorage(storage string) bool {
-	return storage == "s3" || storage == "sftp" || storage == "smb" || storage == "azure"
+	return storage == "s3" || storage == "sftp" || storage == "smb" || storage == "azure" || storage == "gcs"
 }
 
 func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupRecord, int, string, error) {
@@ -152,7 +152,7 @@ func (a *App) createBackupSnapshot(s Server, destinations ...string) (backupReco
 		return backupRecord{}, 0, "", &backupOperationError{status: status, message: message}
 	}
 	if destination != "local" {
-		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, or azure")
+		return fail(http.StatusBadRequest, "backup destination must be local, s3, sftp, smb, azure, or gcs")
 	}
 	if pathsOverlap(s.DataDir, a.backupRoot) {
 		return fail(http.StatusConflict, "backup directory overlaps this server's data directory; set backups.path outside the servers directory")
@@ -742,7 +742,7 @@ func (a *App) removeServerBackups(serverID string) error {
 	if !safePathSegment(serverID) {
 		return errors.New("server identifier is invalid; backup cleanup was stopped")
 	}
-	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb','azure') ORDER BY created_at,id`, serverID)
+	remoteRows, err := a.db.Query(`SELECT id FROM server_backups WHERE server_id=? AND storage IN ('s3','sftp','smb','azure','gcs') ORDER BY created_at,id`, serverID)
 	if err != nil {
 		return errors.New("could not read remote backup records before deleting the server")
 	}

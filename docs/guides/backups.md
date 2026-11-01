@@ -1,6 +1,6 @@
 # Server backups
 
-Docklight stores encrypted snapshots of each server's data directory. Open a server's **Backups** tab to create, verify, restore, delete, or prune snapshots. Backups can be written to local panel storage or one configured remote destination: S3-compatible, Azure Blob Storage, SFTP, or SMB.
+Docklight stores encrypted snapshots of each server's data directory. Open a server's **Backups** tab to create, verify, restore, delete, or prune snapshots. Backups can be written to local panel storage or one configured remote destination: S3-compatible, Google Cloud Storage, Azure Blob Storage, SFTP, or SMB.
 
 ## Create and restore
 
@@ -12,7 +12,7 @@ Local backups are stored under `<database directory>/backups/<server id>/` by de
 
 ## Remote destinations
 
-Administrators configure one remote destination from **Backup storage** in the Docklight sidebar. Only one protocol can be active at a time: S3-compatible storage, Azure Blob Storage, SFTP, or SMB. The connection check lists the Azure container when supported, uploads a temporary test file, reads it back, and removes it again. Credentials and the host or endpoint are encrypted with `auth.secret_key`; API summaries report whether credentials are saved without returning them.
+Administrators configure one remote destination from **Backup storage** in the Docklight sidebar. Only one protocol can be active at a time: S3-compatible storage, Google Cloud Storage, Azure Blob Storage, SFTP, or SMB. The connection check lists the Azure container or GCS bucket prefix when supported, uploads a temporary test file, reads it back, and removes it again. Credentials and the host or endpoint are encrypted with `auth.secret_key`; API summaries report whether credentials are saved without returning them.
 
 SFTP uses password authentication on port `22` by default. Enter the server host, username, password, optional path prefix, and the server's SHA-256 host-key fingerprint. Docklight checks this pin during SSH negotiation before it sends the password and refuses a mismatch. Get the fingerprint from the SSH administrator or another authenticated channel; do not trust an unverified `ssh-keyscan` result. On an OpenSSH server, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` prints the Ed25519 host-key fingerprint when that is the key the server presents. For an RSA-only server, use its `ssh_host_rsa_key.pub` instead. The saved fingerprint is public metadata and is returned in the admin target summary; passwords remain encrypted and redacted.
 
@@ -24,9 +24,11 @@ S3-compatible storage uses an HTTPS endpoint, bucket name, region, access key, s
 
 Azure Blob Storage uses an account name, existing container, account key or SAS token, and optional object prefix. Leave Endpoint blank to use `https://<account>.blob.core.windows.net`, or enter the account's Blob endpoint for a sovereign cloud. Account keys use Azure Shared Key authorization. SAS tokens must allow list, read, write, and delete access to the container; the token is encrypted and never returned by the API. Uploads stream as 16 MiB blocks and are limited to 800 GB per backup. Docklight does not create the container.
 
+Google Cloud Storage uses an existing bucket, a service-account JSON key, and an optional object prefix. Docklight calls the native Cloud Storage JSON API with OAuth 2.0 service-account credentials; it does not use the S3 interoperability endpoint. Grant the service account object list, create, get, and delete access to the bucket or backup prefix. The JSON key is encrypted with `auth.secret_key`, never returned by the API, and used to obtain short-lived access tokens. Uploads stream in 16 MiB resumable chunks and support objects up to 5 TiB. Interrupted uploads are canceled. Create the bucket separately.
+
 The server's **Backups** tab offers the configured remote protocol after an administrator enables it. Docklight streams the encrypted archive to the destination, then downloads and verifies its checksum and archive contents before adding the database record. S3 uses multipart uploads for larger archives. Verification and restore use a mode-`0600` temporary file under panel server-data storage. Ensure that filesystem has enough temporary space for the backup being restored.
 
-While remote backup records exist, Docklight locks the configured protocol, host, port, bucket or share, region, and prefix. Azure also locks the account name and endpoint; credentials and the authentication mode can be rotated. Delete those remote backup records before moving to another destination. Retention uses database records rather than listing remote storage, and server deletion removes each recorded remote object before deleting server data.
+While remote backup records exist, Docklight locks the configured protocol, host, port, bucket or share, region, and prefix. Azure also locks the account name and endpoint; credentials and the authentication mode can be rotated. GCS locks the bucket and prefix while allowing the service-account key to rotate. Delete those remote backup records before moving to another destination. Retention uses database records rather than listing remote storage, and server deletion removes each recorded remote object before deleting server data.
 
 ## Encryption key and recovery
 
@@ -48,4 +50,4 @@ A console-command schedule accepts one line, encrypts it at rest, and sends it t
 
 ## Current limits
 
-SFTP has been tested with an in-process SSH/SFTP server and the panel's backup lifecycle has fake-store coverage. SMB has client configuration, fake-store create/verify/delete, and target-management coverage. Azure's REST client and target lifecycle have request-fixture coverage; no live Azure account or browser acceptance was available. The S3 integration uses an in-repository REST client; run the gated emulator acceptance in `internal/backup/s3_test.go` by setting `DOCKLIGHT_S3_TEST_ENDPOINT`, `DOCKLIGHT_S3_TEST_BUCKET`, `DOCKLIGHT_S3_TEST_REGION`, `DOCKLIGHT_S3_TEST_ACCESS_KEY`, and `DOCKLIGHT_S3_TEST_SECRET_KEY`. A generic signed webhook can report backup and scheduled-action success or failure; see [notifications](notifications.md). Live browser acceptance for the new realm/global schedule management page is still pending.
+SFTP has been tested with an in-process SSH/SFTP server and the panel's backup lifecycle has fake-store coverage. SMB has client configuration, fake-store create/verify/delete, and target-management coverage. Azure and GCS REST clients and target lifecycles have request-fixture coverage; no live Azure account, Google Cloud project, or browser acceptance was available. The S3 integration uses an in-repository REST client; run the gated emulator acceptance in `internal/backup/s3_test.go` by setting `DOCKLIGHT_S3_TEST_ENDPOINT`, `DOCKLIGHT_S3_TEST_BUCKET`, `DOCKLIGHT_S3_TEST_REGION`, `DOCKLIGHT_S3_TEST_ACCESS_KEY`, and `DOCKLIGHT_S3_TEST_SECRET_KEY`. A generic signed webhook can report backup and scheduled-action success or failure; see [notifications](notifications.md). Live browser acceptance for the new realm/global schedule management page is still pending.

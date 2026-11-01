@@ -67,6 +67,8 @@ func (t backupTargetConfig) configured() bool {
 		return t.Endpoint != "" && t.Bucket != "" && t.AccessKey != "" && t.SecretKey != ""
 	case "azure":
 		return t.Bucket != "" && t.AccessKey != "" && t.SecretKey != "" && (t.AuthMode == "key" || t.AuthMode == "sas")
+	case "gcs":
+		return t.Bucket != "" && t.SecretKey != ""
 	default:
 		return false
 	}
@@ -137,14 +139,14 @@ func summarizeBackupTarget(target backupTargetConfig) backupTargetSummary {
 		Enabled:               target.Enabled,
 		Configured:            target.configured(),
 		AccessKeyConfigured:   protocol == "s3" && target.AccessKey != "",
-		UsernameConfigured:    protocol != "s3" && protocol != "azure" && target.AccessKey != "",
+		UsernameConfigured:    protocol != "s3" && protocol != "azure" && protocol != "gcs" && target.AccessKey != "",
 		SecretConfigured:      target.SecretKey != "",
 		Port:                  target.Port,
 		Prefix:                target.Prefix,
 		AccountNameConfigured: protocol == "azure" && target.AccessKey != "",
 		AuthMode:              target.AuthMode,
 	}
-	if protocol == "s3" || protocol == "azure" {
+	if protocol == "s3" || protocol == "azure" || protocol == "gcs" {
 		summary.Endpoint = target.Endpoint
 		summary.Bucket = target.Bucket
 		if protocol == "s3" {
@@ -182,7 +184,7 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		Prefix        *string `json:"prefix"`
 		ClearTarget   bool    `json:"clear_target"`
 	}
-	if decodeJSON(w, r, &in, 12*1024) != nil {
+	if decodeJSON(w, r, &in, 24*1024) != nil {
 		return
 	}
 	a.dataMu.Lock()
@@ -215,8 +217,8 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	if requestedType == "" {
 		requestedType = current.protocol()
 	}
-	if requestedType != "s3" && requestedType != "sftp" && requestedType != "smb" && requestedType != "azure" {
-		writeError(w, http.StatusBadRequest, "backup target type must be s3, sftp, smb, or azure")
+	if requestedType != "s3" && requestedType != "sftp" && requestedType != "smb" && requestedType != "azure" && requestedType != "gcs" {
+		writeError(w, http.StatusBadRequest, "backup target type must be s3, sftp, smb, azure, or gcs")
 		return
 	}
 	next := current
@@ -331,6 +333,8 @@ func incompleteTargetMessage(protocol string) string {
 		return "enter the SMB host, share, username, and password before saving the target"
 	case "azure":
 		return "enter the Azure account name, container, and account key or SAS token before saving the target"
+	case "gcs":
+		return "enter an existing Google Cloud Storage bucket and service-account JSON key before saving the target"
 	default:
 		return "enter the S3 endpoint, bucket, region, access key, and secret key before saving the target"
 	}
@@ -350,8 +354,11 @@ func validateBackupTarget(target backupTargetConfig) error {
 	case "azure":
 		_, err := backup.NewAzureClient(target.Endpoint, target.AccessKey, target.Bucket, target.AuthMode, target.SecretKey, nil)
 		return err
+	case "gcs":
+		_, err := backup.NewGCSClient(target.Bucket, target.SecretKey, nil)
+		return err
 	default:
-		return errors.New("backup target type must be s3, sftp, smb, or azure")
+		return errors.New("backup target type must be s3, sftp, smb, azure, or gcs")
 	}
 }
 
@@ -384,12 +391,12 @@ func sameBackupTargetIdentity(first, second backupTargetConfig) bool {
 	if first.protocol() != second.protocol() || first.Endpoint != second.Endpoint || first.Port != second.Port || first.Bucket != second.Bucket || first.Region != second.Region || first.Prefix != second.Prefix {
 		return false
 	}
-	return first.protocol() != "azure" || first.AccessKey == second.AccessKey
+	return (first.protocol() != "azure" || first.AccessKey == second.AccessKey) && (first.protocol() != "gcs" || first.AccessKey == second.AccessKey)
 }
 
 func (a *App) remoteBackupCount() (int, error) {
 	var count int
-	err := a.db.QueryRow(`SELECT count(*) FROM server_backups WHERE storage IN ('s3','sftp','smb','azure')`).Scan(&count)
+	err := a.db.QueryRow(`SELECT count(*) FROM server_backups WHERE storage IN ('s3','sftp','smb','azure','gcs')`).Scan(&count)
 	return count, err
 }
 
@@ -419,8 +426,10 @@ func (a *App) newRemoteBackupStore(target backupTargetConfig) (backupObjectStore
 		return backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
 	case "azure":
 		return backup.NewAzureClient(target.Endpoint, target.AccessKey, target.Bucket, target.AuthMode, target.SecretKey, nil)
+	case "gcs":
+		return backup.NewGCSClient(target.Bucket, target.SecretKey, nil)
 	default:
-		return nil, errors.New("backup target type must be s3, sftp, smb, or azure")
+		return nil, errors.New("backup target type must be s3, sftp, smb, azure, or gcs")
 	}
 }
 
@@ -579,6 +588,15 @@ func explainRemoteBackupError(protocol, action string, err error) string {
 			return "Azure Blob access was denied; check the account key or SAS permissions for the container"
 		}
 		return fmt.Sprintf("Azure Blob %s failed: %s", action, message)
+	}
+	if protocol == "gcs" {
+		if strings.Contains(message, "HTTP 401") || strings.Contains(message, "HTTP 403") {
+			return "Google Cloud Storage denied access; check the service-account key and bucket IAM permissions"
+		}
+		if strings.Contains(message, "HTTP 404") {
+			return "Google Cloud Storage bucket or object was not found; check the configured bucket name"
+		}
+		return fmt.Sprintf("Google Cloud Storage %s failed: %s", action, message)
 	}
 	if strings.Contains(message, "no such host") {
 		return strings.ToUpper(protocol) + " host could not be resolved; check the host name and panel-host DNS"
