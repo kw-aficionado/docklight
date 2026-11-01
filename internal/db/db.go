@@ -1054,6 +1054,55 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 32 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "servers", "cf_hostname") {
+			if _, err = tx.Exec(`ALTER TABLE servers ADD COLUMN cf_hostname TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS cloudflare_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			api_token_enc TEXT NOT NULL DEFAULT '',
+			account_id TEXT NOT NULL DEFAULT '',
+			tunnel_id TEXT NOT NULL DEFAULT '',
+			base_domain TEXT NOT NULL DEFAULT '',
+			zone_id TEXT NOT NULL DEFAULT '',
+			internal_host TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO cloudflare_settings(id,enabled) VALUES(1,0)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_cf_state (
+			server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+			hostname TEXT NOT NULL DEFAULT '',
+			service TEXT NOT NULL DEFAULT '',
+			dns_record_id TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			cleanup_pending INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(32)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

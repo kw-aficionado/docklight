@@ -60,6 +60,12 @@ Registration and sign-in require user verification and discoverable credentials.
 | `POST /api/npm/test` | Admin only; authenticate to NPM and read the proxy-host list without modifying it. |
 | `GET /api/servers/{id}/npm` | Requires `server.view`; read the server hostname, saved proxy state, and cleanup status. |
 | `PUT /api/servers/{id}/npm` | Requires `server.control`; save a bare subdomain, full hostname, or empty value to clear the server proxy host. This preference is independent of `auto_forward`. |
+| `GET /api/settings/cloudflare`, `PUT /api/settings/cloudflare` | Admin only; read or save Tunnel settings. The PUT body accepts `enabled`, `api_token`, `account_id`, `tunnel_id`, `base_domain`, optional `zone_id`, `internal_host`, and `clear_token`. The token is encrypted and never returned; known routes are cleaned before connection or domain settings change. |
+| `POST /api/cloudflare/test` | Admin only; read the saved tunnel configuration and resolve/cache the zone ID only when unset. Does not call Cloudflare's token verification endpoint. |
+| `GET /api/domains/cloudflare` | Admin only; list hostname/service/path entries from the complete Tunnel ingress configuration, including manually created rules. |
+| `GET /api/domains` | Signed-in users; list primary Cloudflare and NPM domains for servers they can view, with provisioning state and a guarded public HTTP probe cached for 30 seconds. |
+| `GET /api/servers/{id}/cloudflare` | Requires `server.view`; read the selected hostname, route status, and cleanup status. |
+| `PUT /api/servers/{id}/cloudflare` | Requires `server.control`; save `{ "hostname": "app" }`, a full hostname inside the configured base domain, or an empty hostname to remove the route. |
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). Replacing a catalog template clears its source metadata. |

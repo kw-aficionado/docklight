@@ -162,3 +162,13 @@
 - Use the connected NPM account's profile email for Let's Encrypt. NPM's current API does not accept a separate contact address; the optional Docklight contact field must match the account email or remain blank.
 - Prefer the declared TCP `web` port and then the first declared TCP port; skip UDP-only servers. Forward to the configured internal host or the host LAN IPv4 address selected by the route to NPM.
 - The fake API covers token authentication, bearer requests, proxy creation and deletion, certificate fallback, and pending-cleanup retry. A live NPM controller, public DNS, and reachable ACME HTTP challenge were unavailable.
+
+## 2026-11-01: Cloudflare Tunnel routes and DNS
+
+- Store the API token encrypted in a dedicated settings row. Test the account by reading the remote tunnel configuration and resolving the configured zone only when the operator has not supplied a zone ID; never call the token verification endpoint.
+- Keep the full tunnel `config` object as raw JSON fields and replace only `ingress`. Preserve unmanaged rules and config properties, put Docklight's HTTP host rule before the terminal `http_status:404`, and avoid PUT when the desired route is already present.
+- Record each server's hostname and HTTP service so cleanup removes only its unchanged ingress rule. Delete DNS only after listing the hostname and confirming the CNAME still points to `<configured tunnel ID>.cfargotunnel.com`; never delete a foreign target.
+- Save the route before upserting proxied DNS, as requested. A DNS conflict or API failure leaves the tunnel route active with a warning so periodic reconciliation can retry. A tunnel configuration read/write failure prevents DNS provisioning.
+- Run reconciliation at panel startup and every ten minutes. Server lifecycle cleanup failures keep the saved server route state for retry and block server deletion when ownership cannot be checked safely.
+- Forward to the allocated TCP web port or first TCP port. An unset internal host uses the LAN IPv4 address selected by the route to Cloudflare. A configured IP no longer assigned to a local interface falls back to that current LAN address and emits a log warning.
+- The first slice includes the admin Network settings card, per-server hostname field, lifecycle integration, encrypted settings migration 32, and an admin-only endpoint listing all configured Tunnel hostnames. The Domains page also lists primary Cloudflare/NPM routes with RBAC filtering, guarded public probes, conflict labels, and 30-second caching. Extra route rows, IP blocking, and live Cloudflare account acceptance remain outstanding.

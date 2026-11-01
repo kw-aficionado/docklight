@@ -67,6 +67,7 @@ type App struct {
 	upnpMu                sync.Mutex
 	unifiMu               sync.Mutex
 	npmMu                 sync.Mutex
+	cfMu                  sync.Mutex
 	networkDetected       string
 	networkDetectedAt     time.Time
 	networkAttemptAt      time.Time
@@ -75,9 +76,13 @@ type App struct {
 	unifiHTTPClient       *http.Client
 	hostLocalIP           func(context.Context, string) (net.IP, error)
 	npmHTTPClient         *http.Client
+	cfHTTPClient          *http.Client
+	cfAPIBaseURL          string
 	reachabilityMu        sync.Mutex
 	reachabilityCache     map[string]reachabilityCacheEntry
 	reachabilityProbe     func(context.Context, string, int, rune.Rune) error
+	domainProbeMu         sync.Mutex
+	domainProbeCache      map[string]domainProbeCacheEntry
 	rateMu                sync.Mutex
 	loginIPs              map[string][]time.Time
 	loginUsers            map[string][]time.Time
@@ -310,8 +315,15 @@ func (a *App) Router() http.Handler {
 			priv.Get("/settings/npm", a.admin(a.getNPMSettings))
 			priv.Put("/settings/npm", a.admin(a.updateNPMSettings))
 			priv.Post("/npm/test", a.admin(a.testNPMConnection))
+			priv.Get("/settings/cloudflare", a.admin(a.getCloudflareSettings))
+			priv.Put("/settings/cloudflare", a.admin(a.updateCloudflareSettings))
+			priv.Post("/cloudflare/test", a.admin(a.testCloudflareConnection))
+			priv.Get("/domains/cloudflare", a.admin(a.listCloudflareDomains))
 			priv.Get("/servers/{id}/npm", a.getServerNPMSettings)
 			priv.Put("/servers/{id}/npm", a.updateServerNPMSettings)
+			priv.Get("/servers/{id}/cloudflare", a.getServerCloudflareSettings)
+			priv.Put("/servers/{id}/cloudflare", a.updateServerCloudflareSettings)
+			priv.Get("/domains", a.listDomains)
 			priv.Get("/backups/target/status", a.backupTargetStatus)
 			priv.Get("/backups/target", a.admin(a.getBackupTarget))
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))

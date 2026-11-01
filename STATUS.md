@@ -88,6 +88,12 @@ The Network page stores a local NPM URL, account email, encrypted password, base
 
 Tests cover the NPM token and bearer API flow, URL and hostname validation, encrypted settings and admin authorization, TCP web-port preference, default LAN address detection, proxy-host creation and deletion, independence from `auto_forward`, Let's Encrypt fallback, and persisted cleanup retry. A live NPM instance and public DNS/HTTP challenge acceptance were not available.
 
+## Phase 3 Cloudflare Tunnel routes and DNS
+
+The admin-only Network page stores the Cloudflare API token encrypted, plus the account, managed tunnel, base domain, optional zone ID, and optional internal host. Its connection check reads the tunnel configuration and resolves the zone only when the zone ID is blank; it does not call the token verification endpoint. Each server can save a subdomain or full hostname. On start, Docklight preserves unrelated Tunnel configuration fields and ingress rules, places its HTTP service rule before the terminal `http_status:404` fallback, then creates or updates a proxied CNAME to the configured tunnel. DNS conflicts are surfaced without overwriting records; DNS API failures leave the tunnel route in place and are retried by the ten-minute reconciler. Cleanup removes only the recorded ingress service and CNAMEs still targeting Docklight's configured tunnel. Stop, confirmed exit, server deletion, settings changes, restart, and the background reconciler participate in cleanup or repair. The admin-only `GET /api/domains/cloudflare` lists hostnames from all ingress rules, including manually provisioned ones.
+
+The admin Network card and per-server hostname control are implemented. The Domains page lists Cloudflare and NPM rows for servers the signed-in user can view, reports provisioning and route conflicts, and probes public HTTPS then HTTP with a guarded dialer, no redirects, self-signed certificate retry/flagging, 5xx warnings, and a 30-second cache. The page currently supports one hostname per provider per server; extra `server_routes` entries are not implemented. No live Cloudflare account or public DNS acceptance was available; the integration still needs a test account/zone run.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -124,11 +130,11 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: Cloudflare route/DNS reconciliation, IP blocking, beacon, self-update, and cross-server ban automation.
+- Phase 3: IP blocking, beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
-The remaining areas have no active controls in the UI. The Cloudflare Tunnel template runs a tunnel container, but the panel does not manage DNS records or tunnel routes.
+The remaining areas have no active controls in the UI. Additional hostnames beyond each server's primary Cloudflare/NPM route, IP blocking, beacon, self-update, and cross-server ban automation remain unimplemented.
 
 ## Environment limits and remaining acceptance work
 

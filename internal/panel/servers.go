@@ -388,6 +388,13 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	npmCancel()
+	cloudflareCtx, cloudflareCancel := context.WithTimeout(r.Context(), cloudflareRequestTimeout)
+	if err := a.removeServerCloudflareRoute(cloudflareCtx, s.ID); err != nil {
+		cloudflareCancel()
+		writeError(w, 503, "Docker resources are stopped and the server data is retained, but its Cloudflare Tunnel route could not be safely cleared: "+err.Error())
+		return
+	}
+	cloudflareCancel()
 	if err := a.removeServerBackups(s.ID); err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -859,6 +866,12 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		return fmt.Errorf("clear previous Nginx Proxy Manager host before starting: %w", err)
 	}
 	cleanupNPMCancel()
+	cleanupCloudflareCtx, cleanupCloudflareCancel := context.WithTimeout(parent, cloudflareRequestTimeout)
+	if err = a.removeServerCloudflareRoute(cleanupCloudflareCtx, s.ID); err != nil {
+		cleanupCloudflareCancel()
+		return fmt.Errorf("clear previous Cloudflare Tunnel route before starting: %w", err)
+	}
+	cleanupCloudflareCancel()
 	stackNetwork := ""
 	if gs.Stack != nil {
 		stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
@@ -911,6 +924,11 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		a.audit(User{Username: "system"}, "server.npm_error", "server", s.ID, proxyErr.Error())
 	}
 	npmCancel()
+	cloudflareCtx, cloudflareCancel := context.WithTimeout(parent, cloudflareRequestTimeout)
+	if routeErr := a.openServerCloudflareRoute(cloudflareCtx, s); routeErr != nil {
+		a.audit(User{Username: "system"}, "server.cloudflare_error", "server", s.ID, routeErr.Error())
+	}
+	cloudflareCancel()
 	go a.watchReady(s, gs)
 	return nil
 }
@@ -973,6 +991,11 @@ func (a *App) stop(s Server) error {
 		a.audit(User{Username: "system"}, "server.npm_cleanup_error", "server", s.ID, proxyErr.Error())
 	}
 	npmCancel()
+	cloudflareCtx, cloudflareCancel := context.WithTimeout(context.Background(), cloudflareRequestTimeout)
+	if routeErr := a.removeServerCloudflareRoute(cloudflareCtx, s.ID); routeErr != nil {
+		a.audit(User{Username: "system"}, "server.cloudflare_cleanup_error", "server", s.ID, routeErr.Error())
+	}
+	cloudflareCancel()
 	var stack *rune.Rune
 	if loadErr == nil {
 		stack = &gs
@@ -1024,6 +1047,11 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 				a.audit(User{Username: "system"}, "server.npm_cleanup_error", "server", s.ID, proxyErr.Error())
 			}
 			npmCancel()
+			cloudflareCtx, cloudflareCancel := context.WithTimeout(context.Background(), cloudflareRequestTimeout)
+			if routeErr := a.removeServerCloudflareRoute(cloudflareCtx, s.ID); routeErr != nil {
+				a.audit(User{Username: "system"}, "server.cloudflare_cleanup_error", "server", s.ID, routeErr.Error())
+			}
+			cloudflareCancel()
 			message := fmt.Sprintf("Container exited before readiness with code %d; review its logs and template startup settings.", ins.State.ExitCode)
 			if err = a.recordServerCrash(s, "container_exited", ins.State.ExitCode, message); err != nil {
 				log.Printf("could not record startup exit for server %s", s.ID)

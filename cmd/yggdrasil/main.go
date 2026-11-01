@@ -138,6 +138,7 @@ func serve(args []string) error {
 	defer stopWorkers()
 	app.StartScheduleWorker(workerCtx)
 	app.StartRuntimeMonitor(workerCtx)
+	app.StartCloudflareReconciler(workerCtx)
 	app.StartDiskMonitor(workerCtx)
 	app.StartWatchdogMonitor(workerCtx)
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)

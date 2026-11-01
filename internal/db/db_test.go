@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 31 {
-		t.Fatalf("expected 31 migrations, got %d", count)
+	if count != 32 {
+		t.Fatalf("expected 32 migrations, got %d", count)
 	}
 	var hostMountColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='host_mounts'`).Scan(&hostMountColumn); err != nil || hostMountColumn != 1 {
@@ -97,7 +97,7 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 			t.Fatalf("catalog source migration is missing %q: count=%d err=%v", column, found, err)
 		}
 	}
-	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens", "passkey_credentials", "network_settings", "upnp_settings", "server_upnp_mappings", "server_upnp_state", "unifi_settings", "server_unifi_mappings", "server_unifi_state", "npm_settings", "server_npm_state"} {
+	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens", "passkey_credentials", "network_settings", "upnp_settings", "server_upnp_mappings", "server_upnp_state", "unifi_settings", "server_unifi_mappings", "server_unifi_state", "npm_settings", "server_npm_state", "cloudflare_settings", "server_cf_state"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("schema migration is missing table %q: count=%d err=%v", table, found, err)
@@ -124,6 +124,10 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var cleanupPendingColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('server_npm_state') WHERE name='cleanup_pending'`).Scan(&cleanupPendingColumn); err != nil || cleanupPendingColumn != 1 {
 		t.Fatalf("Nginx Proxy Manager migration is missing cleanup_pending state: count=%d err=%v", cleanupPendingColumn, err)
+	}
+	var cfHostnameColumn int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='cf_hostname'`).Scan(&cfHostnameColumn); err != nil || cfHostnameColumn != 1 {
+		t.Fatalf("Cloudflare migration is missing servers.cf_hostname: count=%d err=%v", cfHostnameColumn, err)
 	}
 	for _, column := range []string{"email", "webauthn_user_handle"} {
 		var found int
