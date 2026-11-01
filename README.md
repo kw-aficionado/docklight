@@ -74,3 +74,15 @@ node --check --input-type=module < web/app.js
 ```
 
 The project uses Go's standard library for its browser utility tests; no npm install is required. Docker acceptance still needs a Debian or Ubuntu host with Docker Engine.
+
+## Docklight website
+
+The English static site is in `website/`, with its product guides generated from `docs/` and the template catalogue generated from `builtin-runes/`:
+
+```sh
+go run ./cmd/docs-gen
+go run ./cmd/apps-gen
+python3 -m http.server --directory website 8000
+```
+
+Review and commit generated files before publishing. Set `DOCKLIGHT_SITE_TARGET` to the configured rsync destination, then run `deploy/deploy-website.sh --dry-run` to preview the copy or omit `--dry-run` to publish. The script checks that generated guides and catalogue pages match `HEAD` before it transfers the site.

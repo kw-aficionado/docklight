@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101817">
+  <meta name="description" content="Docklight is a self-hosted control panel for game servers and apps. See what is running, take care of updates, and keep the keys to your own setup.">
+  <link rel="canonical" href="https://docklight.app/">
+  <link rel="icon" href="assets/brand.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/site.css">
+  <title>Docklight — A clearer view of what you run</title>
+</head>
+<body class="home-page">
+  <header class="site-header home-header">
+    <a class="brand" href="index.html"><img src="assets/brand.svg" alt=""><span>Docklight</span></a>
+    <nav aria-label="Main navigation">
+      <a href="docs/index.html">Documentation</a>
+      <a href="apps/index.html">Templates</a>
+      <a class="nav-cta" href="docs/getting-started.html">Get started <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero page-wrap">
+      <div class="hero-copy">
+        <div class="hero-kicker"><span class="signal-light"></span> SELF-HOSTED SERVER CONTROL</div>
+        <h1>A clearer view<br>of what you <em>run.</em></h1>
+        <p>Bring your game servers and everyday apps into one calm, capable control panel. Run Docklight on your own host and keep your setup close.</p>
+        <div class="hero-actions"><a class="button button-primary" href="docs/getting-started.html">Explore the handbook <span aria-hidden="true">↗</span></a><a class="text-link" href="apps/index.html">Browse templates <span aria-hidden="true">→</span></a></div>
+        <div class="hero-note"><span aria-hidden="true">⌘</span> Linux host · Docker Engine · Local panel data</div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+        <div class="overview-window">
+          <div class="overview-top"><div class="overview-brand"><img src="assets/brand.svg" alt=""><b>Docklight</b></div><span class="live-label"><i></i> HOST ONLINE</span></div>
+          <div class="overview-title"><div><small>SERVER OVERVIEW</small><h2>Your setup</h2></div><span class="overview-period">Last 24 hours⌄</span></div>
+          <div class="overview-stats"><div><span>RUNNING</span><strong>03</strong><small>services &amp; games</small></div><div><span>CPU</span><strong>28<small>%</small></strong><div class="mini-chart"><i style="--h:30%"></i><i style="--h:52%"></i><i style="--h:42%"></i><i style="--h:68%"></i><i style="--h:47%"></i><i style="--h:78%"></i><i style="--h:58%"></i><i style="--h:86%"></i><i style="--h:55%"></i><i style="--h:72%"></i><i style="--h:44%"></i><i style="--h:64%"></i></div></div></div>
+          <div class="overview-list-head"><span>NAME</span><span>STATE</span><span>UPTIME</span></div>
+          <div class="overview-row"><span class="app-glyph game-glyph">M</span><span class="overview-app"><b>Minecraft Java</b><small>GAME SERVER</small></span><span class="state-online"><i></i>Running</span><span class="uptime">12d 04h</span></div>
+          <div class="overview-row"><span class="app-glyph app-glyph-one">U</span><span class="overview-app"><b>Uptime Kuma</b><small>APP</small></span><span class="state-online"><i></i>Running</span><span class="uptime">08d 19h</span></div>
+          <div class="overview-row"><span class="app-glyph app-glyph-two">V</span><span class="overview-app"><b>Vaultwarden</b><small>APP</small></span><span class="state-attention"><i></i>Updating</span><span class="uptime">—</span></div>
+          <div class="overview-bottom"><span><i class="status-dot"></i> Docker connected</span><span>Illustrative view</span></div>
+        </div>
+        <div class="float-note note-backup"><span class="note-icon">↗</span><span><b>Backup complete</b><small>Encrypted · just now</small></span></div>
+        <div class="float-note note-status"><span class="status-bars"><i></i><i></i><i></i></span><span><b>All systems clear</b><small>At a glance</small></span></div>
+      </div>
+    </section>
+
+    <section class="principles page-wrap" aria-label="Docklight principles">
+      <div><span class="principle-mark">01</span><p><b>Your host</b><small>Run it on hardware you choose</small></p></div>
+      <div><span class="principle-mark">02</span><p><b>Your data</b><small>Panel state stays on your server</small></p></div>
+      <div><span class="principle-mark">03</span><p><b>Your call</b><small>Choose what to install and expose</small></p></div>
+    </section>
+
+    <section class="feature-section page-wrap">
+      <div class="section-intro"><div class="page-kicker">MADE FOR THE WHOLE STACK</div><h2>Less tab juggling.<br><em>More room to play.</em></h2><p>One place to see what is running and take care of the work around it.</p></div>
+      <div class="feature-grid">
+        <article class="feature-card feature-wide"><div class="feature-symbol symbol-pulse"><span></span><i></i><b></b></div><div class="card-kicker">A LIVE VIEW</div><h3>Know what needs attention.</h3><p>See server state, recent resource use, and install output together. Check what changed before you act.</p><div class="feature-footer"><span>Health &amp; activity</span><span>↗</span></div></article>
+        <article class="feature-card"><div class="feature-symbol symbol-clock"><span>↻</span><i>15:00</i></div><div class="card-kicker">ON YOUR SCHEDULE</div><h3>Plan the routine work.</h3><p>Schedule backups and maintenance, with controls suited to each server.</p><div class="feature-footer"><span>Scoped schedules</span><span>↗</span></div></article>
+        <article class="feature-card"><div class="feature-symbol symbol-archive"><span>▱</span><i>✓</i></div><div class="card-kicker">KEEP A WAY BACK</div><h3>Back up. Verify. Restore.</h3><p>Manage local or remote backups and check an archive before you rely on it.</p><div class="feature-footer"><span>Encrypted backup options</span><span>↗</span></div></article>
+        <article class="feature-card feature-wide feature-template"><div class="template-stacks"><span>GAME</span><b>+</b><span>APP</span><b>+</b><span>STACK</span></div><div class="card-kicker">START WITH A TEMPLATE</div><h3>Set up games and apps without losing the details.</h3><p>Use built-in templates or bring one you trust. Configuration, ports, files, and container output stay connected to the server they belong to.</p><div class="feature-footer"><a href="apps/index.html">Explore built-in templates <span>→</span></a><span>↗</span></div></article>
+        <article class="feature-card"><div class="feature-symbol symbol-route"><span>↗</span><i></i><b></b></div><div class="card-kicker">A ROUTE THAT FITS</div><h3>Bring traffic to the right place.</h3><p>Connect web apps through supported reverse proxy and tunnel integrations.</p><div class="feature-footer"><span>Domains &amp; routes</span><span>↗</span></div></article>
+      </div>
+    </section>
+
+    <section class="privacy-band"><div class="page-wrap privacy-inner"><div><div class="page-kicker">BUILT TO STAY CLOSE</div><h2>Your panel. Your machine.<br><em>Your operating choices.</em></h2></div><div class="privacy-copy"><p>Docklight runs as a Go service, uses SQLite for panel records, and talks to the local Docker Engine. Optional integrations connect only when you configure them.</p><p>A disclosed daily beacon can be turned off in settings. It sends a random installation ID and build version so the project can estimate active installations.</p><a class="text-link" href="docs/guides/security.html">Read the security guide <span aria-hidden="true">→</span></a></div></div></section>
+
+    <section class="closing page-wrap"><div><div class="page-kicker">YOUR NEXT STEP</div><h2>Make the host feel<br><em>like your own.</em></h2><p>Start with the setup guide, then add the servers and apps you actually use.</p></div><div class="closing-actions"><a class="button button-primary" href="docs/getting-started.html">Read the getting started guide <span aria-hidden="true">↗</span></a><a class="button button-secondary" href="docs/index.html">Browse all documentation</a></div></section>
+  </main>
+  <footer class="site-footer home-footer"><a class="brand" href="index.html"><img src="assets/brand.svg" alt=""><span>Docklight</span></a><p>Self-hosted operations for the things you run.</p><div><a href="docs/index.html">Documentation</a><a href="apps/index.html">Templates</a><a href="https://docklight.app">docklight.app</a></div></footer>
+</body>
+</html>

@@ -25,6 +25,11 @@ jobs:
         run: go vet ./...
       - name: Test Go packages
         run: go test -count=1 ./...
+      - name: Verify generated Docklight website pages
+        run: |
+          go run ./cmd/docs-gen
+          go run ./cmd/apps-gen
+          git diff --exit-code -- website/docs website/apps website/icons
       - name: Test browser and service-worker logic
         run: node --test web/*.test.mjs
       - name: Check browser module syntax

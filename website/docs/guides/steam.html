@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101817">
+  <meta name="description" content="Docklight is a self-hosted control panel for game servers and apps.">
+  <link rel="icon" href="../../assets/brand.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/site.css">
+  <title>Steam-enabled templates · Docklight</title>
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="../../index.html"><img src="../../assets/brand.svg" alt=""><span>Docklight</span></a>
+    <nav aria-label="Main navigation"><a aria-current="page" href="../../docs/index.html">Documentation</a><a  href="../../apps/index.html">Templates</a><a class="nav-cta" href="../../docs/getting-started.html">Get started <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main class="page-wrap page-generated docs-wrap"><div class="page-kicker">DOCKLIGHT HANDBOOK</div><div class="docs-grid"><aside class="docs-index"><a class="docs-home" href="../../docs/index.html">All documentation <span>→</span></a><h2>Start here</h2><a href="../getting-started.html">Getting started</a><h2>Guides</h2><a href="security.html">Access and security</a><a href="anti-cheat.html">Anti-cheat guidance</a><a href="stacks.html">App stacks</a><a href="assistant.html">Assistant setup</a><a href="beacon.html">Beacon and privacy</a><a href="dayz-economy.html">DayZ Economy</a><a href="dayz-mods.html">DayZ mods</a><a href="updates.html">Docklight panel updates</a><a href="offline-pwa.html">Install and use Docklight offline</a><a href="networking.html">Network address and reachability</a><a href="notifications.html">Notifications</a><a href="moderation.html">Player moderation</a><a href="status-page.html">Public status page</a><a href="realms.html">Realms and access</a><a href="monitoring.html">Runtime monitoring</a><a href="backups.html">Server backups</a><a href="servers.html">Server operations</a><a aria-current="page" href="steam.html">Steam-enabled templates</a><h2>Reference</h2><a href="../configuration.html">Configuration reference</a><a href="../api.html">HTTP API reference</a><a href="../templates.html">Template schema</a></aside><article class="docs-article"><h1>Steam-enabled templates</h1><div class="docs-content"><p>Steam-enabled templates use SteamCMD in their install script. Docklight supplies the persistent cache, account authorization flow, and port mapping needed by those templates; the template author remains responsible for the SteamCMD commands and app ID.</p><h2 id="authorize-an-account">Authorize an account</h2><ol><li>Open <strong>Templates → Steam account</strong> as an administrator.</li><li>Enter the Steam account name and password. Docklight starts a short-lived SteamCMD container and asks Steam to send a Guard code.</li><li>Enter the code from Steam Support email or the Steam Mobile app to finish authorization.</li></ol><p>The password stays in panel memory only while waiting for the code, for up to five minutes. Docklight does not save or return the password or Guard code. SQLite stores the account name, authorization flag, and authorization time. The panel&#39;s persistent <code>steam-cache/</code> directory holds SteamCMD&#39;s sentry data so future runs can reuse the authorization. Remove the account from the same dialog to revoke the saved status and clear that cache. Remove the old account before switching to a different username.</p><p>SteamCMD access requires Docker and outbound network access to Steam. Docklight uses the <code>steamcmd/steamcmd:debian-12</code> image for the authorization helper and requests its <code>linux/amd64</code> variant. The upstream image currently publishes that tag for amd64; on an ARM64 Docker host, install and enable working x86-64 emulation first. The game server image has its own architecture requirements. Steam Guard login follows Valve&#39;s <a href="https://partner.steamgames.com/doc/sdk/uploading">Steamworks SteamCMD instructions</a>.</p><h2 id="template-behavior">Template behavior</h2><p>Add a <code>steam</code> block to the Rune:</p><pre><code class="language-yaml">gameskill:
+  id: sample-steam-server
+  name: Sample Steam Server
+  category: Games
+  version: 1
+  docker:
+    image: example/server:latest
+    keep_entrypoint: true
+  install:
+    script: steamcmd +force_install_dir /data +login &#34;$STEAM_USER&#34; +app_update 123456 validate +quit
+  startup:
+    exec: [&#34;./server&#34;, &#34;-port={{GAME_PORT}}&#34;]
+  ports:
+    - name: game
+      default: 27015
+      protocol: udp
+  steam:
+    app_id: 123456
+    anonymous: false
+</code></pre><p>The panel does not interpret <code>app_id</code>; the install script passes it to SteamCMD. <code>anonymous: false</code> requires the authorized account and injects its username as <code>STEAM_USER</code>. Without authorization, installation stops with:</p><blockquote><p>This game requires an authorized Steam account. Authorize one under Settings → Steam first.</p></blockquote><p>When <code>anonymous: true</code>, the installer can log in anonymously and receives no <code>STEAM_USER</code>. The Steam cache is still mounted at <code>/steamcache</code>, and install-time <code>HOME</code> is set to that path. Docklight prefixes the install script with <code>chmod -R a+rwX /data 2&gt;/dev/null || true</code> and sets the host app-data directory mode to <code>0777</code> for games whose container user writes the mounted data.</p><p>Each declared port is published on the same host port as its container port. Choose unique ports that are free on the host; Docklight reports a conflict if the number is already reserved or bound. For Steam templates, using the game port in the startup command keeps the advertised and published ports aligned.</p><p>See the full <a href="../templates.html">template schema</a> and <a href="../api.html#steam-account">Steam account API</a>. The SteamCMD image&#39;s available Debian tags are listed in its <a href="https://github.com/steamcmd/docker">official source repository</a>.</p></div></article></div></main>
+  <footer class="site-footer"><a class="brand" href="../../index.html"><img src="../../assets/brand.svg" alt=""><span>Docklight</span></a><p>Self-hosted operations for the things you run.</p><div><a href="../../docs/index.html">Documentation</a><a href="../../apps/index.html">Templates</a><a href="https://docklight.app">docklight.app</a></div></footer>
+</body>
+</html>
