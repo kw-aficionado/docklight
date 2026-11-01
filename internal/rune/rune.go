@@ -27,6 +27,7 @@ type Rune struct {
 	Query       *Query       `json:"query,omitempty"`
 	RCON        *RCON        `json:"rcon,omitempty"`
 	Bans        *BanCommands `json:"bans,omitempty"`
+	Anticheat   *Anticheat   `json:"anticheat,omitempty"`
 	Restart     *Restart     `json:"restart,omitempty"`
 	Stack       *Stack       `json:"stack,omitempty"`
 	Steam       *Steam       `json:"steam,omitempty"`
@@ -84,6 +85,15 @@ type RCON struct {
 type BanCommands struct {
 	BanCommand   string `json:"ban_command"`
 	UnbanCommand string `json:"unban_command"`
+}
+type Anticheat struct {
+	AntiXray           *AnticheatFeature `json:"antixray,omitempty"`
+	Battleye           *AnticheatFeature `json:"battleye,omitempty"`
+	PluginsRecommended []string          `json:"plugins_recommended,omitempty"`
+}
+type AnticheatFeature struct {
+	Supported  bool   `json:"supported"`
+	ConfigHint string `json:"config_hint,omitempty"`
 }
 type Restart struct {
 	Warnings []RestartWarning `json:"warnings,omitempty"`
@@ -394,6 +404,25 @@ func (g Rune) Validate() error {
 		}
 		if err := validateBanCommand("bans.unban_command", g.Bans.UnbanCommand); err != nil {
 			return err
+		}
+	}
+	if g.Anticheat != nil {
+		for _, item := range []struct {
+			name    string
+			feature *AnticheatFeature
+		}{{"antixray", g.Anticheat.AntiXray}, {"battleye", g.Anticheat.Battleye}} {
+			name, feature := item.name, item.feature
+			if feature != nil && (len(feature.ConfigHint) > 2000 || strings.ContainsRune(feature.ConfigHint, '\x00')) {
+				return fmt.Errorf("anticheat.%s.config_hint must be 2000 characters or fewer", name)
+			}
+		}
+		if len(g.Anticheat.PluginsRecommended) > 16 {
+			return errors.New("anticheat.plugins_recommended accepts at most 16 entries")
+		}
+		for _, plugin := range g.Anticheat.PluginsRecommended {
+			if strings.TrimSpace(plugin) == "" || len(plugin) > 120 || strings.ContainsAny(plugin, "\r\n\x00") {
+				return errors.New("anticheat plugin recommendations must be 1–120 characters without line breaks")
+			}
 		}
 	}
 	if g.Steam != nil {

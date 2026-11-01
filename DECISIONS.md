@@ -211,3 +211,9 @@
 - Watch only newly streamed log output, parse patterns with Go's linear-time RE2 implementation, and count threshold hits per rule/server/player. Keep counters in memory and reset them after restart or rule edits so stored text is not replayed as an action.
 - Record violation actions in Docklight audit history and expose them as an opt-in legacy webhook event. Keep DayZ's distinct `ban.txt` handling out of the generic command feature until a DayZ template and a verified adapter are available.
 - No Docker daemon or game server is available in this environment, so command delivery and game-specific ban behavior need host acceptance.
+
+## 2026-11-01: template anti-cheat guidance
+
+- Read anti-cheat capability notes only from the selected template and show them as escaped plain text in a server detail tab gated by `server.files`.
+- Keep the feature informational. Do not infer installed protection from the template alone, install plugins, or change user-owned config files.
+- The Minecraft Java note follows Paper's official docs: Anti-Xray is a Paper feature, disabled by default, and configured in `config/paper-world-defaults.yml`; the template makes it conditional on selecting Paper.

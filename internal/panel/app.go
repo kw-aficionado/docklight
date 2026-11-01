@@ -775,6 +775,9 @@ func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
 		if rr.Bans != nil {
 			item["bans"] = rr.Bans
 		}
+		if rr.Anticheat != nil {
+			item["anticheat"] = rr.Anticheat
+		}
 		if u.Role == "admin" {
 			item["source_host"], item["source_repo"] = x.sourceHost, x.sourceRepo
 		}

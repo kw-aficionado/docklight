@@ -124,6 +124,10 @@ Administrators can record central player bans for one server or the whole fleet,
 
 Templates opt in using `bans.ban_command` and `bans.unban_command`; commands support `{{player}}`, `{{player_id}}`, and `{{reason}}`. This checkout has no DayZ template or DayZ `ban.txt` adapter, so DayZ-specific ban-file behavior remains unsupported. Violation hit counts are in memory and reset on panel restart; old log output is not replayed. The change was formatted and the Go build, JavaScript syntax check, installer/updater shell syntax check, and whitespace check passed. No tests, UI browser review, or live Docker/game-server acceptance were run.
 
+## Phase 3 anti-cheat guidance
+
+Templates can declare Anti-Xray, BattlEye, and recommended-plugin information. The server's **Anti-cheat** tab displays only escaped template text and requires `server.files`; it does not install protection or edit configuration. The Minecraft Java template notes that Paper Anti-Xray applies with the Paper server type and is disabled by default. Build, `go vet`, and browser-script syntax checks passed after this slice; no tests or live server/browser acceptance were run.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.

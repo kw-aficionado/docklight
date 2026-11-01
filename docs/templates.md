@@ -93,6 +93,8 @@ gameskill:
 | `query.type` | `minecraft`, `minecraft-java`, `minecraft-bedrock`, `a2s`, or `source`. |
 | `rcon` | Enables RCON commands using a declared `password_var`. The host mapping is loopback-only when its port is named `rcon`. |
 | `bans.ban_command`, `bans.unban_command` | Optional single console commands used by the central ban list. Both must include `{{player}}`; `{{player_id}}` and `{{reason}}` are also available. Docklight removes control characters before sending commands over RCON or server input. |
+| `anticheat.antixray`, `anticheat.battleye` | Optional `{ supported, config_hint }` informational cards in the server detail **Anti-cheat** tab. The tab requires `server.files`; Docklight does not apply the hint or modify server files. |
+| `anticheat.plugins_recommended` | Optional list of up to 16 plugin names displayed as template guidance only. |
 
 Variable keys that conflict with panel-injected names (including `SERVER_NAME`, `HOME`, `PUID`, `PGID`, `UID`, `GID`, `PUBLIC_URL`, `PORT_*`, and `*_PORT`) are rejected. Secret variables are encrypted at rest and masked in API responses. Password/token/secret/private-key-like variable names are treated as secret even without `secret: true`.
 
