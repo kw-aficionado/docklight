@@ -435,6 +435,13 @@ func (a *App) updateServerCloudflareSettings(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusConflict, fmt.Sprintf("hostname %s is already assigned to server %s", hostname, other))
 			return
 		}
+		if other, inUse, useErr := a.serverRouteProviderHostnameInUse(r.Context(), hostname, "cloudflare", "", s.ID, npmConfig{}, cfg); useErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not check additional Cloudflare hostnames")
+			return
+		} else if inUse {
+			writeError(w, http.StatusConflict, fmt.Sprintf("hostname %s is already assigned through an additional route to server %s", hostname, other))
+			return
+		}
 	}
 	var previous string
 	if err = a.db.QueryRowContext(r.Context(), `SELECT cf_hostname FROM servers WHERE id=?`, s.ID).Scan(&previous); err != nil {
@@ -533,7 +540,9 @@ func (a *App) openServerCloudflareRoute(ctx context.Context, s Server) error {
 	if err != nil {
 		return err
 	}
-	return a.openServerCloudflareRouteLocked(ctx, s, cfg)
+	primaryErr := a.openServerCloudflareRouteLocked(ctx, s, cfg)
+	extraErr := a.openServerExtraCloudflareRoutesLocked(ctx, s, cfg)
+	return errors.Join(primaryErr, extraErr)
 }
 
 func (a *App) openServerCloudflareRouteLocked(ctx context.Context, s Server, cfg cloudflareConfig) error {
@@ -545,6 +554,16 @@ func (a *App) openServerCloudflareRouteLocked(ctx context.Context, s Server, cfg
 	if err != nil {
 		_ = a.setCloudflareError(ctx, s.ID, err.Error())
 		return err
+	}
+	if hostname != "" && cfg.Enabled {
+		if other, inUse, useErr := a.serverRouteProviderHostnameInUse(ctx, hostname, "cloudflare", "", s.ID, npmConfig{}, cfg); useErr != nil {
+			_ = a.setCloudflareError(ctx, s.ID, useErr.Error())
+			return useErr
+		} else if inUse {
+			err = fmt.Errorf("Cloudflare hostname %s is also assigned to server %s", hostname, other)
+			_ = a.setCloudflareError(ctx, s.ID, err.Error())
+			return err
+		}
 	}
 	state, err := a.readServerCloudflareState(ctx, s.ID)
 	if err != nil {
@@ -700,7 +719,9 @@ func (a *App) removeServerCloudflareRoute(ctx context.Context, serverID string) 
 	if err != nil {
 		return err
 	}
-	return a.removeServerCloudflareRouteLocked(ctx, serverID, cfg)
+	primaryErr := a.removeServerCloudflareRouteLocked(ctx, serverID, cfg)
+	extraErr := a.reconcileServerExtraCloudflareRoutesLocked(ctx, serverID, nil, cfg)
+	return errors.Join(primaryErr, extraErr)
 }
 
 func (a *App) removeServerCloudflareRouteLocked(ctx context.Context, serverID string, cfg cloudflareConfig) error {
@@ -782,6 +803,9 @@ func (a *App) cleanupAllCloudflareRoutesLocked(ctx context.Context, cfg cloudfla
 			failures = append(failures, fmt.Errorf("server %s: %w", id, err))
 		}
 	}
+	if err = a.cleanupAllExtraCloudflareRoutesLocked(ctx); err != nil {
+		failures = append(failures, fmt.Errorf("additional server routes: %w", err))
+	}
 	return errors.Join(failures...)
 }
 
@@ -847,6 +871,9 @@ func (a *App) syncRunningCloudflareRoutesLocked(ctx context.Context, cfg cloudfl
 			failures = append(failures, fmt.Errorf("server %s: %w", id, err))
 		}
 	}
+	if err = a.reconcileAllExtraCloudflareRoutesLocked(ctx, cfg, runningSet); err != nil {
+		failures = append(failures, fmt.Errorf("additional server routes: %w", err))
+	}
 	return errors.Join(failures...)
 }
 
@@ -875,11 +902,14 @@ func (a *App) reconcileCloudflareRoutes(ctx context.Context) error {
 	a.cfMu.Lock()
 	defer a.cfMu.Unlock()
 	cfg, err := a.readCloudflareConfig()
-	if err != nil || !cfg.Enabled || !cfg.configured() {
+	if err != nil || !cfg.configured() {
 		return err
 	}
 	workCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	if !cfg.Enabled {
+		return a.cleanupAllCloudflareRoutesLocked(workCtx, cfg)
+	}
 	return a.syncRunningCloudflareRoutesLocked(workCtx, cfg)
 }
 

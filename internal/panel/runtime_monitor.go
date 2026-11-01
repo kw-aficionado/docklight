@@ -217,6 +217,11 @@ func (a *App) recordServerCrash(s Server, reason string, exitCode int, message s
 		a.audit(User{Username: "system"}, "server.cloudflare_cleanup_error", "server", s.ID, routeErr.Error())
 	}
 	cloudflareCancel()
+	npmCtx, npmCancel := context.WithTimeout(context.Background(), npmRequestTimeout)
+	if proxyErr := a.removeServerNPMHost(npmCtx, s.ID); proxyErr != nil {
+		a.audit(User{Username: "system"}, "server.npm_cleanup_error", "server", s.ID, proxyErr.Error())
+	}
+	npmCancel()
 	detail := fmt.Sprintf("reason=%s exit_code=%d", reason, exitCode)
 	a.audit(User{Username: "runtime monitor"}, "server.container_crash", "server", s.ID, detail)
 	a.dispatchWebhookNotification(notificationServerCrash, &webhookServer{ID: s.ID, Name: s.Name}, message)

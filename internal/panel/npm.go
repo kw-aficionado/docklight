@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/mail"
@@ -22,6 +23,8 @@ import (
 )
 
 const npmRequestTimeout = 20 * time.Second
+
+const npmReconcileEvery = 10 * time.Minute
 
 var npmDomainPattern = regexp.MustCompile(`(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$`)
 
@@ -366,6 +369,15 @@ func (a *App) updateServerNPMSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if hostname != "" {
+		if other, inUse, useErr := a.serverRouteProviderHostnameInUse(r.Context(), hostname, "npm", "", s.ID, cfg, cloudflareConfig{}); useErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not check additional Nginx Proxy Manager hostnames")
+			return
+		} else if inUse {
+			writeError(w, http.StatusConflict, fmt.Sprintf("hostname %s is already assigned through an additional route to server %s", hostname, other))
+			return
+		}
+	}
 	var previous string
 	if err = a.db.QueryRowContext(r.Context(), `SELECT npm_subdomain FROM servers WHERE id=?`, s.ID).Scan(&previous); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read current server hostname")
@@ -438,7 +450,9 @@ func (a *App) removeServerNPMHost(ctx context.Context, serverID string) error {
 	if err != nil {
 		return err
 	}
-	return a.removeServerNPMHostLocked(ctx, serverID, cfg)
+	primaryErr := a.removeServerNPMHostLocked(ctx, serverID, cfg)
+	extraErr := a.reconcileServerExtraNPMRoutesLocked(ctx, serverID, nil, cfg)
+	return errors.Join(primaryErr, extraErr)
 }
 
 func (a *App) removeServerNPMHostLocked(ctx context.Context, serverID string, cfg npmConfig) error {
@@ -497,6 +511,9 @@ func (a *App) cleanupAllNPMHostsLocked(ctx context.Context, cfg npmConfig) error
 			failures = append(failures, fmt.Errorf("server %s: %w", id, err))
 		}
 	}
+	if err = a.cleanupAllExtraNPMRoutesLocked(ctx, cfg); err != nil {
+		failures = append(failures, fmt.Errorf("additional server routes: %w", err))
+	}
 	return errors.Join(failures...)
 }
 
@@ -523,7 +540,36 @@ func (a *App) syncRunningNPMHostsLocked(ctx context.Context) error {
 		return err
 	}
 	rows.Close()
+	running := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		running[id] = true
+	}
+	stateRows, err := a.db.QueryContext(ctx, `SELECT server_id FROM server_npm_state WHERE host_id<>'' OR cleanup_pending=1 ORDER BY server_id`)
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for stateRows.Next() {
+		var id string
+		if err = stateRows.Scan(&id); err != nil {
+			stateRows.Close()
+			return err
+		}
+		if !running[id] {
+			stale = append(stale, id)
+		}
+	}
+	if err = stateRows.Err(); err != nil {
+		stateRows.Close()
+		return err
+	}
+	stateRows.Close()
 	var failures []error
+	for _, id := range stale {
+		if err = a.removeServerNPMHostLocked(ctx, id, cfg); err != nil {
+			failures = append(failures, fmt.Errorf("stopped server %s: %w", id, err))
+		}
+	}
 	for _, id := range ids {
 		s, getErr := a.getServer(id)
 		if getErr == nil {
@@ -532,7 +578,46 @@ func (a *App) syncRunningNPMHostsLocked(ctx context.Context) error {
 			}
 		}
 	}
+	if err = a.reconcileAllExtraNPMRoutesLocked(ctx, cfg, running); err != nil {
+		failures = append(failures, fmt.Errorf("additional server routes: %w", err))
+	}
 	return errors.Join(failures...)
+}
+
+// StartNPMReconciler repairs managed proxy hosts after restarts and every ten minutes.
+func (a *App) StartNPMReconciler(ctx context.Context) {
+	go func() {
+		if err := a.reconcileNPMHosts(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("Nginx Proxy Manager reconciliation: %v", err)
+		}
+		ticker := time.NewTicker(npmReconcileEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := a.reconcileNPMHosts(ctx); err != nil && !errors.Is(err, context.Canceled) {
+					log.Printf("Nginx Proxy Manager reconciliation: %v", err)
+				}
+			}
+		}
+	}()
+}
+
+func (a *App) reconcileNPMHosts(ctx context.Context) error {
+	a.npmMu.Lock()
+	defer a.npmMu.Unlock()
+	cfg, err := a.readNPMConfig()
+	if err != nil || !cfg.configured() {
+		return err
+	}
+	workCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if !cfg.Enabled {
+		return a.cleanupAllNPMHostsLocked(workCtx, cfg)
+	}
+	return a.syncRunningNPMHostsLocked(workCtx)
 }
 
 func (a *App) openServerNPMHost(ctx context.Context, s Server) error {
@@ -542,7 +627,9 @@ func (a *App) openServerNPMHost(ctx context.Context, s Server) error {
 	if err != nil {
 		return err
 	}
-	return a.openServerNPMHostLocked(ctx, s, cfg)
+	primaryErr := a.openServerNPMHostLocked(ctx, s, cfg)
+	extraErr := a.openServerExtraNPMRoutesLocked(ctx, s, cfg)
+	return errors.Join(primaryErr, extraErr)
 }
 
 func (a *App) openServerNPMHostLocked(ctx context.Context, s Server, cfg npmConfig) error {
@@ -554,6 +641,16 @@ func (a *App) openServerNPMHostLocked(ctx context.Context, s Server, cfg npmConf
 	if err != nil {
 		_ = a.setNPMError(ctx, s.ID, err.Error())
 		return err
+	}
+	if hostname != "" && cfg.Enabled {
+		if other, inUse, useErr := a.serverRouteProviderHostnameInUse(ctx, hostname, "npm", "", s.ID, cfg, cloudflareConfig{}); useErr != nil {
+			_ = a.setNPMError(ctx, s.ID, useErr.Error())
+			return useErr
+		} else if inUse {
+			err = fmt.Errorf("Nginx Proxy Manager hostname %s is also assigned to server %s", hostname, other)
+			_ = a.setNPMError(ctx, s.ID, err.Error())
+			return err
+		}
 	}
 	if hostname == "" || !cfg.Enabled {
 		return a.removeServerNPMHostLocked(ctx, s.ID, cfg)

@@ -1178,6 +1178,42 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 35 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_routes (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+			hostname TEXT NOT NULL,
+			port_name TEXT NOT NULL DEFAULT '',
+			cf_service TEXT NOT NULL DEFAULT '',
+			cf_dns_record_id TEXT NOT NULL DEFAULT '',
+			cf_last_error TEXT NOT NULL DEFAULT '',
+			cf_cleanup_pending INTEGER NOT NULL DEFAULT 0,
+			npm_host_id TEXT NOT NULL DEFAULT '',
+			npm_last_error TEXT NOT NULL DEFAULT '',
+			npm_cleanup_pending INTEGER NOT NULL DEFAULT 0,
+			delete_pending INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_server_routes_server ON server_routes(server_id,created_at,id)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(35)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

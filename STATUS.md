@@ -92,7 +92,7 @@ Tests cover the NPM token and bearer API flow, URL and hostname validation, encr
 
 The admin-only Network page stores the Cloudflare API token encrypted, plus the account, managed tunnel, base domain, optional zone ID, and optional internal host. Its connection check reads the tunnel configuration and resolves the zone only when the zone ID is blank; it does not call the token verification endpoint. Each server can save a subdomain or full hostname. On start, Docklight preserves unrelated Tunnel configuration fields and ingress rules, places its HTTP service rule before the terminal `http_status:404` fallback, then creates or updates a proxied CNAME to the configured tunnel. DNS conflicts are surfaced without overwriting records; DNS API failures leave the tunnel route in place and are retried by the ten-minute reconciler. Cleanup removes only the recorded ingress service and CNAMEs still targeting Docklight's configured tunnel. Stop, confirmed exit, server deletion, settings changes, restart, and the background reconciler participate in cleanup or repair. The admin-only `GET /api/domains/cloudflare` lists hostnames from all ingress rules, including manually provisioned ones.
 
-The admin Network card and per-server hostname control are implemented. The Domains page lists Cloudflare and NPM rows for servers the signed-in user can view, reports provisioning and route conflicts, and probes public HTTPS then HTTP with a guarded dialer, no redirects, self-signed certificate retry/flagging, 5xx warnings, and a 30-second cache. The page currently supports one hostname per provider per server; extra `server_routes` entries are not implemented. No live Cloudflare account or public DNS acceptance was available; the integration still needs a test account/zone run.
+The admin Network card and per-server hostname control are implemented. The Domains page lists Cloudflare and NPM rows for servers the signed-in user can view, reports provisioning and route conflicts, and probes public HTTPS then HTTP with a guarded dialer, no redirects, self-signed certificate retry/flagging, 5xx warnings, and a 30-second cache. Additional hostnames are described below. No live Cloudflare account or public DNS acceptance was available; the integration still needs a test account/zone run.
 
 ## Phase 3 IP blocking
 
@@ -101,6 +101,10 @@ The admin **IP blocking** page manages one public IPv4 or IPv6 address per rule.
 Blocking is off by default. Administrators can maintain up to 256 protected IPs or CIDR ranges. Docklight also rejects private, local, link-local, Cloudflare, CGNAT/Tailscale, documentation, benchmark, and reserved ranges, plus addresses used by administrators in the last 30 days. Admin connection addresses are retained in SQLite for that 30-day safety window. The configured Cloudflare API token needs the zone-level **Firewall Services → Edit** permission. Host nftables requires the systemd service to have `CAP_NET_ADMIN`; the installer does not grant it. Cloudflare ranges are embedded from Cloudflare's published IPv4/IPv6 lists as of 2026-11-01; IANA special-use prefixes are also embedded. Update the protected-range lists when those sources change.
 
 Startup and once-per-minute reconciliation repair managed Cloudflare and nftables rules and remove expired entries. The feature compiled and the browser script syntax checked in this checkout; no Cloudflare account, privileged host firewall, or end-to-end admin browser acceptance was available. The `off`/`propose`/`auto` setting is stored for the planned Kvasir workflow; only manual blocks are active in this slice.
+
+## Phase 3 additional server hostnames
+
+Administrators can add and remove full hostnames on each server, and optionally select a declared TCP port. Saved routes appear in per-server Settings and the Domains page. Cloudflare preserves unrelated Tunnel ingress rules and creates a proxied DNS record; Nginx Proxy Manager creates an independently tracked proxy host, including its optional Let's Encrypt flow. Provider state, errors, and cleanup intent are recorded separately per route. Start/stop, confirmed exits, server deletion, provider settings changes, and ten-minute Cloudflare/NPM reconciliation provision, remove, or retry routes. Deletes keep the database row until owned provider objects are confirmed removed. Existing hostname assignments and foreign Tunnel ingress, DNS, or NPM objects are left untouched. This slice compiled and browser-script syntax was checked; live provider and public-DNS acceptance remains pending.
 
 ## Phase 1 per-server host mounts
 
@@ -138,7 +142,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: beacon, self-update, cross-server ban automation, and additional hostnames beyond the primary Cloudflare/NPM route.
+- Phase 3: beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

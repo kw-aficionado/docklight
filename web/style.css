@@ -55,3 +55,21 @@
 .ip-block-empty p{max-width:430px;margin:0 auto;color:var(--muted);font-size:10px;line-height:1.5}
 .light .ip-block-capability,.light .ip-block-safety{background:#f8faf8}
 @media(max-width:900px){.ip-blocks-grid{grid-template-columns:1fr}.ip-block-list{grid-column:auto}.ip-block-settings,.ip-block-create{padding:15px}}
+.server-routes-card{padding:20px}
+.server-route-list{display:flex;flex-direction:column;margin:4px 0 20px}
+.server-route-row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(260px,1.3fr) auto;align-items:center;gap:16px;padding:14px 0;border-top:1px solid var(--border-soft)}
+.server-route-main,.server-route-providers{display:flex;flex-direction:column;gap:5px;min-width:0}
+.server-route-main b{overflow-wrap:anywhere;font-size:12px}
+.server-route-main small,.route-provider-error,.server-routes-readonly{color:var(--muted);font-size:10px;line-height:1.45}
+.route-provider-error{color:var(--red)}
+.server-route-providers .status-badge{width:max-content;max-width:100%}
+.server-route-form{display:grid;grid-template-columns:minmax(220px,1fr) minmax(200px,.65fr) auto;align-items:end;gap:14px;padding-top:18px;border-top:1px solid var(--border-soft)}
+.server-route-form>label{display:flex;flex-direction:column;gap:6px;font-size:11px}
+.server-route-form input,.server-route-form select{width:100%}
+.server-route-form small{color:var(--muted);font-size:10px;line-height:1.45}
+.server-route-submit{display:flex;align-items:center;gap:12px}
+.server-route-submit .form-error:empty{display:none}
+.server-routes-readonly{margin:0}
+.light .server-route-form input,.light .server-route-form select{background:#fff;color:#1b2922;border-color:#ccd8d0}
+@media(max-width:900px){.server-route-form{grid-template-columns:1fr 1fr}.server-route-submit{grid-column:1/-1;justify-content:space-between}}
+@media(max-width:600px){.server-route-row{grid-template-columns:1fr auto;gap:10px}.server-route-providers{grid-column:1/-1;grid-row:2;flex-direction:row;flex-wrap:wrap}.server-route-row>.button{grid-column:2;grid-row:1}.server-route-form{grid-template-columns:1fr}.server-route-submit{grid-column:auto}}

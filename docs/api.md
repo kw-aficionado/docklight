@@ -78,6 +78,9 @@ Blocking starts off. Cloudflare is selected when a configured zone is available 
 | `GET /api/domains` | Signed-in users; list primary Cloudflare and NPM domains for servers they can view, with provisioning state and a guarded public HTTP probe cached for 30 seconds. |
 | `GET /api/servers/{id}/cloudflare` | Requires `server.view`; read the selected hostname, route status, and cleanup status. |
 | `PUT /api/servers/{id}/cloudflare` | Requires `server.control`; save `{ "hostname": "app" }`, a full hostname inside the configured base domain, or an empty hostname to remove the route. |
+| `GET /api/servers/{id}/routes` | Requires `server.view`; list the primary Cloudflare/NPM hostnames and additional full hostnames, target TCP ports, per-provider state, and cleanup status. |
+| `POST /api/servers/{id}/routes` | Admin only; add `{ "hostname": "play.example.com", "port_name": "web" }`. `port_name` is optional and selects the server's web port or first TCP port when empty. Running servers are provisioned immediately. |
+| `DELETE /api/servers/{id}/routes/{routeID}` | Admin only; remove the recorded Cloudflare Tunnel and NPM objects before deleting the saved route. Failed cleanup leaves it marked for retry. |
 | `GET /api/gameskills` | List templates visible to the caller. |
 | `GET /api/gameskills/{id}` | Read one template; secret defaults are omitted. |
 | `POST /api/gameskills` | Admin only; upload a YAML template (512 KiB maximum). Replacing a catalog template clears its source metadata. |

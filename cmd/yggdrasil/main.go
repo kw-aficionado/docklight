@@ -139,6 +139,7 @@ func serve(args []string) error {
 	app.StartScheduleWorker(workerCtx)
 	app.StartRuntimeMonitor(workerCtx)
 	app.StartCloudflareReconciler(workerCtx)
+	app.StartNPMReconciler(workerCtx)
 	app.StartIPBlockingReconciler(workerCtx)
 	app.StartDiskMonitor(workerCtx)
 	app.StartWatchdogMonitor(workerCtx)

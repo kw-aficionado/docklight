@@ -35,6 +35,9 @@ type domainProbeResult struct {
 type domainRow struct {
 	ServerID        string            `json:"server_id"`
 	ServerName      string            `json:"server_name"`
+	RouteID         string            `json:"route_id,omitempty"`
+	PortName        string            `json:"port_name,omitempty"`
+	DeletePending   bool              `json:"delete_pending,omitempty"`
 	Provider        string            `json:"provider"`
 	Hostname        string            `json:"hostname"`
 	ProviderEnabled bool              `json:"provider_enabled"`
@@ -113,6 +116,19 @@ func (a *App) listDomains(w http.ResponseWriter, r *http.Request) {
 			row.ErrorCode = domainErrorCode(row.Provider, row.LastError)
 			domains = append(domains, row)
 		}
+		routes, routeErr := a.serverRoutes(r.Context(), id)
+		if routeErr != nil {
+			writeError(w, http.StatusInternalServerError, "could not read additional server hostnames")
+			return
+		}
+		for _, route := range routes {
+			cfRow := domainRow{ServerID: id, ServerName: server.Name, RouteID: route.ID, PortName: route.PortName, DeletePending: route.DeletePending, Provider: "cloudflare", Hostname: route.Hostname, ProviderEnabled: cfConfig.Enabled && cfConfig.configured(), Provisioned: route.CFActive, LastError: route.CFLastError}
+			cfRow.ErrorCode = domainErrorCode(cfRow.Provider, cfRow.LastError)
+			domains = append(domains, cfRow)
+			npmRow := domainRow{ServerID: id, ServerName: server.Name, RouteID: route.ID, PortName: route.PortName, DeletePending: route.DeletePending, Provider: "npm", Hostname: route.Hostname, ProviderEnabled: npmConfig.Enabled && npmConfig.configured(), Provisioned: route.NPMActive, LastError: route.NPMLastError}
+			npmRow.ErrorCode = domainErrorCode(npmRow.Provider, npmRow.LastError)
+			domains = append(domains, npmRow)
+		}
 	}
 	if len(domains) == 0 {
 		writeJSON(w, http.StatusOK, []domainRow{})
@@ -144,12 +160,15 @@ func (a *App) listDomains(w http.ResponseWriter, r *http.Request) {
 func domainErrorCode(provider, message string) string {
 	if provider == "cloudflare" {
 		lower := strings.ToLower(message)
-		if strings.Contains(lower, "different cloudflare tunnel") || strings.Contains(lower, "dns conflict") || strings.Contains(lower, "multiple cname") {
+		if strings.Contains(lower, "different cloudflare tunnel") || strings.Contains(lower, "dns conflict") || strings.Contains(lower, "multiple cname") || strings.Contains(lower, "already has an ingress rule") || strings.Contains(lower, "already assigned through cloudflare") || strings.Contains(lower, "does not own") {
 			return "cf_conflict"
 		}
 		if strings.Contains(lower, "no published tcp") || strings.Contains(lower, "internal host") || strings.Contains(lower, "internal ip") {
 			return "cf_target"
 		}
+	}
+	if strings.TrimSpace(message) != "" {
+		return "provider_error"
 	}
 	return ""
 }

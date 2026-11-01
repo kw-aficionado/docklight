@@ -180,3 +180,11 @@
 - Make host nftables opt-in and bind it to the Docklight-marked `inet yggdrasil` table only. Drop web ingress TCP 80/443 without touching SSH or game ports; require explicit `CAP_NET_ADMIN`, and refuse an unmarked existing table.
 - Keep expiration and external state in SQLite and reconcile at startup and every minute. Persist pending Cloudflare intent before API creation so a timeout can be recovered by ownership note rather than creating duplicates.
 - The `off`/`propose`/`auto` mode is reserved for the planned Kvasir workflow; manual blocks are the only source implemented here. No Cloudflare account or privileged host-firewall acceptance was available.
+
+## 2026-11-01: additional server hostnames
+
+- Store each additional full hostname and optional declared TCP port in a separate `server_routes` row, with independent Cloudflare and NPM ownership, error, and cleanup state. Primary hostnames continue to use their existing server settings.
+- Check hostname collisions against primary and additional routes before provisioning. Cloudflare hostnames must fit its configured base domain; NPM accepts the full hostname and does not create DNS records.
+- Record the Cloudflare ingress service and DNS record ID before deleting owned objects. Delete DNS only when that ID still names the recorded CNAME and it still targets the configured Tunnel. Do not adopt or remove an unrecorded pre-existing DNS record just because it points at the same Tunnel.
+- Mark NPM proxy hosts with Docklight server and route IDs. Use saved host IDs plus those markers for cleanup and recovery, leaving foreign hosts untouched.
+- Keep route rows when provider cleanup fails, then retry at server lifecycle changes and the ten-minute provider reconcilers. Extra hostnames require live Cloudflare, NPM, and public-DNS acceptance; those services were not available in this environment.
