@@ -35,6 +35,51 @@ func TestBuiltinRunesParse(t *testing.T) {
 	}
 }
 
+func TestParseRejectsUnknownAndDuplicateFields(t *testing.T) {
+	valid := `gameskill:
+  id: sample
+  name: Sample
+  docker:
+    image: example/app:1
+    keep_entrypoint: true
+  startup:
+    exec: [run]
+`
+	tests := []struct {
+		name    string
+		source  string
+		wantErr string
+	}{
+		{
+			name:    "unknown rune field",
+			source:  strings.Replace(valid, "  name: Sample", "  nam: Sample", 1),
+			wantErr: `unknown field "nam"`,
+		},
+		{
+			name:    "unknown nested field",
+			source:  strings.Replace(valid, "    image: example/app:1", "    imag: example/app:1", 1),
+			wantErr: `unknown field "imag"`,
+		},
+		{
+			name:    "duplicate top-level field",
+			source:  valid + "  name: Another name\n",
+			wantErr: `duplicate key "name"`,
+		},
+		{
+			name:    "duplicate field in sequence item",
+			source:  strings.Replace(valid, "  startup:", "  ports:\n    - name: game\n      name: other\n      default: 25565\n      protocol: tcp\n  startup:", 1),
+			wantErr: `duplicate key "name"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := Parse(test.source); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Parse() error = %v, want it to contain %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestAppStackTemplateValidationAndSecrets(t *testing.T) {
 	path := filepath.Join("..", "..", "builtin-runes", "wordpress-mariadb.yaml")
 	content, err := os.ReadFile(path)

@@ -2,6 +2,7 @@ package rune
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -119,6 +120,9 @@ func parseMap(ls []yamlLine, i *int, indent int, initial map[string]any) (map[st
 		if !ok {
 			return nil, fmt.Errorf("line %d: expected key: value", ln.num)
 		}
+		if _, exists := m[key]; exists {
+			return nil, fmt.Errorf("line %d: duplicate key %q", ln.num, key)
+		}
 		*i++
 		if val == "|" || val == ">" || val == "|-" || val == ">-" || val == "|+" || val == ">+" {
 			var chunks []string
@@ -222,12 +226,8 @@ func parseSeq(ls []yamlLine, i *int, indent int) ([]any, error) {
 			}
 			if *i < len(ls) && ls[*i].indent > indent {
 				childIndent := ls[*i].indent
-				more, e := parseMap(ls, i, childIndent, nil)
-				if e != nil {
+				if _, e := parseMap(ls, i, childIndent, m); e != nil {
 					return nil, e
-				}
-				for k, v := range more {
-					m[k] = v
 				}
 			}
 			out = append(out, m)
@@ -353,5 +353,10 @@ func Decode(src string, dst any) error {
 	if e != nil {
 		return e
 	}
-	return json.Unmarshal(b, dst)
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return fmt.Errorf("rune fields: %w", err)
+	}
+	return nil
 }

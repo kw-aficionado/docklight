@@ -2,6 +2,8 @@
 
 A server template describes a container image, settings, ports, lifecycle and optional protocols. For API compatibility, it is stored under the `gameskill` resource name and uses one top-level `gameskill:` YAML mapping. Imports are limited to 512 KiB.
 
+The parser rejects unknown fields and duplicate mapping keys with an error. This catches misspelled settings such as `done_regx` before a template is saved; arbitrary keys remain valid only inside declared environment and sysctl maps.
+
 ## Supported shape
 
 ```yaml
