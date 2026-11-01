@@ -217,3 +217,10 @@
 - Read anti-cheat capability notes only from the selected template and show them as escaped plain text in a server detail tab gated by `server.files`.
 - Keep the feature informational. Do not infer installed protection from the template alone, install plugins, or change user-owned config files.
 - The Minecraft Java note follows Paper's official docs: Anti-Xray is a Paper feature, disabled by default, and configured in `config/paper-world-defaults.yml`; the template makes it conditional on selecting Paper.
+
+## 2026-11-01: DayZ Economy controls
+
+- Use the neutral product name **Economy** in Docklight instead of the brief's mythological feature label; require the Rune ID `dayz` and enforce `server.view` for summaries and `server.control` for edits.
+- Patch only numeric lifetime/global value spans so comments and surrounding XML remain intact. Restrict cleanup edits to the seven named lifetime globals and reject links, special files, path traversal, and oversized XML.
+- Save the minimum floor, cleanup values, and registered type paths in SQLite and reapply them after successful installs and scheduled updates. Reset clears that saved state without attempting to reverse XML edits.
+- This is a compatible-template feature, not a built-in DayZ Rune. Workshop management and importing mod loot remain separate follow-up work; no live DayZ server acceptance was available.

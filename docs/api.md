@@ -229,6 +229,11 @@ curl -sS http://127.0.0.1:8080/api/servers \
 | `POST /api/servers/{id}/files/mkdir` | JSON `{ "path": "mods" }`. |
 | `POST /api/servers/{id}/files/upload` | Multipart form fields `path` and `file`; maximum request size 64 MiB. |
 | `GET /api/servers/{id}/files/download?path=…` | Download a file. |
+| `GET /api/servers/{id}/dayz/economy` | Requires `server.view`; summarize the mission's vanilla and registered DayZ types files, cleanup lifetimes, and eligible unregistered XML files. Candidate scanning is bounded to 20,000 entries, 128 MiB read, and 256 candidates; `candidates_truncated` reports when a limit was reached. Available only when `gameskill_id` is `dayz`. |
+| `PUT /api/servers/{id}/dayz/min-lifetime` | Requires `server.control`; accept `{"hours":24}` from 0–8760. Raises only positive type lifetimes below the floor; 0 disables future floor applications but does not undo prior edits. |
+| `PUT /api/servers/{id}/dayz/globals` | Requires `server.control`; accept `{"values":{"CleanupLifetimeDefault":86400}}` for allowlisted cleanup globals, in seconds. |
+| `POST /api/servers/{id}/dayz/register-types` | Requires `server.control`; accept `{"paths":["MyMod/types.xml"]}` for validated types files under mission subfolders. |
+| `POST /api/servers/{id}/dayz/reset` | Requires `server.control`; clear saved reapply settings. Existing mission XML changes remain in place. |
 | `GET /api/servers/{id}/logs` | WebSocket with container log output; requires `server.view`. |
 | `GET /api/servers/{id}/stack-services/{service}/logs` | WebSocket with up to 2,000 recent lines and live private-service output; requires `server.view`. Template secret values are redacted. |
 | `POST /api/servers/{id}/stack-services/{service}/exec` | Run a one-line command in a private service; requires `server.console`. Waits up to 30 seconds and returns at most 64 KiB of redacted output. A timed-out command may continue in its container. |

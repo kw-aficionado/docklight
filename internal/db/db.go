@@ -1358,6 +1358,29 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 39 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS dayz_economy_settings (
+			server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+			min_lifetime_hours INTEGER NOT NULL DEFAULT 0 CHECK(min_lifetime_hours BETWEEN 0 AND 8760),
+			globals_json TEXT NOT NULL DEFAULT '{}',
+			registered_files_json TEXT NOT NULL DEFAULT '[]',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(39)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

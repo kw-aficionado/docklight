@@ -459,6 +459,12 @@ func (a *App) installServer(w http.ResponseWriter, r *http.Request) {
 	if gs.Install == nil {
 		_, _ = a.db.Exec(`UPDATE servers SET installed=1,status='stopped' WHERE id=?`, s.ID)
 		s.Installed = true
+		if e = a.applyDayZEconomySettings(s); e != nil {
+			message := "server data is installed, but saved DayZ Economy settings could not be restored: " + e.Error()
+			_, _ = a.db.Exec(`UPDATE servers SET status='error',error_message=? WHERE id=?`, cleanModerationText(message, 800), s.ID)
+			writeError(w, http.StatusConflict, message)
+			return
+		}
 		if e = a.start(s); e != nil {
 			writeError(w, 502, e.Error())
 			return
@@ -521,6 +527,11 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 		return
 	}
 	a.dataMu.Lock()
+	if err = a.applyDayZEconomySettings(s); err != nil {
+		finish(fmt.Errorf("restore saved DayZ Economy settings: %w", err))
+		a.dataMu.Unlock()
+		return
+	}
 	finish(nil)
 	s.Installed = true
 	if e := a.start(s); e != nil {
@@ -644,6 +655,9 @@ func (a *App) executeScheduledUpdate(parent context.Context, serverID string) (s
 	secrets = append(secrets, installSecrets...)
 	if installErr != nil {
 		return fail(fmt.Errorf("run template update: %w", installErr))
+	}
+	if err = a.applyDayZEconomySettings(s); err != nil {
+		return fail(fmt.Errorf("restore saved DayZ Economy settings: %w", err))
 	}
 	if _, err = a.db.Exec(`UPDATE servers SET installed=1,status='updating',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?`, serverID); err != nil {
 		return fail(fmt.Errorf("record completed template update: %w", err))

@@ -128,6 +128,10 @@ Templates opt in using `bans.ban_command` and `bans.unban_command`; commands sup
 
 Templates can declare Anti-Xray, BattlEye, and recommended-plugin information. The server's **Anti-cheat** tab displays only escaped template text and requires `server.files`; it does not install protection or edit configuration. The Minecraft Java template notes that Paper Anti-Xray applies with the Paper server type and is disabled by default. Build, `go vet`, and browser-script syntax checks passed after this slice; no tests or live server/browser acceptance were run.
 
+## DayZ Economy
+
+Servers using a Rune ID of `dayz` have an **Economy** tab. `server.view` can read type counts, shortest positive lifetimes, registered files, and eligible unregistered XML candidates; candidate scanning is capped at 20,000 entries, 128 MiB, and 256 files and reports when incomplete. `server.control` can raise a minimum lifetime, update seven allowlisted cleanup globals, register validated types files, or clear saved automation. XML edits preserve bytes outside changed numeric values. Saved settings are reapplied after a successful install or scheduled update, and a missing registered file prevents that operation from starting the server with a broken mission reference. There is no built-in DayZ Rune yet, and the Workshop mod manager and mod loot import are still outstanding. `go build`, `go vet`, JavaScript syntax, and whitespace checks passed; no tests, browser review, or live DayZ acceptance were run.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -164,7 +168,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Built-in DayZ server template and DayZ Norn economy/mod tools.
+- Built-in DayZ server template, Workshop mod management, and mod loot import.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
