@@ -27,102 +27,109 @@ import (
 )
 
 type App struct {
-	cfg                   config.Config
-	configPath            string
-	db                    *sql.DB
-	engine                *docker.Engine
-	dataRoot              string
-	updateDir             string
-	backupRoot            string
-	backupStoreFactory    func(backupTargetConfig) (backupObjectStore, error)
-	booted                time.Time
-	dataMu                sync.Mutex
-	scheduleMu            sync.Mutex
-	scheduleRestart       func(context.Context, string, bool, int) (string, error)
-	scheduleControl       func(context.Context, string, string) (string, string, error)
-	scheduleUpdate        func(context.Context, string) (string, error)
-	scheduleReady         func(context.Context, string, time.Duration) error
-	schedulePlayers       func(context.Context, string) (int, error)
-	scheduleWait          func(context.Context, time.Duration) error
-	scheduleCommand       func(context.Context, Server, string) error
-	notificationClient    *http.Client
-	assistantHTTPClient   *http.Client
-	assistantDigestMu     sync.Mutex
-	assistantDigestActive bool
-	metricsMu             sync.Mutex
-	metricsCPUBusy        uint64
-	metricsCPUTotal       uint64
-	metricsPruneAt        time.Time
-	metricsStats          func(context.Context, Server) (float64, uint64, error)
-	metricsPlayers        func(context.Context, Server) (int, error)
-	metricsHostProbe      func(time.Time) hostMetricPoint
-	runeCatalogHTTPClient *http.Client
-	runeCatalogMu         sync.Mutex
-	runeCatalogCache      map[string]runeCatalogCacheEntry
-	runtimeMu             sync.Mutex
-	runtimePending        map[string]pendingRuntimeIncident
-	runtimeInspect        func(context.Context, string) (docker.Inspect, error)
-	runtimePing           func(context.Context) error
-	diskAlertMu           sync.Mutex
-	diskProbe             func(string) (diskUsage, error)
-	watchdogMu            sync.Mutex
-	watchdogStates        map[string]*watchdogRuntimeState
-	watchdogQuery         func(context.Context, Server, rune.Rune) error
-	watchdogHeal          func(context.Context, Server) error
-	watchdogStart         func(context.Context, Server) error
-	watchdogWait          func(context.Context, time.Duration) error
-	statusMu              sync.Mutex
-	statusCache           []byte
-	statusCacheUntil      time.Time
-	version               string
-	releaseRepo           string
-	releaseMu             sync.Mutex
-	releaseCache          releaseCacheEntry
-	updateRequestMu       sync.Mutex
-	banSyncMu             sync.Mutex
-	violationMu           sync.Mutex
-	violationRules        []violationRule
-	violationRulesAt      time.Time
-	violationHits         map[string][]time.Time
-	violationDroppedAt    time.Time
-	violationWatches      map[string]violationLogWatch
-	violationActions      chan violationAction
-	beaconSendMu          sync.Mutex
-	beaconMu              sync.Mutex
-	beaconCountCache      *beaconCountResponse
-	beaconCountCacheUntil time.Time
-	networkMu             sync.Mutex
-	blockingMu            sync.Mutex
-	upnpMu                sync.Mutex
-	unifiMu               sync.Mutex
-	npmMu                 sync.Mutex
-	cfMu                  sync.Mutex
-	networkDetected       string
-	networkDetectedAt     time.Time
-	networkAttemptAt      time.Time
-	networkHTTPClient     *http.Client
-	upnpDiscover          func(context.Context) (upnp.Gateway, error)
-	unifiHTTPClient       *http.Client
-	hostLocalIP           func(context.Context, string) (net.IP, error)
-	npmHTTPClient         *http.Client
-	cfHTTPClient          *http.Client
-	cfAPIBaseURL          string
-	reachabilityMu        sync.Mutex
-	reachabilityCache     map[string]reachabilityCacheEntry
-	reachabilityProbe     func(context.Context, string, int, rune.Rune) error
-	domainProbeMu         sync.Mutex
-	domainProbeCache      map[string]domainProbeCacheEntry
-	rateMu                sync.Mutex
-	loginIPs              map[string][]time.Time
-	loginUsers            map[string][]time.Time
-	forgotAttempts        map[string][]time.Time
-	passkeyMu             sync.Mutex
-	passkeyCeremonies     map[string]passkeyCeremony
-	passkeyIPs            map[string][]time.Time
-	passwordResetSender   func(context.Context, notificationChannelConfig, string, string) error
-	passwordResetWG       sync.WaitGroup
-	jobsMu                sync.RWMutex
-	jobs                  map[string]*installJob
+	cfg                      config.Config
+	configPath               string
+	db                       *sql.DB
+	engine                   *docker.Engine
+	dataRoot                 string
+	updateDir                string
+	backupRoot               string
+	backupStoreFactory       func(backupTargetConfig) (backupObjectStore, error)
+	booted                   time.Time
+	dataMu                   sync.Mutex
+	scheduleMu               sync.Mutex
+	scheduleRestart          func(context.Context, string, bool, int) (string, error)
+	scheduleControl          func(context.Context, string, string) (string, string, error)
+	scheduleUpdate           func(context.Context, string) (string, error)
+	scheduleReady            func(context.Context, string, time.Duration) error
+	schedulePlayers          func(context.Context, string) (int, error)
+	scheduleWait             func(context.Context, time.Duration) error
+	scheduleCommand          func(context.Context, Server, string) error
+	notificationClient       *http.Client
+	assistantHTTPClient      *http.Client
+	assistantDigestMu        sync.Mutex
+	assistantDigestActive    bool
+	assistantPlanMu          sync.Mutex
+	assistantPlans           map[string]assistantActionGrant
+	assistantWatcherMu       sync.Mutex
+	assistantWatcherStreams  map[string]assistantWatcherStream
+	assistantWatcherHits     map[string][]time.Time
+	assistantWatcherHitCount int
+	metricsMu                sync.Mutex
+	metricsCPUBusy           uint64
+	metricsCPUTotal          uint64
+	metricsPruneAt           time.Time
+	metricsStats             func(context.Context, Server) (float64, uint64, error)
+	metricsPlayers           func(context.Context, Server) (int, error)
+	metricsHostProbe         func(time.Time) hostMetricPoint
+	runeCatalogHTTPClient    *http.Client
+	runeCatalogMu            sync.Mutex
+	runeCatalogCache         map[string]runeCatalogCacheEntry
+	runtimeMu                sync.Mutex
+	runtimePending           map[string]pendingRuntimeIncident
+	runtimeInspect           func(context.Context, string) (docker.Inspect, error)
+	runtimePing              func(context.Context) error
+	diskAlertMu              sync.Mutex
+	diskProbe                func(string) (diskUsage, error)
+	watchdogMu               sync.Mutex
+	watchdogStates           map[string]*watchdogRuntimeState
+	watchdogQuery            func(context.Context, Server, rune.Rune) error
+	watchdogHeal             func(context.Context, Server) error
+	watchdogStart            func(context.Context, Server) error
+	watchdogWait             func(context.Context, time.Duration) error
+	statusMu                 sync.Mutex
+	statusCache              []byte
+	statusCacheUntil         time.Time
+	version                  string
+	releaseRepo              string
+	releaseMu                sync.Mutex
+	releaseCache             releaseCacheEntry
+	updateRequestMu          sync.Mutex
+	banSyncMu                sync.Mutex
+	violationMu              sync.Mutex
+	violationRules           []violationRule
+	violationRulesAt         time.Time
+	violationHits            map[string][]time.Time
+	violationDroppedAt       time.Time
+	violationWatches         map[string]violationLogWatch
+	violationActions         chan violationAction
+	beaconSendMu             sync.Mutex
+	beaconMu                 sync.Mutex
+	beaconCountCache         *beaconCountResponse
+	beaconCountCacheUntil    time.Time
+	networkMu                sync.Mutex
+	blockingMu               sync.Mutex
+	upnpMu                   sync.Mutex
+	unifiMu                  sync.Mutex
+	npmMu                    sync.Mutex
+	cfMu                     sync.Mutex
+	networkDetected          string
+	networkDetectedAt        time.Time
+	networkAttemptAt         time.Time
+	networkHTTPClient        *http.Client
+	upnpDiscover             func(context.Context) (upnp.Gateway, error)
+	unifiHTTPClient          *http.Client
+	hostLocalIP              func(context.Context, string) (net.IP, error)
+	npmHTTPClient            *http.Client
+	cfHTTPClient             *http.Client
+	cfAPIBaseURL             string
+	reachabilityMu           sync.Mutex
+	reachabilityCache        map[string]reachabilityCacheEntry
+	reachabilityProbe        func(context.Context, string, int, rune.Rune) error
+	domainProbeMu            sync.Mutex
+	domainProbeCache         map[string]domainProbeCacheEntry
+	rateMu                   sync.Mutex
+	loginIPs                 map[string][]time.Time
+	loginUsers               map[string][]time.Time
+	oauthRegisterIPs         map[string][]time.Time
+	forgotAttempts           map[string][]time.Time
+	passkeyMu                sync.Mutex
+	passkeyCeremonies        map[string]passkeyCeremony
+	passkeyIPs               map[string][]time.Time
+	passwordResetSender      func(context.Context, notificationChannelConfig, string, string) error
+	passwordResetWG          sync.WaitGroup
+	jobsMu                   sync.RWMutex
+	jobs                     map[string]*installJob
 }
 
 type User struct {
@@ -155,7 +162,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}, violationHits: map[string][]time.Time{}, violationWatches: map[string]violationLogWatch{}, violationActions: make(chan violationAction, 128)}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, oauthRegisterIPs: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}, violationHits: map[string][]time.Time{}, violationWatches: map[string]violationLogWatch{}, violationActions: make(chan violationAction, 128), assistantPlans: map[string]assistantActionGrant{}, assistantWatcherStreams: map[string]assistantWatcherStream{}, assistantWatcherHits: map[string][]time.Time{}}
 }
 
 func (a *App) SetBuildVersion(version string) {
@@ -221,18 +228,32 @@ func UpsertBuiltins(d *sql.DB) error {
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(a.headers)
+	r.Get("/.well-known/oauth-authorization-server", a.mcpAuthorizationServerMetadata)
+	r.Get("/.well-known/oauth-protected-resource", a.mcpProtectedResourceMetadata)
+	r.Get("/.well-known/oauth-protected-resource/api/mcp", a.mcpProtectedResourceMetadata)
+	r.Post("/oauth/register", a.mcpRegisterClient)
+	r.Get("/oauth/authorize", a.mcpAuthorizationPage)
+	r.Post("/oauth/authorize", a.auth(a.mcpAuthorizationConsent))
+	r.Post("/oauth/token", a.mcpToken)
 	r.Get("/", a.static("web/index.html", "text/html; charset=utf-8"))
 	r.Get("/app.js", a.static("web/app.js", "text/javascript; charset=utf-8"))
 	r.Get("/ui-utils.mjs", a.static("web/ui-utils.mjs", "text/javascript; charset=utf-8"))
 	r.Get("/style.css", a.static("web/style.css", "text/css; charset=utf-8"))
 	r.Get("/config-editor.css", a.static("web/config-editor.css", "text/css; charset=utf-8"))
+	r.Get("/service-worker.js", a.serviceWorker)
 	r.Get("/status", a.publicStatusPage)
 	r.Get("/status.js", a.publicStatusScript)
 	r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"name": "Docklight", "short_name": "Docklight", "start_url": "/", "display": "standalone", "background_color": "#0d1417", "theme_color": "#0d1417", "icons": []map[string]string{{"src": "/brand.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}}})
+		w.Header().Set("Cache-Control", "no-cache")
+		writeJSON(w, http.StatusOK, docklightManifest())
 	})
 	r.Get("/brand.svg", a.static("web/brand.svg", "image/svg+xml"))
 	r.Route("/api", func(api chi.Router) {
+		api.Handle("/mcp", http.HandlerFunc(a.mcpEndpoint))
+		api.Get("/mcp/info", a.auth(a.mcpInfo))
+		api.Get("/mcp/connections", a.auth(a.mcpListConnections))
+		api.Delete("/mcp/connections/{id}", a.auth(a.mcpRevokeConnection))
+		api.Handle("/mcp/*", http.HandlerFunc(a.mcpRejectSubpath))
 		api.Get("/status", a.publicStatusJSON)
 		api.Post("/beacon", a.receiveBeacon)
 		api.Get("/beacon/count", a.publicBeaconCount)
@@ -339,7 +360,22 @@ func (a *App) Router() http.Handler {
 			priv.Put("/ai/config", a.admin(a.updateAssistantConfig))
 			priv.Post("/ai/config/test", a.admin(a.testAssistantConnection))
 			priv.Put("/ai/enabled", a.admin(a.setAssistantEnabled))
+			priv.Put("/ai/digest-settings", a.admin(a.updateAssistantDigestSettings))
+			priv.Put("/ai/chat-scope", a.admin(a.updateAssistantChatScope))
+			priv.Put("/ai/proactive-settings", a.admin(a.updateAssistantProactiveSettings))
+			priv.Get("/ai/proactive-events", a.listAssistantProactiveEvents)
+			priv.Delete("/ai/proactive-events/{id}", a.dismissAssistantProactiveEvent)
+			priv.Put("/ai/actions-enabled", a.admin(a.setAssistantActionsEnabled))
 			priv.Post("/ai/health-digest", a.admin(a.assistantHealthDigest))
+			priv.Get("/ai/chat/ws", a.assistantFleetChatWS)
+			priv.Post("/ai/plan", a.assistantPlanActions)
+			priv.Post("/ai/plan/execute", a.assistantExecuteActions)
+			priv.Get("/ai/status", a.assistantStatus)
+			priv.Get("/watchers", a.admin(a.listAssistantLogWatchers))
+			priv.Post("/watchers", a.admin(a.createAssistantLogWatcher))
+			priv.Put("/watchers/{id}", a.admin(a.updateAssistantLogWatcher))
+			priv.Delete("/watchers/{id}", a.admin(a.deleteAssistantLogWatcher))
+			priv.Post("/admin-log/digest", a.admin(a.assistantActivityDigest))
 			priv.Get("/settings/status-page", a.admin(a.getStatusPageSettings))
 			priv.Put("/settings/status-page", a.admin(a.updateStatusPageSettings))
 			priv.Get("/settings/beacon", a.admin(a.getBeaconSettings))
@@ -406,6 +442,10 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/restart", a.restartServer)
 			priv.Get("/servers/{id}/stats", a.serverStats)
 			priv.Get("/servers/{id}/metrics", a.serverMetrics)
+			priv.Post("/servers/{id}/explain", a.assistantExplainServerLogs)
+			priv.Post("/servers/{id}/config-advice", a.assistantAdviseServerConfig)
+			priv.Post("/servers/{id}/assistant/chat", a.assistantServerChat)
+			priv.Post("/servers/{id}/watchers/suggest", a.admin(a.assistantSuggestWatchers))
 			priv.Get("/servers/{id}/query", a.serverQuery)
 			priv.Get("/servers/{id}/reachability", a.serverReachability)
 			priv.Post("/servers/{id}/rcon", a.serverRCON)
@@ -425,6 +465,7 @@ func (a *App) Router() http.Handler {
 			priv.Get("/servers/{id}/dayz/mod-loot", a.getDayZModLoot)
 			priv.Post("/servers/{id}/dayz/import-mod-types", a.importDayZModTypes)
 			priv.Get("/servers/{id}/dayz/mods", a.getDayZMods)
+			priv.Post("/servers/{id}/dayz/mods/suggest", a.assistantSuggestDayZMods)
 			priv.Get("/servers/{id}/dayz/mods/search", a.getDayZModsSearch)
 			priv.Put("/servers/{id}/dayz/mods/order", a.reorderDayZMods)
 			priv.Post("/servers/{id}/dayz/mods/add", a.addDayZMods)
@@ -598,7 +639,12 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		authorization := strings.TrimSpace(r.Header.Get("Authorization"))
-		token := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		authorizationParts := strings.Fields(authorization)
+		bearerAuth := len(authorizationParts) == 2 && strings.EqualFold(authorizationParts[0], "Bearer")
+		token := ""
+		if bearerAuth {
+			token = authorizationParts[1]
+		}
 		if token == "" {
 			if c, e := r.Cookie("ygg_token"); e == nil {
 				token = c.Value
@@ -606,11 +652,28 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		var u User
 		var disabled int
-		if strings.HasPrefix(token, "ygg_") && strings.HasPrefix(authorization, "Bearer ") {
+		if strings.HasPrefix(token, "ygg_mcp_") && bearerAuth {
+			if r.URL.Path != "/api/mcp" {
+				a.writeAuthError(w, r, 401, "unauthorized")
+				return
+			}
+			var storedVersion, expiresAt, revokedAt int64
+			var resource, scope string
+			var connectionID string
+			err := a.db.QueryRow(`SELECT u.id,u.username,u.role,u.disabled,u.token_version,c.user_token_version,c.resource,c.scope,c.revoked_at,x.expires_at,c.id
+				FROM mcp_access_tokens x JOIN mcp_connections c ON c.id=x.connection_id AND c.user_id=x.user_id JOIN users u ON u.id=x.user_id
+				WHERE x.token_hash=?`, security.APIKeyHash(token)).Scan(&u.ID, &u.Username, &u.Role, &disabled, &u.TokenVersion, &storedVersion, &resource, &scope, &revokedAt, &expiresAt, &connectionID)
+			expectedResource, resourceErr := a.mcpResourceURL(r)
+			if err != nil || disabled != 0 || u.TokenVersion != int(storedVersion) || expiresAt <= time.Now().Unix() || revokedAt != 0 || scope != "yggdrasil" || resourceErr != nil || resource != expectedResource {
+				a.writeAuthError(w, r, 401, "unauthorized")
+				return
+			}
+			_, _ = a.db.ExecContext(r.Context(), `UPDATE mcp_connections SET last_used_at=CURRENT_TIMESTAMP WHERE id=? AND revoked_at=0`, connectionID)
+		} else if strings.HasPrefix(token, "ygg_") && bearerAuth {
 			var rawScopes string
 			err := a.db.QueryRow(`SELECT u.id,u.username,u.role,u.disabled,u.token_version,u.totp_secret,u.totp_enabled,u.totp_last_counter,t.scope FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?`, security.APIKeyHash(token)).Scan(&u.ID, &u.Username, &u.Role, &disabled, &u.TokenVersion, &u.TotpSecret, &u.TotpEnabled, &u.TotpLastCounter, &rawScopes)
 			if err != nil || disabled != 0 {
-				writeError(w, 401, "unauthorized")
+				a.writeAuthError(w, r, 401, "unauthorized")
 				return
 			}
 			u.IsAPIToken = true
@@ -624,18 +687,27 @@ func (a *App) auth(next http.HandlerFunc) http.HandlerFunc {
 		} else {
 			claims, err := security.ParseJWT([]byte(a.cfg.Auth.SecretKey), token)
 			if err != nil {
-				writeError(w, 401, "unauthorized")
+				a.writeAuthError(w, r, 401, "unauthorized")
 				return
 			}
 			err = a.db.QueryRow(`SELECT id,username,role,disabled,token_version,totp_secret,totp_enabled,totp_last_counter FROM users WHERE id=?`, claims.UserID).Scan(&u.ID, &u.Username, &u.Role, &disabled, &u.TokenVersion, &u.TotpSecret, &u.TotpEnabled, &u.TotpLastCounter)
 			if err != nil || disabled != 0 || u.TokenVersion != claims.Version {
-				writeError(w, 401, "session expired")
+				a.writeAuthError(w, r, 401, "session expired")
 				return
 			}
 		}
 		u.Disabled = false
 		next(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, u)))
 	}
+}
+
+func (a *App) writeAuthError(w http.ResponseWriter, r *http.Request, status int, message string) {
+	if r.URL.Path == "/api/mcp" {
+		if issuer, err := a.mcpIssuer(r); err == nil {
+			w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+issuer+`/.well-known/oauth-protected-resource"`)
+		}
+	}
+	writeError(w, status, message)
 }
 
 func sameOrigin(r *http.Request, origin string) bool {

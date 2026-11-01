@@ -48,4 +48,4 @@ sudo /usr/local/bin/yggdrasil reset-2fa admin --config /etc/yggdrasil/config.yam
 
 Both reset commands require root and invalidate existing web sessions. The generated reset password is printed to the terminal. For server-specific failures, open the server Console tab and read its status message before changing template settings.
 
-See [configuration](configuration.md), [HTTP API](api.md), [server operations](guides/servers.md), [access and security](guides/security.md), and [templates](templates.md).
+See [configuration](configuration.md), [HTTP API](api.md), [offline app shell](guides/offline-pwa.md), [server operations](guides/servers.md), [access and security](guides/security.md), and [templates](templates.md).

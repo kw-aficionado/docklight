@@ -74,8 +74,26 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 44 {
-		t.Fatalf("expected 44 migrations, got %d", count)
+	if count != 48 {
+		t.Fatalf("expected 48 migrations, got %d", count)
+	}
+	var watcherTable, watcherConsentColumn int
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='log_watchers'`).Scan(&watcherTable); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('log_watchers') WHERE name='advisory_host'`).Scan(&watcherConsentColumn); err != nil {
+		t.Fatal(err)
+	}
+	if watcherTable != 1 || watcherConsentColumn != 1 {
+		t.Fatalf("log watcher schema missing table or provider consent binding: table=%d consent=%d", watcherTable, watcherConsentColumn)
+	}
+	var proactiveTable int
+	if err = d.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='assistant_proactive_events'").Scan(&proactiveTable); err != nil || proactiveTable != 1 {
+		t.Fatalf("proactive Advisory event table missing: count=%d err=%v", proactiveTable, err)
+	}
+	var mcpTables int
+	if err = d.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('mcp_clients','mcp_authorization_requests','mcp_authorization_codes','mcp_connections','mcp_access_tokens','mcp_refresh_tokens')").Scan(&mcpTables); err != nil || mcpTables != 6 {
+		t.Fatalf("MCP OAuth schema incomplete: tables=%d err=%v", mcpTables, err)
 	}
 	var assistantEnabled int
 	var assistantProvider, assistantModel, assistantURL, assistantKey string

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 type Rune struct {
@@ -27,6 +29,7 @@ type Rune struct {
 	Query       *Query       `json:"query,omitempty"`
 	RCON        *RCON        `json:"rcon,omitempty"`
 	Bans        *BanCommands `json:"bans,omitempty"`
+	Watchers    []Watcher    `json:"watchers,omitempty"`
 	Anticheat   *Anticheat   `json:"anticheat,omitempty"`
 	Restart     *Restart     `json:"restart,omitempty"`
 	Stack       *Stack       `json:"stack,omitempty"`
@@ -86,6 +89,13 @@ type BanCommands struct {
 	Adapter      string `json:"adapter,omitempty"`
 	BanCommand   string `json:"ban_command"`
 	UnbanCommand string `json:"unban_command"`
+}
+type Watcher struct {
+	Name       string `json:"name"`
+	Pattern    string `json:"pattern"`
+	Threshold  int    `json:"threshold,omitempty"`
+	WindowSecs int    `json:"window_secs,omitempty"`
+	Action     string `json:"action,omitempty"`
 }
 type Anticheat struct {
 	AntiXray           *AnticheatFeature `json:"antixray,omitempty"`
@@ -414,6 +424,38 @@ func (g Rune) Validate() error {
 			}
 		default:
 			return fmt.Errorf("unsupported bans.adapter %q", g.Bans.Adapter)
+		}
+	}
+	if len(g.Watchers) > 100 {
+		return errors.New("watchers accepts at most 100 rules")
+	}
+	watcherNames := make(map[string]bool, len(g.Watchers))
+	for index, watcher := range g.Watchers {
+		field := fmt.Sprintf("watchers[%d]", index)
+		name := strings.TrimSpace(watcher.Name)
+		if name == "" || utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+			return fmt.Errorf("%s.name must contain 1 to 80 printable characters", field)
+		}
+		if watcherNames[strings.ToLower(name)] {
+			return fmt.Errorf("watchers contains duplicate name %q", name)
+		}
+		watcherNames[strings.ToLower(name)] = true
+		if strings.TrimSpace(watcher.Pattern) == "" || len(watcher.Pattern) > 512 || strings.IndexFunc(watcher.Pattern, unicode.IsControl) >= 0 {
+			return fmt.Errorf("%s.pattern must contain 1 to 512 printable characters", field)
+		}
+		if _, err := regexp.Compile(watcher.Pattern); err != nil {
+			return fmt.Errorf("%s.pattern: %w", field, err)
+		}
+		if watcher.Threshold < 0 || watcher.Threshold > 1000 {
+			return fmt.Errorf("%s.threshold must be from 0 to 1000", field)
+		}
+		if watcher.WindowSecs < 0 || watcher.WindowSecs > 3600 {
+			return fmt.Errorf("%s.window_secs must be from 0 to 3600", field)
+		}
+		switch watcher.Action {
+		case "", "notify", "advisory", "kvasir": // accept legacy template spelling; Docklight normalizes it on import.
+		default:
+			return fmt.Errorf("%s.action must be notify or advisory", field)
 		}
 	}
 	if g.Anticheat != nil {

@@ -216,6 +216,14 @@ func (a *App) createServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "could not save the server; choose another name or check panel storage")
 		return
 	}
+	if err = a.seedRuneWatchers(id, gs); err != nil {
+		_, _ = a.db.Exec(`DELETE FROM log_watchers WHERE server_id=?`, id)
+		_, _ = a.db.Exec(`DELETE FROM servers WHERE id=?`, id)
+		a.releasePorts(id)
+		_ = os.RemoveAll(dataDir)
+		writeError(w, http.StatusInternalServerError, "could not apply template log watchers")
+		return
+	}
 	a.audit(u, "server.create", "server", id, "template="+gs.ID+" realm="+realmID)
 	s, _ := a.getServer(id)
 	writeJSON(w, 201, a.decorateServer(u, maskServer(s, a.db)))
@@ -407,6 +415,10 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "server backups were removed but crash history could not be deleted")
 		return
 	}
+	if _, err := a.db.Exec(`DELETE FROM assistant_proactive_events WHERE server_id=?`, s.ID); err != nil {
+		writeError(w, 500, "server backups were removed but Advisory history could not be deleted")
+		return
+	}
 	if err := os.RemoveAll(s.DataDir); err != nil {
 		writeError(w, 500, "Docker removed the container but panel data cleanup failed; fix storage permissions and retry cleanup")
 		return
@@ -420,6 +432,7 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 	a.releasePorts(s.ID)
 	_, _ = a.db.Exec(`DELETE FROM permissions WHERE scope_type='server' AND scope_id=?`, s.ID)
 	_, _ = a.db.Exec(`DELETE FROM server_upnp_state WHERE server_id=?`, s.ID)
+	_, _ = a.db.Exec(`DELETE FROM log_watchers WHERE server_id=?`, s.ID)
 	_, _ = a.db.Exec(`DELETE FROM servers WHERE id=?`, s.ID)
 	a.audit(u, "server.delete", "server", s.ID, "data_removed=true")
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -457,6 +470,10 @@ func (a *App) installServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if gs.Install == nil {
+		if e = a.seedRuneWatchers(s.ID, gs); e != nil {
+			writeError(w, http.StatusInternalServerError, "could not apply template log watchers")
+			return
+		}
 		_, _ = a.db.Exec(`UPDATE servers SET installed=1,status='stopped' WHERE id=?`, s.ID)
 		s.Installed = true
 		if e = a.applyDayZEconomySettings(s); e != nil {
@@ -524,6 +541,10 @@ func (a *App) runInstall(s Server, gs rune.Rune, j *installJob) {
 	}
 	if err != nil {
 		finish(err)
+		return
+	}
+	if err = a.seedRuneWatchers(s.ID, gs); err != nil {
+		finish(fmt.Errorf("seed template log watchers: %w", err))
 		return
 	}
 	a.dataMu.Lock()
@@ -655,6 +676,9 @@ func (a *App) executeScheduledUpdate(parent context.Context, serverID string) (s
 	secrets = append(secrets, installSecrets...)
 	if installErr != nil {
 		return fail(fmt.Errorf("run template update: %w", installErr))
+	}
+	if err = a.seedRuneWatchers(serverID, gs); err != nil {
+		return fail(fmt.Errorf("restore template log watchers: %w", err))
 	}
 	if err = a.applyDayZEconomySettings(s); err != nil {
 		return fail(fmt.Errorf("restore saved DayZ Economy settings: %w", err))

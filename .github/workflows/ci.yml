@@ -25,8 +25,8 @@ jobs:
         run: go vet ./...
       - name: Test Go packages
         run: go test -count=1 ./...
-      - name: Test browser utilities
-        run: node --test web/ui-utils.test.mjs
+      - name: Test browser and service-worker logic
+        run: node --test web/*.test.mjs
       - name: Check browser module syntax
         run: node --check --input-type=module < web/app.js
 

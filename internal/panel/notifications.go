@@ -29,6 +29,8 @@ const (
 	notificationScheduleSuccess = "schedule.success"
 	notificationScheduleFailure = "schedule.failure"
 	notificationAutoModeration  = "player.auto_moderation"
+	notificationAssistantDigest = "assistant.daily_digest"
+	notificationLogWatcher      = "server.log_watcher"
 )
 
 type notificationSettings struct {
@@ -161,8 +163,8 @@ func (a *App) updateNotificationSettings(w http.ResponseWriter, r *http.Request)
 		current.Events = make([]string, 0, len(in.Events))
 		for _, event := range in.Events {
 			event = strings.TrimSpace(event)
-			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationServerCrash && event != notificationWatchdog && event != notificationHostDiskLow && event != notificationScheduleSuccess && event != notificationScheduleFailure && event != notificationAutoModeration {
-				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, server.crash, server.watchdog, host.disk_low, schedule.success, schedule.failure, or player.auto_moderation")
+			if event != notificationBackupSuccess && event != notificationBackupFailure && event != notificationServerCrash && event != notificationWatchdog && event != notificationHostDiskLow && event != notificationScheduleSuccess && event != notificationScheduleFailure && event != notificationAutoModeration && event != notificationAssistantDigest && event != notificationLogWatcher {
+				writeError(w, http.StatusBadRequest, "event must be backup.success, backup.failure, server.crash, server.watchdog, server.log_watcher, host.disk_low, schedule.success, schedule.failure, player.auto_moderation, or assistant.daily_digest")
 				return
 			}
 			if !seen[event] {

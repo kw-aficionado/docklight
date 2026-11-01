@@ -1519,6 +1519,189 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 45 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS log_watchers (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL,
+			pattern TEXT NOT NULL,
+			threshold INTEGER NOT NULL DEFAULT 1,
+			window_secs INTEGER NOT NULL DEFAULT 60,
+			action TEXT NOT NULL DEFAULT 'notify',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_fired TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'user',
+			source_key TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			CHECK(threshold BETWEEN 1 AND 1000),
+			CHECK(window_secs BETWEEN 1 AND 3600),
+			CHECK(action IN ('notify','advisory')),
+			CHECK(source IN ('user','rune'))
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_log_watchers_scope_enabled ON log_watchers(enabled,server_id)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_log_watchers_rune_seed ON log_watchers(server_id,source_key) WHERE source='rune' AND source_key<>''`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(45)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 46 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "log_watchers", "advisory_host") {
+			if _, err = tx.Exec(`ALTER TABLE log_watchers ADD COLUMN advisory_host TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(46)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 47 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec("CREATE TABLE IF NOT EXISTS assistant_proactive_events (" +
+			"id TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE, server_id TEXT NOT NULL DEFAULT '', " +
+			"event_type TEXT NOT NULL, summary TEXT NOT NULL, details_json TEXT NOT NULL DEFAULT '{}', " +
+			"explanation TEXT NOT NULL DEFAULT '', suggested_action TEXT NOT NULL DEFAULT 'none', " +
+			"suggestion_reason TEXT NOT NULL DEFAULT '', level INTEGER NOT NULL, applied INTEGER NOT NULL DEFAULT 0, " +
+			"apply_status TEXT NOT NULL DEFAULT 'not_requested', status TEXT NOT NULL DEFAULT 'pending', " +
+			"dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+			"updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+			"CHECK(event_type IN ('crash','slowstart','resource','host','anomalies')), CHECK(level BETWEEN 1 AND 3), " +
+			"CHECK(applied IN (0,1)), CHECK(dismissed IN (0,1)), " +
+			"CHECK(status IN ('pending','processing','explained','failed','applied')), " +
+			"CHECK(apply_status IN ('not_requested','proposal','applied','failed','rate_limited','not_allowed'))" +
+			")"); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_assistant_proactive_server_recent ON assistant_proactive_events(server_id,created_at DESC)"); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec("CREATE INDEX IF NOT EXISTS idx_assistant_proactive_pending ON assistant_proactive_events(status,created_at)"); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec("INSERT INTO schema_migrations(version) VALUES(47)"); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 48 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		statements := []string{
+			`CREATE TABLE IF NOT EXISTS mcp_clients (
+				client_id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				redirect_uris_json TEXT NOT NULL,
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE TABLE IF NOT EXISTS mcp_authorization_requests (
+				nonce_hash TEXT PRIMARY KEY,
+				client_id TEXT NOT NULL,
+				redirect_uri TEXT NOT NULL,
+				code_challenge TEXT NOT NULL,
+				state TEXT NOT NULL DEFAULT '',
+				scope TEXT NOT NULL,
+				resource TEXT NOT NULL,
+				expires_at INTEGER NOT NULL,
+				consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1))
+			)`,
+			`CREATE TABLE IF NOT EXISTS mcp_authorization_codes (
+				code_hash TEXT PRIMARY KEY,
+				client_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				user_token_version INTEGER NOT NULL,
+				redirect_uri TEXT NOT NULL,
+				code_challenge TEXT NOT NULL,
+				scope TEXT NOT NULL,
+				resource TEXT NOT NULL,
+				expires_at INTEGER NOT NULL,
+				consumed INTEGER NOT NULL DEFAULT 0 CHECK(consumed IN (0,1)),
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE TABLE IF NOT EXISTS mcp_connections (
+				id TEXT PRIMARY KEY,
+				client_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				user_token_version INTEGER NOT NULL,
+				scope TEXT NOT NULL,
+				resource TEXT NOT NULL,
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				last_used_at TEXT NOT NULL DEFAULT '',
+				revoked_at INTEGER NOT NULL DEFAULT 0
+			)`,
+			`CREATE TABLE IF NOT EXISTS mcp_access_tokens (
+				token_hash TEXT PRIMARY KEY,
+				connection_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				expires_at INTEGER NOT NULL,
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE TABLE IF NOT EXISTS mcp_refresh_tokens (
+				token_hash TEXT PRIMARY KEY,
+				connection_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				expires_at INTEGER NOT NULL,
+				consumed_at INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_codes_expiry ON mcp_authorization_codes(expires_at,consumed)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_requests_expiry ON mcp_authorization_requests(expires_at,consumed)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_connections_user ON mcp_connections(user_id,revoked_at,created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_access_connection ON mcp_access_tokens(connection_id,expires_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_access_expiry ON mcp_access_tokens(expires_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_refresh_connection ON mcp_refresh_tokens(connection_id,expires_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_refresh_expiry ON mcp_refresh_tokens(expires_at,consumed_at)`,
+		}
+		for _, statement := range statements {
+			if _, err = tx.Exec(statement); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(48)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

@@ -116,6 +116,21 @@ func TestStackRejectsUnsafeNamesPathsAndUndeclaredVariables(t *testing.T) {
 	}
 }
 
+func TestWatcherTemplateValidationAcceptsLegacyActionAndRejectsInvalidPatterns(t *testing.T) {
+	base := Rune{
+		ID: "watcher-template", Name: "Watcher template",
+		Docker:   Docker{Image: "example/app:1", KeepEntrypoint: true},
+		Watchers: []Watcher{{Name: "Startup warning", Pattern: `(?i)failed to bind`, Action: "kvasir"}},
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("legacy template Advisory action was rejected: %v", err)
+	}
+	base.Watchers[0].Pattern = `(?=failed)`
+	if err := base.Validate(); err == nil || !strings.Contains(err.Error(), "watchers[0].pattern") {
+		t.Fatalf("unsupported lookahead pattern was accepted: %v", err)
+	}
+}
+
 func TestServiceEnabledValues(t *testing.T) {
 	for _, test := range []struct {
 		name       string

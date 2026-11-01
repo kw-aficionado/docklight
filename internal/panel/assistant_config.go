@@ -23,12 +23,19 @@ const (
 )
 
 type assistantConfig struct {
-	Enabled          bool   `json:"enabled"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	BaseURL          string `json:"base_url"`
-	APIKeyConfigured bool   `json:"api_key_configured"`
-	APIKeyMasked     string `json:"api_key_masked"`
+	Enabled           bool     `json:"enabled"`
+	DigestEnabled     bool     `json:"digest_enabled"`
+	DigestHour        int      `json:"digest_hour"`
+	DigestLastDay     string   `json:"digest_last_day"`
+	ActionsEnabled    bool     `json:"actions_enabled"`
+	ChatDataLevel     int      `json:"chat_data_level"`
+	ProactiveLevel    int      `json:"proactive_level"`
+	ProactiveTriggers []string `json:"proactive_triggers"`
+	Provider          string   `json:"provider"`
+	Model             string   `json:"model"`
+	BaseURL           string   `json:"base_url"`
+	APIKeyConfigured  bool     `json:"api_key_configured"`
+	APIKeyMasked      string   `json:"api_key_masked"`
 }
 
 type assistantConfigInput struct {
@@ -118,21 +125,86 @@ func assistantPrivateHTTPHost(host string) bool {
 }
 
 func (a *App) getAssistantConfig(w http.ResponseWriter, r *http.Request) {
-	var enabled int
-	var provider, model, baseURL, encryptedKey string
-	err := a.db.QueryRow(`SELECT enabled,provider,model,base_url,api_key_enc FROM assistant_config WHERE id=1`).Scan(&enabled, &provider, &model, &baseURL, &encryptedKey)
+	var enabled, digestEnabled, digestHour, actionsEnabled, chatDataLevel, proactiveLevel int
+	var provider, model, baseURL, encryptedKey, digestLastDay, proactiveTriggers string
+	err := a.db.QueryRow(`SELECT enabled,digest_enabled,digest_hour,digest_last_day,actions_enabled,chat_data_level,proactive_level,proactive_triggers,provider,model,base_url,api_key_enc FROM assistant_config WHERE id=1`).Scan(&enabled, &digestEnabled, &digestHour, &digestLastDay, &actionsEnabled, &chatDataLevel, &proactiveLevel, &proactiveTriggers, &provider, &model, &baseURL, &encryptedKey)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read Assistant settings")
 		return
 	}
 	writeJSON(w, http.StatusOK, assistantConfig{
-		Enabled:          enabled != 0,
-		Provider:         provider,
-		Model:            model,
-		BaseURL:          baseURL,
-		APIKeyConfigured: encryptedKey != "",
-		APIKeyMasked:     assistantMaskKey(encryptedKey),
+		Enabled:           enabled != 0,
+		DigestEnabled:     digestEnabled != 0,
+		DigestHour:        digestHour,
+		DigestLastDay:     digestLastDay,
+		ActionsEnabled:    actionsEnabled != 0,
+		ChatDataLevel:     chatDataLevel,
+		ProactiveLevel:    proactiveLevel,
+		ProactiveTriggers: assistantProactiveTriggerList(proactiveTriggers),
+		Provider:          provider,
+		Model:             model,
+		BaseURL:           baseURL,
+		APIKeyConfigured:  encryptedKey != "",
+		APIKeyMasked:      assistantMaskKey(encryptedKey),
 	})
+}
+
+type assistantChatScopeInput struct {
+	DataLevel *int `json:"data_level"`
+}
+
+func (a *App) updateAssistantChatScope(w http.ResponseWriter, r *http.Request) {
+	var input assistantChatScopeInput
+	if decodeJSON(w, r, &input, 1024) != nil {
+		return
+	}
+	if input.DataLevel == nil || *input.DataLevel < 0 || *input.DataLevel > 2 {
+		writeError(w, http.StatusBadRequest, "data_level must be 0, 1, or 2")
+		return
+	}
+	if _, err := a.db.Exec(`UPDATE assistant_config SET chat_data_level=?,updated_at=CURRENT_TIMESTAMP WHERE id=1`, *input.DataLevel); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save Advisory data scope")
+		return
+	}
+	a.audit(principal(r), "ai.config", "assistant", "1", fmt.Sprintf("chat_data_level=%d", *input.DataLevel))
+	writeJSON(w, http.StatusOK, map[string]int{"chat_data_level": *input.DataLevel})
+}
+
+type assistantDigestSettingsInput struct {
+	Enabled *bool `json:"enabled"`
+	Hour    *int  `json:"hour"`
+}
+
+func (a *App) updateAssistantDigestSettings(w http.ResponseWriter, r *http.Request) {
+	var input assistantDigestSettingsInput
+	if decodeJSON(w, r, &input, 1024) != nil {
+		return
+	}
+	if input.Enabled == nil || input.Hour == nil || *input.Hour < 0 || *input.Hour > 23 {
+		writeError(w, http.StatusBadRequest, "daily digest requires an enabled flag and an hour from 0 to 23")
+		return
+	}
+	if *input.Enabled {
+		var enabled int
+		if err := a.db.QueryRow(`SELECT enabled FROM assistant_config WHERE id=1`).Scan(&enabled); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not read Advisory settings")
+			return
+		}
+		if enabled == 0 {
+			writeError(w, http.StatusConflict, "enable Advisory before scheduling a daily digest")
+			return
+		}
+	}
+	if _, err := a.db.Exec(`UPDATE assistant_config SET digest_enabled=?,digest_hour=?,updated_at=CURRENT_TIMESTAMP WHERE id=1`, boolInt(*input.Enabled), *input.Hour); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save daily digest settings")
+		return
+	}
+	state := "disabled"
+	if *input.Enabled {
+		state = fmt.Sprintf("enabled at %02d:00", *input.Hour)
+	}
+	a.audit(principal(r), "ai.config", "assistant", "1", "daily_digest="+state)
+	writeJSON(w, http.StatusOK, map[string]any{"digest_enabled": *input.Enabled, "digest_hour": *input.Hour})
 }
 
 func assistantMaskKey(encryptedKey string) string {

@@ -14,6 +14,7 @@
 - API tokens use 256-bit random opaque values with a `ygg_` prefix. Only a SHA-256 hash and the token name/scope metadata are stored; the plaintext is returned only by the create response. Every API-token permission is intersected with the owner's current RBAC grants.
 - Schema changes use a numbered `schema_migrations` table. The second migration adds a safe startup error field and the API-token lookup index; old tables are upgraded in place.
 - The standalone browser app uses a small ES module for shared escaping/number formatting and Node's built-in test runner. This gives the UI logic a dependency-free test path while package registries are unreachable.
+- The installable Docklight app uses a dependency-free web manifest and service worker. The worker caches only the embedded static shell, keeps API and session data network-only, and versions its cache from the embedded shell contents.
 - `PUBLIC_URL` is derived at runtime from an explicitly configured listener host or a current non-loopback host address, so DHCP changes are not persisted into template settings.
 - Readiness is a state transition, not an optimistic default. A timeout or Docker inspection failure sets an actionable error state and leaves the container record intact for diagnosis.
 
@@ -244,4 +245,28 @@
 - Use **Assistant** as the neutral, international product label. Keep provider setup administrator-only and the feature off by default until chat, scopes, data controls, and action confirmations are implemented.
 - Support Anthropic Messages and OpenAI-compatible endpoints for OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, and custom providers. Store keys encrypted with the panel secret and return only a configured flag and fixed mask.
 - Let administrators test saved settings while Assistant is off. Send one fixed prompt without panel context, discard the model response, avoid audit logging, refuse redirects, bound timeout/response size, and do not expose provider error bodies.
-- This slice only establishes provider storage and a connection check. The assistant's chat, advisory functions, action proposals, proactive monitoring, and MCP connector remain outstanding.
+- At this point, this slice only established provider storage and a connection check; the later Assistant, proactive monitoring, and MCP entries record the follow-up implementation.
+
+## 2026-11-01: Docklight fleet Advisory
+
+- Keep the public product identity as Docklight and use Advisory as the read-only assistant label; do not expose the original mythological feature name in the UI.
+- Provide the fleet conversation over the same-origin authenticated WebSocket, filtering by the current account's server-view grants before building provider context. Cap each turn at 100 visible servers and report omitted counts.
+- Revalidate the session, role, API-token scope, and account status for each WebSocket question so open connections do not retain access after a revocation or role change.
+- Keep log search separate, limited to one selected visible server, and gated by the administrator's level-2 scope. Require per-search confirmation bound to the provider host when it is hosted.
+- Keep history only in browser memory, do not implement transcript storage, and never execute actions from chat.
+
+## 2026-11-01: Docklight proactive monitoring
+
+- Keep proactive monitoring off by default and expose levels 0–3 with administrator-selected triggers for confirmed crashes, slow starts, resource thresholds, host pressure, and player-count anomalies.
+- Build observations from the panel's existing crash records and metric history. Do not read container logs or query live player counts; do not add log-volume anomaly detection without a safe baseline.
+- Preserve server-view scoping for event history and restrict host-wide events to admins. Bound stored history to 1,000 events and rate-limit automatic fixes to three per server in 30 minutes.
+- Level 2 suggestions are informational. Level 3 requires both Advisory and Actions and can only restart a confirmed failed server or raise memory after exit 137 when fresh host metrics show enough headroom. Keep every other proposed action manual.
+- Store event explanations and suggestions for operator review, but do not persist prompts or write their contents to audit details.
+
+## 2026-11-01: Docklight MCP connector
+
+- Provide Streamable HTTP JSON-RPC at the exact `/api/mcp` path with seven inspection and server-control tools. Keep file, settings, create, and delete operations out of the connector.
+- Use the panel as its own OAuth 2.1 authorization server: public clients only, exact registered callbacks, PKCE S256, explicit same-origin consent, a single `yggdrasil` scope, and resource-bound tokens. Require HTTPS for non-loopback issuers.
+- Store only hashes of authorization nonces, codes, access tokens, and refresh tokens. Keep codes short-lived and single-use, rotate refresh credentials, revoke a connection on replay, and let the approving user revoke connections immediately.
+- Preserve the approving account's current server grants and intersect API-token calls with the API token's own scopes. Do not accept ordinary browser sessions as a substitute for MCP consent. Audit tool and control calls as the actual caller.
+- Show the connector's log-data and player-disconnection risks on the consent screen. The public-reachability flag is a hostname heuristic, not a live external probe.

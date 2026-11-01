@@ -3,15 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0d1417">
+  <meta name="theme-color" content="#0a1013">
   <meta name="application-name" content="Docklight">
   <meta name="description" content="Docklight is a self-hosted control panel for game servers and apps. Learn more at docklight.app.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Docklight">
   <title>Docklight — Self-hosted servers</title>
   <link rel="icon" href="/brand.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/config-editor.css">
 </head>
 <body>
+  <div id="connection-banner" class="connection-banner" role="status" aria-live="polite" hidden></div>
   <div id="app" class="app-shell"><div class="boot"><img class="brand-logo" src="/brand.svg" alt=""><span>Starting Docklight…</span></div></div>
   <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
   <script src="/app.js" type="module"></script>

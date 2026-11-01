@@ -53,6 +53,12 @@ gameskill:
   bans:
     ban_command: "ban {{player}} {{reason}}"
     unban_command: "pardon {{player}}"
+  watchers:
+    - name: Startup warning
+      pattern: "(?i)failed to bind"
+      threshold: 1
+      window_secs: 60
+      action: notify
   restart:
     warnings:
       - at: 5m
@@ -94,6 +100,7 @@ gameskill:
 | `rcon` | Enables RCON commands using a declared `password_var`. The host mapping is loopback-only when its port is named `rcon`. |
 | `bans.ban_command`, `bans.unban_command` | Optional pair of single console commands used by the central ban list. Both must include `{{player}}`; `{{player_id}}` and `{{reason}}` are also available. Docklight removes control characters before sending commands over RCON or server input. |
 | `bans.adapter` | Optional built-in adapter `dayz-ban-file`. It writes the player's 17-digit SteamID or 44-character UID as a line in the server data root's `ban.txt`; do not also declare command fields. This adapter does not kick an already-connected player. |
+| `watchers[]` | Optional template-seeded log watcher defaults. Each entry has a unique `name`, Go RE2 `pattern`, `threshold` (default 1, maximum 1000), `window_secs` (default 60, maximum 3600), and `action` (`notify` or `advisory`; legacy `kvasir` imports as `advisory`). Rules are copied on server creation and installation. Operator edits persist across installs; deleted template rules are restored on the next install. Hosted-provider log consent is never copied from a template. |
 | `anticheat.antixray`, `anticheat.battleye` | Optional `{ supported, config_hint }` informational cards in the server detail **Anti-cheat** tab. The tab requires `server.files`; Docklight does not apply the hint or modify server files. |
 | `anticheat.plugins_recommended` | Optional list of up to 16 plugin names displayed as template guidance only. |
 
