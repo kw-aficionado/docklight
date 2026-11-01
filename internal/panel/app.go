@@ -66,13 +66,15 @@ type App struct {
 	networkMu             sync.Mutex
 	upnpMu                sync.Mutex
 	unifiMu               sync.Mutex
+	npmMu                 sync.Mutex
 	networkDetected       string
 	networkDetectedAt     time.Time
 	networkAttemptAt      time.Time
 	networkHTTPClient     *http.Client
 	upnpDiscover          func(context.Context) (upnp.Gateway, error)
 	unifiHTTPClient       *http.Client
-	unifiLocalIP          func(context.Context, string) (net.IP, error)
+	hostLocalIP           func(context.Context, string) (net.IP, error)
+	npmHTTPClient         *http.Client
 	reachabilityMu        sync.Mutex
 	reachabilityCache     map[string]reachabilityCacheEntry
 	reachabilityProbe     func(context.Context, string, int, rune.Rune) error
@@ -305,6 +307,11 @@ func (a *App) Router() http.Handler {
 			priv.Get("/unifi/rules", a.admin(a.listUniFiRules))
 			priv.Get("/unifi/strays", a.admin(a.listUniFiStrayRules))
 			priv.Post("/unifi/strays/delete", a.admin(a.deleteUniFiStrayRules))
+			priv.Get("/settings/npm", a.admin(a.getNPMSettings))
+			priv.Put("/settings/npm", a.admin(a.updateNPMSettings))
+			priv.Post("/npm/test", a.admin(a.testNPMConnection))
+			priv.Get("/servers/{id}/npm", a.getServerNPMSettings)
+			priv.Put("/servers/{id}/npm", a.updateServerNPMSettings)
 			priv.Get("/backups/target/status", a.backupTargetStatus)
 			priv.Get("/backups/target", a.admin(a.getBackupTarget))
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))

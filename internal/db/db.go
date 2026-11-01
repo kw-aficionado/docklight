@@ -1006,6 +1006,54 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 31 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "servers", "npm_subdomain") {
+			if _, err = tx.Exec(`ALTER TABLE servers ADD COLUMN npm_subdomain TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS npm_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			url TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			password_enc TEXT NOT NULL DEFAULT '',
+			base_domain TEXT NOT NULL DEFAULT '',
+			internal_host TEXT NOT NULL DEFAULT '',
+			le_email TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO npm_settings(id,enabled) VALUES(1,0)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_npm_state (
+			server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+			host_id TEXT NOT NULL DEFAULT '',
+			hostname TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			cleanup_pending INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(31)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

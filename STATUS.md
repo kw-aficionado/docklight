@@ -82,6 +82,12 @@ Admins can inspect live controller rules, identify unmatched Docklight-tagged ru
 
 Tests cover disabled-by-default migration, admin-only settings, encrypted/masked credentials, cookie and CSRF login state, redirect refusal, controller rule listing, one combined TCP/UDP rule, rule creation and saved ownership, exact-tag cleanup, host-scoped explicit stray removal, and foreign-rule preservation. No physical UniFi controller was available. Ubiquiti's current local API is documented per installed Network version, so actual controller/API-version acceptance remains pending.
 
+## Phase 3 Nginx Proxy Manager
+
+The Network page stores a local NPM URL, account email, encrypted password, base domain, optional internal host, and optional matching Let's Encrypt contact. Proxy automation starts off and has its own master switch. Each server stores a subdomain or full hostname, independently of UPnP and UniFi forwarding preferences. When a server starts, Docklight selects its declared TCP `web` port, or the first TCP port, and creates a tagged proxy host pointing to the allocated host port. UDP-only servers are skipped. On stop, confirmed exit, subdomain change, settings reconfiguration, and deletion, Docklight removes the saved proxy-host ID. Docklight records the plain host before requesting Let's Encrypt, so an ACME failure leaves a removable HTTP host with a warning. Failed cleanup is saved for retry. Deletion is held if the saved host cannot be removed.
+
+Tests cover the NPM token and bearer API flow, URL and hostname validation, encrypted settings and admin authorization, TCP web-port preference, default LAN address detection, proxy-host creation and deletion, independence from `auto_forward`, Let's Encrypt fallback, and persisted cleanup retry. A live NPM instance and public DNS/HTTP challenge acceptance were not available.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -118,7 +124,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
+- Phase 3: Cloudflare route/DNS reconciliation, IP blocking, beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

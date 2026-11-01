@@ -151,7 +151,7 @@ func TestUniFiClientUsesLocalLoginAndListsRules(t *testing.T) {
 	token := runeCatalogAdminToken(t, app, d)
 	setUniFiTestConfig(t, app, "https://unifi.example.test", true)
 	app.unifiHTTPClient = fakeUniFiHTTPClient(fake)
-	app.unifiLocalIP = func(context.Context, string) (net.IP, error) { return net.ParseIP("192.168.1.40"), nil }
+	app.hostLocalIP = func(context.Context, string) (net.IP, error) { return net.ParseIP("192.168.1.40"), nil }
 	response := testRequest(app.Router(), http.MethodPost, "/api/unifi/test", `{}`, token)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"port_forward_rules":2`) {
 		t.Fatalf("test controller returned %d %s", response.Code, response.Body.String())
@@ -249,7 +249,7 @@ func TestUniFiLifecycleCreatesOnlyDeclaredGameRulesAndCleansOwnedTag(t *testing.
 	app, d, _ := testApp(t)
 	setUniFiTestConfig(t, app, "https://unifi.example.test", true)
 	app.unifiHTTPClient = fakeUniFiHTTPClient(fake)
-	app.unifiLocalIP = func(context.Context, string) (net.IP, error) { return net.ParseIP("192.168.1.40"), nil }
+	app.hostLocalIP = func(context.Context, string) (net.IP, error) { return net.ParseIP("192.168.1.40"), nil }
 	seedUPnPServer(t, d, "unifi-game-server", `{"game":25565,"rcon":25575}`)
 	s, err := app.getServer("unifi-game-server")
 	if err != nil {
@@ -300,7 +300,7 @@ func TestUniFiCleanupDeletesOnlyExactServerTagAndStrayDeleteIsExplicit(t *testin
 	app, d, _ := testApp(t)
 	setUniFiTestConfig(t, app, "https://unifi.example.test", true)
 	app.unifiHTTPClient = fakeUniFiHTTPClient(fake)
-	app.unifiLocalIP = func(context.Context, string) (net.IP, error) { return net.ParseIP("192.168.1.40"), nil }
+	app.hostLocalIP = func(context.Context, string) (net.IP, error) { return net.ParseIP("192.168.1.40"), nil }
 	if err := app.removeServerUniFiMappings(context.Background(), "server-a"); err != nil {
 		t.Fatal(err)
 	}

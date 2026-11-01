@@ -262,7 +262,7 @@ func (a *App) listUniFiRules(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), uniFiRequestTimeout)
 	defer cancel()
-	localIP, err := a.uniFiHostIP(ctx, cfg.ControllerURL)
+	localIP, err := a.hostIPv4ForURL(ctx, cfg.ControllerURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -288,7 +288,7 @@ func (a *App) listUniFiStrayRules(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), uniFiRequestTimeout)
 	defer cancel()
-	localIP, err := a.uniFiHostIP(ctx, cfg.ControllerURL)
+	localIP, err := a.hostIPv4ForURL(ctx, cfg.ControllerURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -331,7 +331,7 @@ func (a *App) deleteUniFiStrayRules(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), uniFiRequestTimeout)
 	defer cancel()
-	localIP, err := a.uniFiHostIP(ctx, cfg.ControllerURL)
+	localIP, err := a.hostIPv4ForURL(ctx, cfg.ControllerURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -521,7 +521,7 @@ func (a *App) openServerUniFiMappingsLocked(ctx context.Context, s Server, cfg u
 	if err := a.removeServerUniFiMappingsWithConfigLocked(ctx, s.ID, cfg); err != nil {
 		return err
 	}
-	ip, err := a.uniFiHostIP(ctx, cfg.ControllerURL)
+	ip, err := a.hostIPv4ForURL(ctx, cfg.ControllerURL)
 	if err != nil {
 		return a.recordUniFiError(s.ID, err)
 	}
@@ -621,11 +621,11 @@ func uniFiControllerProtocol(protocol string) string {
 	}
 }
 
-func (a *App) uniFiHostIP(ctx context.Context, controllerURL string) (net.IP, error) {
-	if a.unifiLocalIP != nil {
-		return a.unifiLocalIP(ctx, controllerURL)
+func (a *App) hostIPv4ForURL(ctx context.Context, targetURL string) (net.IP, error) {
+	if a.hostLocalIP != nil {
+		return a.hostLocalIP(ctx, targetURL)
 	}
-	u, err := url.Parse(controllerURL)
+	u, err := url.Parse(targetURL)
 	if err != nil || u.Hostname() == "" {
 		return nil, errors.New("could not determine a LAN address for the server host")
 	}
@@ -639,16 +639,16 @@ func (a *App) uniFiHostIP(ctx context.Context, controllerURL string) (net.IP, er
 	}
 	address, err := net.ResolveUDPAddr("udp", net.JoinHostPort(u.Hostname(), port))
 	if err != nil {
-		return nil, errors.New("could not resolve the UniFi controller address")
+		return nil, errors.New("could not resolve the configured service address")
 	}
 	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "udp", address.String())
 	if err != nil {
-		return nil, errors.New("could not determine the host LAN address from its route to the UniFi controller")
+		return nil, errors.New("could not determine the host LAN address from its route to the configured service")
 	}
 	defer conn.Close()
 	local, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok || local.IP.To4() == nil || local.IP.IsLoopback() || local.IP.IsUnspecified() || local.IP.IsLinkLocalUnicast() {
-		return nil, errors.New("UniFi port forwarding requires a usable host LAN IPv4 address")
+		return nil, errors.New("network forwarding requires a usable host LAN IPv4 address")
 	}
 	return append(net.IP(nil), local.IP.To4()...), nil
 }

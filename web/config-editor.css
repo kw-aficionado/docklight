@@ -19,6 +19,13 @@
 .unifi-settings-card{grid-column:1/-1;padding:20px}
 .unifi-settings-card form{display:flex;flex-direction:column;gap:12px}
 .unifi-settings-card .checkline{margin:0}
+.npm-settings-card{grid-column:1/-1;padding:20px}
+.npm-settings-card form{display:flex;flex-direction:column;gap:12px}
+.npm-settings-card .checkline{margin:0}
+.npm-credentials{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.npm-actions{display:flex;gap:10px;align-items:center}
+.npm-server-facts{display:grid;grid-template-columns:minmax(120px,.35fr) 1fr;gap:8px 16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;color:var(--muted);font-size:12px}
+.npm-server-facts b{color:var(--text);overflow-wrap:anywhere}
 .unifi-credentials{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .unifi-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .unifi-rules-list{margin-top:16px;border-top:1px solid var(--border-soft);padding-top:14px}
@@ -59,6 +66,6 @@
 .reachability-address{display:block;margin:13px 0 7px;color:var(--green);font-size:14px;overflow-wrap:anywhere}
 .reachability-message{margin:9px 0;color:var(--muted);font-size:11px;line-height:1.5}
 .reachability-time{color:var(--faint);font-size:9px}
-@media(max-width:900px){.network-settings-grid{grid-template-columns:1fr}.upnp-settings-card,.unifi-settings-card{grid-column:auto}.upnp-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.unifi-credentials{grid-template-columns:1fr}}
+@media(max-width:900px){.network-settings-grid{grid-template-columns:1fr}.upnp-settings-card,.unifi-settings-card,.npm-settings-card{grid-column:auto}.upnp-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.unifi-credentials,.npm-credentials{grid-template-columns:1fr}}
 @media(max-width:600px){.upnp-mapping-list>div{grid-template-columns:minmax(0,1fr) 70px}.upnp-mapping-list small{grid-column:1/-1}}
 .light .network-settings-card form input{background:#fff;color:#1b2922;border-color:#ccd8d0}

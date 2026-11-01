@@ -153,3 +153,12 @@
 - Tag generated entries with `Docklight: [docklight:<server-id>]`. Delete only rules whose parsed tag exactly equals the server ID; do not infer ownership from port numbers or targets. An admin can explicitly remove selected unmatched Docklight-prefixed rules, while other rules remain untouched.
 - Before replacing credentials, site, or controller URL, and before disabling the integration, remove exact-tagged rules using the saved configuration. If cleanup fails, preserve the old settings and report the conflict.
 - Fake-controller HTTP fixtures cover login, rule listing, creation, and deletion. No live UniFi controller is present for end-to-end acceptance.
+
+## 2026-11-01: Nginx Proxy Manager
+
+- Keep NPM independent of UPnP and UniFi: NPM has its own admin master switch and per-server hostname, and does not use `auto_forward`.
+- Encrypt the NPM password with the panel secret. Keep saved host IDs and cleanup errors per server so stop, deletion, setting changes, and retries operate only on Docklight's recorded host.
+- Create and persist the plain proxy host before requesting a certificate, so its NPM ID is known even if ACME fails. Clear Docklight metadata while NPM creates the certificate because NPM passes proxy-host metadata into the certificate record, then restore the marker on the host. Keep the saved plain host on certificate failure and surface a warning.
+- Use the connected NPM account's profile email for Let's Encrypt. NPM's current API does not accept a separate contact address; the optional Docklight contact field must match the account email or remain blank.
+- Prefer the declared TCP `web` port and then the first declared TCP port; skip UDP-only servers. Forward to the configured internal host or the host LAN IPv4 address selected by the route to NPM.
+- The fake API covers token authentication, bearer requests, proxy creation and deletion, certificate fallback, and pending-cleanup retry. A live NPM controller, public DNS, and reachable ACME HTTP challenge were unavailable.

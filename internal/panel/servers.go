@@ -381,6 +381,13 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uniFiCancel()
+	npmCtx, npmCancel := context.WithTimeout(r.Context(), npmRequestTimeout)
+	if err := a.removeServerNPMHost(npmCtx, s.ID); err != nil {
+		npmCancel()
+		writeError(w, 503, "Docker resources are stopped and the server data is retained, but its Nginx Proxy Manager host could not be cleared: "+err.Error())
+		return
+	}
+	npmCancel()
 	if err := a.removeServerBackups(s.ID); err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -846,6 +853,12 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		return fmt.Errorf("clear previous UniFi port forwards before starting: %w", err)
 	}
 	cleanupUniFiCancel()
+	cleanupNPMCtx, cleanupNPMCancel := context.WithTimeout(parent, npmRequestTimeout)
+	if err = a.removeServerNPMHost(cleanupNPMCtx, s.ID); err != nil {
+		cleanupNPMCancel()
+		return fmt.Errorf("clear previous Nginx Proxy Manager host before starting: %w", err)
+	}
+	cleanupNPMCancel()
 	stackNetwork := ""
 	if gs.Stack != nil {
 		stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
@@ -893,6 +906,11 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		a.audit(User{Username: "system"}, "server.unifi_error", "server", s.ID, mappingErr.Error())
 	}
 	uniFiCancel()
+	npmCtx, npmCancel := context.WithTimeout(parent, npmRequestTimeout)
+	if proxyErr := a.openServerNPMHost(npmCtx, s); proxyErr != nil {
+		a.audit(User{Username: "system"}, "server.npm_error", "server", s.ID, proxyErr.Error())
+	}
+	npmCancel()
 	go a.watchReady(s, gs)
 	return nil
 }
@@ -950,6 +968,11 @@ func (a *App) stop(s Server) error {
 		a.audit(User{Username: "system"}, "server.unifi_cleanup_error", "server", s.ID, mappingErr.Error())
 	}
 	uniFiCancel()
+	npmCtx, npmCancel := context.WithTimeout(context.Background(), npmRequestTimeout)
+	if proxyErr := a.removeServerNPMHost(npmCtx, s.ID); proxyErr != nil {
+		a.audit(User{Username: "system"}, "server.npm_cleanup_error", "server", s.ID, proxyErr.Error())
+	}
+	npmCancel()
 	var stack *rune.Rune
 	if loadErr == nil {
 		stack = &gs
@@ -996,6 +1019,11 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 				a.audit(User{Username: "system"}, "server.unifi_cleanup_error", "server", s.ID, mappingErr.Error())
 			}
 			uniFiCancel()
+			npmCtx, npmCancel := context.WithTimeout(context.Background(), npmRequestTimeout)
+			if proxyErr := a.removeServerNPMHost(npmCtx, s.ID); proxyErr != nil {
+				a.audit(User{Username: "system"}, "server.npm_cleanup_error", "server", s.ID, proxyErr.Error())
+			}
+			npmCancel()
 			message := fmt.Sprintf("Container exited before readiness with code %d; review its logs and template startup settings.", ins.State.ExitCode)
 			if err = a.recordServerCrash(s, "container_exited", ins.State.ExitCode, message); err != nil {
 				log.Printf("could not record startup exit for server %s", s.ID)
