@@ -267,7 +267,13 @@ func (e *Engine) attach(ctx context.Context, id string, stdin, stdout, stderr bo
 	if id == "" {
 		return nil, errors.New("Docker attach needs a container ID")
 	}
-	q := url.Values{"stream": {"1"}, "stdin": {strconv.FormatBool(stdin)}, "stdout": {strconv.FormatBool(stdout)}, "stderr": {strconv.FormatBool(stderr)}}
+	dockerBool := func(value bool) string {
+		if value {
+			return "1"
+		}
+		return "0"
+	}
+	q := url.Values{"stream": {"1"}, "stdin": {dockerBool(stdin)}, "stdout": {dockerBool(stdout)}, "stderr": {dockerBool(stderr)}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint("/containers/"+url.PathEscape(id)+"/attach?"+q.Encode()), nil)
 	if err != nil {
 		return nil, err
