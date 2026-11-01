@@ -47,6 +47,7 @@ type App struct {
 	scheduleCommand          func(context.Context, Server, string) error
 	notificationClient       *http.Client
 	assistantHTTPClient      *http.Client
+	assistantLogVolumeProbe  func(context.Context, string, time.Time) (int64, int64, bool, error)
 	assistantDigestMu        sync.Mutex
 	assistantDigestActive    bool
 	assistantPlanMu          sync.Mutex

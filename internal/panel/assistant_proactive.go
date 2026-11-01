@@ -1,16 +1,20 @@
 package panel
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"example.com/yggdrasil-panel/internal/docker"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -18,7 +22,13 @@ const (
 	assistantProactiveInterval  = time.Minute
 	assistantProactiveEventCap  = 1000
 	assistantProactiveServerCap = 250
+	assistantLogVolumeWindow    = time.Minute
+	assistantLogVolumeByteCap   = 8 << 20
+	assistantLogVolumeMinBytes  = 1 << 20
+	assistantLogVolumeWarmup    = 5
 )
+
+var errAssistantLogVolumeLimit = errors.New("log volume sample reached its byte limit")
 
 var assistantProactiveTriggerOrder = []string{"crash", "slowstart", "resource", "host", "anomalies"}
 
@@ -252,6 +262,7 @@ func (a *App) runAssistantProactiveCycle(ctx context.Context, now time.Time) {
 			a.scanAssistantProactiveHost(ctx, now)
 		case "anomalies":
 			a.scanAssistantProactiveAnomalies(ctx, now)
+			a.scanAssistantProactiveLogVolume(ctx, now)
 		}
 	}
 	if _, err := a.db.ExecContext(ctx, "UPDATE assistant_proactive_events SET status='failed',explanation='Observation expired before Advisory could explain it',updated_at=CURRENT_TIMESTAMP WHERE status='pending' AND created_at<datetime(?,'-1 hour')", now.UTC().Format("2006-01-02 15:04:05")); err != nil {
@@ -269,6 +280,187 @@ func (a *App) runAssistantProactiveCycle(ctx context.Context, now time.Time) {
 		return
 	}
 	a.processAssistantProactivePending(ctx, runtime, now)
+}
+
+type assistantLogVolumeCounter struct {
+	bytes int64
+	lines int64
+	last  byte
+}
+
+func (c *assistantLogVolumeCounter) Write(p []byte) (int, error) {
+	remaining := int64(assistantLogVolumeByteCap) - c.bytes
+	if remaining <= 0 {
+		return 0, errAssistantLogVolumeLimit
+	}
+	n := len(p)
+	if int64(n) > remaining {
+		n = int(remaining)
+	}
+	chunk := p[:n]
+	c.bytes += int64(n)
+	c.lines += int64(bytes.Count(chunk, []byte{'\n'}))
+	if n > 0 {
+		c.last = chunk[n-1]
+	}
+	if n != len(p) {
+		return n, errAssistantLogVolumeLimit
+	}
+	return n, nil
+}
+
+func (c *assistantLogVolumeCounter) finish() {
+	if c.bytes > 0 && c.last != '\n' {
+		c.lines++
+	}
+}
+
+func (a *App) assistantContainerLogVolume(ctx context.Context, containerID string, since time.Time) (int64, int64, bool, error) {
+	if a.assistantLogVolumeProbe != nil {
+		return a.assistantLogVolumeProbe(ctx, containerID, since)
+	}
+	if a.engine == nil || containerID == "" {
+		return 0, 0, false, errors.New("container log access is unavailable")
+	}
+	stream, err := a.engine.LogsSince(ctx, containerID, since)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	defer stream.Close()
+	counter := &assistantLogVolumeCounter{}
+	err = docker.CopyLogs(counter, stream)
+	if errors.Is(err, errAssistantLogVolumeLimit) {
+		counter.finish()
+		return counter.bytes, counter.lines, true, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	counter.finish()
+	return counter.bytes, counter.lines, false, nil
+}
+
+func (a *App) scanAssistantProactiveLogVolume(ctx context.Context, now time.Time) {
+	rows, err := a.db.QueryContext(ctx, "SELECT id,name,container_id FROM servers WHERE status='running' AND container_id<>'' ORDER BY name COLLATE NOCASE LIMIT ?", assistantProactiveServerCap)
+	if err != nil {
+		log.Printf("Docklight proactive Advisory could not list servers for log-volume checks")
+		return
+	}
+	type serverRow struct{ id, name, containerID string }
+	servers := make([]serverRow, 0)
+	for rows.Next() {
+		var item serverRow
+		if err = rows.Scan(&item.id, &item.name, &item.containerID); err != nil {
+			_ = rows.Close()
+			return
+		}
+		servers = append(servers, item)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return
+	}
+	_ = rows.Close()
+
+	windowStart := now.Add(-assistantLogVolumeWindow)
+	type logSample struct {
+		server   serverRow
+		current  int64
+		lines    int64
+		capped   bool
+		probeErr error
+	}
+	jobs := make(chan serverRow, len(servers))
+	results := make(chan logSample, len(servers))
+	for _, server := range servers {
+		jobs <- server
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	for range min(8, len(servers)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for server := range jobs {
+				if ctx.Err() != nil {
+					results <- logSample{server: server, probeErr: ctx.Err()}
+					continue
+				}
+				probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				current, lines, capped, probeErr := a.assistantContainerLogVolume(probeCtx, server.containerID, windowStart)
+				cancel()
+				results <- logSample{server: server, current: current, lines: lines, capped: capped, probeErr: probeErr}
+			}
+		}()
+	}
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+	for sample := range results {
+		if ctx.Err() != nil {
+			return
+		}
+		server, current, lines, capped := sample.server, sample.current, sample.lines, sample.capped
+		if sample.probeErr != nil || current < 0 || lines < 0 {
+			continue
+		}
+
+		var samples int
+		var mean, variance float64
+		var lastSample int64
+		err = a.db.QueryRowContext(ctx, `SELECT sample_count,mean_bytes,variance_bytes,last_sample_at
+			FROM assistant_log_volume_baselines WHERE server_id=?`, server.id).Scan(&samples, &mean, &variance, &lastSample)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if lastSample > 0 && lastSample < now.Add(-24*time.Hour).Unix() {
+			samples, mean, variance, lastSample = 0, 0, 0, 0
+		}
+		if lastSample >= now.Add(-10*time.Second).Unix() {
+			continue
+		}
+
+		threshold := math.Max(float64(assistantLogVolumeMinBytes), math.Max(mean*8, mean+6*math.Sqrt(math.Max(variance, 0))))
+		if samples >= assistantLogVolumeWarmup && float64(current) >= threshold {
+			bucket := now.UTC().Format("2006-01-02T15")
+			ratio := 0.0
+			if mean > 0 {
+				ratio = float64(current) / mean
+			}
+			_ = a.insertAssistantProactiveCandidate(ctx, assistantProactiveCandidate{
+				SourceKey: "anomaly:log_volume:" + server.id + ":" + bucket, ServerID: server.id, Trigger: "anomalies",
+				Summary: cleanModerationText(server.name+" produced an unusually large amount of log output", 240),
+				Details: map[string]any{
+					"kind": "log_volume", "window_seconds": int(assistantLogVolumeWindow / time.Second),
+					"bytes": current, "lines": lines, "baseline_bytes_per_minute": mean,
+					"threshold_bytes_per_minute": threshold, "baseline_ratio": ratio, "sample_capped": capped,
+				},
+			})
+			continue
+		}
+
+		// An exponential baseline adapts to sustained ordinary traffic. Outlier
+		// samples are excluded above so a burst cannot immediately normalize itself.
+		const alpha = 0.2
+		if samples == 0 {
+			mean = float64(current)
+			variance = 0
+			samples = 1
+		} else {
+			delta := float64(current) - mean
+			mean += alpha * delta
+			variance = (1 - alpha) * (variance + alpha*delta*delta)
+			if samples < 1000 {
+				samples++
+			}
+		}
+		_, _ = a.db.ExecContext(ctx, `INSERT INTO assistant_log_volume_baselines(server_id,sample_count,mean_bytes,variance_bytes,last_sample_at)
+			VALUES(?,?,?,?,?) ON CONFLICT(server_id) DO UPDATE SET sample_count=excluded.sample_count,
+			mean_bytes=excluded.mean_bytes,variance_bytes=excluded.variance_bytes,last_sample_at=excluded.last_sample_at,updated_at=CURRENT_TIMESTAMP`,
+			server.id, samples, mean, variance, now.Unix())
+	}
+	_, _ = a.db.ExecContext(ctx, `DELETE FROM assistant_log_volume_baselines WHERE server_id NOT IN (SELECT id FROM servers)`)
 }
 
 func (a *App) scanAssistantProactiveCrashes(ctx context.Context, now time.Time) {

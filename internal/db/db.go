@@ -1702,6 +1702,27 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 49 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS assistant_log_volume_baselines (
+			server_id TEXT PRIMARY KEY, sample_count INTEGER NOT NULL DEFAULT 0,
+			mean_bytes REAL NOT NULL DEFAULT 0, variance_bytes REAL NOT NULL DEFAULT 0,
+			last_sample_at INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(49)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

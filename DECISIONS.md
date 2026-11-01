@@ -258,7 +258,7 @@
 ## 2026-11-01: Docklight proactive monitoring
 
 - Keep proactive monitoring off by default and expose levels 0–3 with administrator-selected triggers for confirmed crashes, slow starts, resource thresholds, host pressure, and player-count anomalies.
-- Build observations from the panel's existing crash records and metric history. Do not read container logs or query live player counts; do not add log-volume anomaly detection without a safe baseline.
+- Build observations from the panel's existing crash records and metric history. Do not query live player counts. The later proactive log-volume decision permits count-only Docker log sampling with a persisted, bounded baseline.
 - Preserve server-view scoping for event history and restrict host-wide events to admins. Bound stored history to 1,000 events and rate-limit automatic fixes to three per server in 30 minutes.
 - Level 2 suggestions are informational. Level 3 requires both Advisory and Actions and can only restart a confirmed failed server or raise memory after exit 137 when fresh host metrics show enough headroom. Keep every other proposed action manual.
 - Store event explanations and suggestions for operator review, but do not persist prompts or write their contents to audit details.
@@ -278,3 +278,10 @@
 - Stop only the main app before its update so working sidecars remain available on the private network. Start stopped or missing sidecars when needed, then attach the update container to that network.
 - Chown updated data to the panel user while preserving group ownership and existing modes; apply group write only to validated `app_writable` paths. Attempt to recreate the app after script failures so the update result does not suppress a deployment attempt.
 - Use the Rune app-update script for scheduled Update actions only while the server is running; keep the legacy installer-based scheduled update for templates without an `update` block.
+
+## 2026-11-01: Proactive log-volume monitoring
+
+- Keep log-volume checks under the existing `anomalies` trigger so administrators have one switch for player and output anomalies.
+- Read Docker output counts for a one-minute window, but never retain or send raw log lines for this check. Cap reads at 8 MiB per server per sample.
+- Learn a per-server exponential baseline after five observations; relearn when it is older than 24 hours. Report only bursts that exceed an absolute 1 MiB floor and both an eight-times-baseline and six-standard-deviation threshold. Exclude outlier samples from the baseline and deduplicate events hourly to reduce noise.
+- Store only the rolling numeric baseline and remove it when its server is deleted. Ignore Docker log access failures rather than treating them as zero output.

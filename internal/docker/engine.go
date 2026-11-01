@@ -435,6 +435,17 @@ func (e *Engine) Logs(ctx context.Context, id, tail string, follow bool) (io.Rea
 	return r.Body, nil
 }
 
+// LogsSince reads container output emitted at or after the supplied time.
+// Docker supplies timestamped, multiplexed stdout and stderr frames.
+func (e *Engine) LogsSince(ctx context.Context, id string, since time.Time) (io.ReadCloser, error) {
+	q := url.Values{"stdout": {"1"}, "stderr": {"1"}, "since": {strconv.FormatInt(since.Unix(), 10)}, "timestamps": {"1"}}
+	r, err := e.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(id)+"/logs?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	return r.Body, nil
+}
+
 // CopyLogs removes Docker's 8-byte multiplex headers and writes readable log lines.
 func CopyLogs(dst io.Writer, src io.Reader) error {
 	br := bufio.NewReader(src)

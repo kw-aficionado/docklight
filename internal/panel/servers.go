@@ -420,6 +420,10 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "server backups were removed but Advisory history could not be deleted")
 		return
 	}
+	if _, err := a.db.Exec(`DELETE FROM assistant_log_volume_baselines WHERE server_id=?`, s.ID); err != nil {
+		writeError(w, 500, "could not clear Advisory log-volume state; server data was retained")
+		return
+	}
 	if err := os.RemoveAll(s.DataDir); err != nil {
 		writeError(w, 500, "Docker removed the container but panel data cleanup failed; fix storage permissions and retry cleanup")
 		return

@@ -74,8 +74,12 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 48 {
-		t.Fatalf("expected 48 migrations, got %d", count)
+	if count != 49 {
+		t.Fatalf("expected 49 migrations, got %d", count)
+	}
+	var logBaselineTable int
+	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='assistant_log_volume_baselines'`).Scan(&logBaselineTable); err != nil || logBaselineTable != 1 {
+		t.Fatalf("version 49 log-volume baseline table missing: count=%d err=%v", logBaselineTable, err)
 	}
 	var watcherTable, watcherConsentColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='log_watchers'`).Scan(&watcherTable); err != nil {

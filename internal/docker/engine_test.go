@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -106,6 +107,30 @@ func TestStatsCPUIsShareOfWholeHost(t *testing.T) {
 	cpu, memory, err := e.Stats(context.Background(), "container-123")
 	if err != nil || cpu != 50 || memory != 1048576 {
 		t.Fatalf("stats cpu/memory=%v/%d err=%v, want host CPU share 50%% and 1 MiB", cpu, memory, err)
+	}
+}
+
+func TestLogsSincePassesTimestampAndMultiplexedOutput(t *testing.T) {
+	var requestURI string
+	body := string([]byte{1, 0, 0, 0, 0, 0, 0, 6}) + "hello\n"
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestURI = req.URL.RequestURI()
+		return dockerResponse(req, http.StatusOK, body), nil
+	})}
+	e := NewWithHTTPClient("test-socket", "1.45", client)
+	since := time.Unix(1_800_000_123, 0)
+	stream, err := e.LogsSince(context.Background(), "container-123", since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	var output strings.Builder
+	if err = CopyLogs(&output, stream); err != nil {
+		t.Fatal(err)
+	}
+	query, err := url.ParseQuery(strings.SplitN(requestURI, "?", 2)[1])
+	if err != nil || query.Get("since") != "1800000123" || query.Get("timestamps") != "1" || output.String() != "hello\n" {
+		t.Fatalf("since log request=%q output=%q err=%v", requestURI, output.String(), err)
 	}
 }
 

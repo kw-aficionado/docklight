@@ -92,7 +92,7 @@ Blocking starts off. Cloudflare is selected when a configured zone is available 
 | `DELETE /api/watchers/{id}` | Admin only; remove a rule. Template-seeded defaults are restored the next time the server is installed. |
 | `POST /api/servers/{id}/dayz/mods/suggest` | Requires a compatible DayZ `MODS` setting and `server.view`; suggest checks without changing the configured mod list. |
 | `POST /api/admin-log/digest` | Admin only; summarize up to 200 structured audit fields, without audit detail text. |
-| `PUT /api/ai/proactive-settings` | Admin only; save monitoring `level` (0–3) and selected `triggers` (`crash`, `slowstart`, `resource`, `host`, `anomalies`). Level 0 disables monitoring. Level 3 requires Advisory and Actions to be enabled before narrowly bounded crash-restart or OOM memory-limit fixes can run. |
+| `PUT /api/ai/proactive-settings` | Admin only; save monitoring `level` (0–3) and selected `triggers` (`crash`, `slowstart`, `resource`, `host`, `anomalies`). `anomalies` includes player-count changes and log-volume outliers based on Docker log byte counts; raw log lines are not retained for this check. Level 0 disables monitoring. Level 3 requires Advisory and Actions to be enabled before narrowly bounded crash-restart or OOM memory-limit fixes can run. |
 | `GET /api/ai/proactive-events` | Signed-in users; return up to 50 undismissed observations limited to servers the user can view. Host-wide observations are admin-only. |
 | `DELETE /api/ai/proactive-events/{id}` | Requires access to the observation's server; dismiss it from the active list. |
 
