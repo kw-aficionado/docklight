@@ -106,6 +106,12 @@ Startup and once-per-minute reconciliation repair managed Cloudflare and nftable
 
 Administrators can add and remove full hostnames on each server, and optionally select a declared TCP port. Saved routes appear in per-server Settings and the Domains page. Cloudflare preserves unrelated Tunnel ingress rules and creates a proxied DNS record; Nginx Proxy Manager creates an independently tracked proxy host, including its optional Let's Encrypt flow. Provider state, errors, and cleanup intent are recorded separately per route. Start/stop, confirmed exits, server deletion, provider settings changes, and ten-minute Cloudflare/NPM reconciliation provision, remove, or retry routes. Deletes keep the database row until owned provider objects are confirmed removed. Existing hostname assignments and foreign Tunnel ingress, DNS, or NPM objects are left untouched. This slice compiled and browser-script syntax was checked; live provider and public-DNS acceptance remains pending.
 
+## Phase 3 disclosed usage beacon
+
+The sender transmits exactly a random per-installation UUID and the Docklight build version. It checks 30 seconds after startup and every 30 minutes, sends at most once per UTC day after collector acceptance, and retries after failures. A build-version change can send again immediately at the next check. The first administrator sign-in shows the exact payload and a one-click opt-out; the acknowledgement and opt-out persist in SQLite through upgrades. Admins can change the collector URL, test the URL currently in the form, and see the last success or failure.
+
+The same binary can receive beacons when its separate receiver switch is enabled. It upserts by instance ID and stores version, first/last seen, and ping count; it does not store request IP addresses. Public count is an independent opt-in, defaults off, and returns `null` below its configurable minimum of 25. The admin Beacon page shows collector totals, activity, and active versions. The default receiver URL follows Docklight's `docklight.app` domain. Build and JavaScript syntax checks passed; no tests, live collector or visual browser acceptance were run in this slice.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -142,7 +148,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: beacon, self-update, and cross-server ban automation.
+- Phase 3: self-update and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

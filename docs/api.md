@@ -54,6 +54,18 @@ Registration and sign-in require user verification and discoverable credentials.
 
 Blocking starts off. Cloudflare is selected when a configured zone is available and the token can create IP Access Rules for that zone; the required token permission is **Zone → Firewall Services → Edit**. Host nftables is used only when its fallback switch is on. Cloudflare rules affect proxied HTTP/S traffic for the configured zone. Host nftables drops inbound TCP 80 and 443 in the host `input` chain and requires `CAP_NET_ADMIN`; it does not block SSH or game ports. Docker-published container traffic normally traverses `forward` and is not intercepted by this host-input backend. Private, local, link-local, multicast, Cloudflare, CGNAT/Tailscale, documentation, benchmark, reserved, allowlisted, and recent administrator addresses are rejected. Recent administrator source addresses are kept in SQLite for 30 days. Reconciliation and expiry cleanup run at startup and once per minute.
 
+## Beacon
+
+| Method and path | Purpose |
+| --- | --- |
+| `POST /api/beacon` | Public; receiver returns `404` unless enabled. Accepts exactly `{"instance_id":"<uuid>","version":"<build>"}` and stores no source IP address. |
+| `GET /api/beacon/count` | Public; returns `404` unless both the receiver and public count are enabled. Returns `{ "count": null, "window_days": 30 }` below the configured minimum. Cached for 60 seconds. |
+| `GET /api/settings/beacon` | Admin only; shows the sender/receiver settings, exact payload, last success and last failure. |
+| `PUT /api/settings/beacon` | Admin only; save `enabled`, `url`, `receiver_enabled`, `public_count_enabled`, and `public_count_min` together. Blank URL restores `https://beacon.docklight.app/api/beacon`. Enabling after an explicit opt-out sends immediately. |
+| `POST /api/settings/beacon/notice` | Admin only; accepts `{ "keep": true|false }` and acknowledges the first-login disclosure. `false` disables the sender. |
+| `POST /api/settings/beacon/test` | Admin only; while the sender is on, send the exact payload to the URL currently in the request body without saving that URL or changing the scheduled-ping record. A disabled sender returns `409`; a collector `404` explains how to check the receiver path and switch. |
+| `GET /api/beacon/stats` | Admin only; collector totals, 7/30-day activity, and versions received in the last 30 days. |
+
 ## Templates and servers
 
 | Method and path | Purpose |

@@ -63,6 +63,11 @@ type App struct {
 	statusMu              sync.Mutex
 	statusCache           []byte
 	statusCacheUntil      time.Time
+	version               string
+	beaconSendMu          sync.Mutex
+	beaconMu              sync.Mutex
+	beaconCountCache      *beaconCountResponse
+	beaconCountCacheUntil time.Time
 	networkMu             sync.Mutex
 	blockingMu            sync.Mutex
 	upnpMu                sync.Mutex
@@ -127,7 +132,14 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}}
+}
+
+func (a *App) SetBuildVersion(version string) {
+	version = strings.TrimSpace(version)
+	if version != "" {
+		a.version = version
+	}
 }
 
 func EnsureAdmin(d *sql.DB, username, password string) (string, error) {
@@ -199,11 +211,13 @@ func (a *App) Router() http.Handler {
 	r.Get("/brand.svg", a.static("web/brand.svg", "image/svg+xml"))
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/status", a.publicStatusJSON)
+		api.Post("/beacon", a.receiveBeacon)
+		api.Get("/beacon/count", a.publicBeaconCount)
 		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, 200, map[string]string{"status": "ok", "version": "dev"})
+			writeJSON(w, 200, map[string]string{"status": "ok", "version": a.version})
 		})
 		api.Get("/version", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, 200, map[string]any{"version": "dev", "panel_name": "Docklight"})
+			writeJSON(w, 200, map[string]any{"version": a.version, "panel_name": "Docklight"})
 		})
 		api.Post("/login", a.login)
 		api.Post("/auth/login", a.login)
@@ -302,6 +316,11 @@ func (a *App) Router() http.Handler {
 			priv.Post("/notifications/{id}/test", a.admin(a.testNotificationChannel))
 			priv.Get("/settings/status-page", a.admin(a.getStatusPageSettings))
 			priv.Put("/settings/status-page", a.admin(a.updateStatusPageSettings))
+			priv.Get("/settings/beacon", a.admin(a.getBeaconSettings))
+			priv.Put("/settings/beacon", a.admin(a.updateBeaconSettings))
+			priv.Post("/settings/beacon/notice", a.admin(a.ackBeaconNotice))
+			priv.Post("/settings/beacon/test", a.admin(a.testBeacon))
+			priv.Get("/beacon/stats", a.admin(a.beaconStats))
 			priv.Get("/settings/network", a.getNetworkSettings)
 			priv.Put("/settings/network", a.admin(a.updateNetworkSettings))
 			priv.Get("/settings/upnp", a.admin(a.getUPnPSettings))

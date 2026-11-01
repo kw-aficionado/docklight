@@ -188,3 +188,10 @@
 - Record the Cloudflare ingress service and DNS record ID before deleting owned objects. Delete DNS only when that ID still names the recorded CNAME and it still targets the configured Tunnel. Do not adopt or remove an unrecorded pre-existing DNS record just because it points at the same Tunnel.
 - Mark NPM proxy hosts with Docklight server and route IDs. Use saved host IDs plus those markers for cleanup and recovery, leaving foreign hosts untouched.
 - Keep route rows when provider cleanup fails, then retry at server lifecycle changes and the ten-minute provider reconcilers. Extra hostnames require live Cloudflare, NPM, and public-DNS acceptance; those services were not available in this environment.
+
+## 2026-11-01: Docklight usage beacon
+
+- Send exactly a random installation UUID and build version, and disclose the literal payload on the first administrator sign-in. Keep the sender on by default as specified, but store the one-click opt-out in SQLite so upgrades cannot silently re-enable it.
+- Use `https://beacon.docklight.app/api/beacon` as the Docklight-branded default collector instead of the original Yggdrasil domain in the brief. The collector stores instance ID, version, timestamps, and a ping count; it does not persist source IP addresses.
+- Keep collection and publication independent: the receiver is off by default, and the public count is a second opt-in with a minimum population threshold. Do not ship panel analytics.
+- Schedule the first check 30 seconds after startup and subsequent checks every 30 minutes. Record a day only after a successful response, retry failures, and bypass the daily limit only when a build version changes or an administrator explicitly opts back in.

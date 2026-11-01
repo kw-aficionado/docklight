@@ -134,6 +134,7 @@ func serve(args []string) error {
 		log.Printf("Docker Engine not ready yet: %v", err)
 	}
 	app := panel.New(c, path, d)
+	app.SetBuildVersion(version)
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	app.StartScheduleWorker(workerCtx)
@@ -143,6 +144,7 @@ func serve(args []string) error {
 	app.StartIPBlockingReconciler(workerCtx)
 	app.StartDiskMonitor(workerCtx)
 	app.StartWatchdogMonitor(workerCtx)
+	app.StartBeaconWorker(workerCtx)
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	errs := make(chan error, 1)

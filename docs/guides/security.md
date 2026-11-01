@@ -47,7 +47,7 @@ The packaged unit permits `AF_NETLINK` for the nftables command but does not gra
 
 The `yggdrasil` service account must access Docker's Unix socket, usually through the `docker` group. Anyone who can use that socket can effectively control the host. Keep it local; do not expose it over TCP. Restrict panel port 8080 to trusted networks and use TLS when access crosses an untrusted network.
 
-The service uses an HttpOnly, SameSite=Strict session cookie, same-origin checks for browser mutations, security headers, and a Content Security Policy. The API does not enable cross-origin browser access. Docklight sends no telemetry or beacon in this release.
+The service uses an HttpOnly, SameSite=Strict session cookie, same-origin checks for browser mutations, security headers, and a Content Security Policy. The API does not enable cross-origin browser access. Docklight sends a disclosed daily beacon by default with only a random instance ID and build version. Administrators can turn it off at first sign-in or later in Beacon settings. The collector does not store source IP addresses; no panel analytics are shipped.
 
 ## Recovery
 

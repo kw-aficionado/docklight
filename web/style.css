@@ -73,3 +73,13 @@
 .light .server-route-form input,.light .server-route-form select{background:#fff;color:#1b2922;border-color:#ccd8d0}
 @media(max-width:900px){.server-route-form{grid-template-columns:1fr 1fr}.server-route-submit{grid-column:1/-1;justify-content:space-between}}
 @media(max-width:600px){.server-route-row{grid-template-columns:1fr auto;gap:10px}.server-route-providers{grid-column:1/-1;grid-row:2;flex-direction:row;flex-wrap:wrap}.server-route-row>.button{grid-column:2;grid-row:1}.server-route-form{grid-template-columns:1fr}.server-route-submit{grid-column:auto}}
+.beacon-last-state{display:grid;gap:9px;padding:12px;border:1px solid var(--border-soft);border-radius:8px;background:var(--panel-2);overflow-wrap:anywhere}
+.beacon-last-state>div{display:grid;gap:3px}
+.beacon-last-state span{color:var(--muted);font-size:10px}
+.beacon-last-state b{font-size:11px;font-weight:600}
+#beacon-config-card form{display:flex;flex-direction:column;gap:13px}
+#beacon-config-card form>hr{width:100%;margin:7px 0;border:0;border-top:1px solid var(--border-soft)}
+#beacon-config-card form>h3{margin:0;font-size:13px}
+#beacon-config-card .form-actions{align-items:center;flex-wrap:wrap}
+#beacon-config-card .form-actions .button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:900px){#beacon-config-card .form-actions{align-items:stretch}}

@@ -1214,6 +1214,56 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 36 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS beacon_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 1,
+			instance_id TEXT NOT NULL DEFAULT '',
+			last_day TEXT NOT NULL DEFAULT '',
+			last_version TEXT NOT NULL DEFAULT '',
+			last_success_at TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			last_error_at TEXT NOT NULL DEFAULT '',
+			notice_ack INTEGER NOT NULL DEFAULT 0,
+			receiver_enabled INTEGER NOT NULL DEFAULT 0,
+			url TEXT NOT NULL DEFAULT 'https://beacon.docklight.app/api/beacon',
+			public_count_enabled INTEGER NOT NULL DEFAULT 0,
+			public_count_min INTEGER NOT NULL DEFAULT 25,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO beacon_settings(id) VALUES(1)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS beacon_pings (
+			instance_id TEXT PRIMARY KEY,
+			version TEXT NOT NULL,
+			first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			ping_count INTEGER NOT NULL DEFAULT 1
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_beacon_pings_last_seen ON beacon_pings(last_seen)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(36)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
