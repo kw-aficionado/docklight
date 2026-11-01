@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 38 {
-		t.Fatalf("expected 38 migrations, got %d", count)
+	if count != 41 {
+		t.Fatalf("expected 41 migrations, got %d", count)
 	}
 	var hostMountColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='host_mounts'`).Scan(&hostMountColumn); err != nil || hostMountColumn != 1 {
@@ -96,6 +96,10 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('gameskills') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("catalog source migration is missing %q: count=%d err=%v", column, found, err)
 		}
+	}
+	var modImportsColumn int
+	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('dayz_economy_settings') WHERE name='mod_imports_json'`).Scan(&modImportsColumn); err != nil || modImportsColumn != 1 {
+		t.Fatalf("DayZ mod import migration is missing dayz_economy_settings.mod_imports_json: count=%d err=%v", modImportsColumn, err)
 	}
 	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens", "passkey_credentials", "network_settings", "upnp_settings", "server_upnp_mappings", "server_upnp_state", "unifi_settings", "server_unifi_mappings", "server_unifi_state", "npm_settings", "server_npm_state", "cloudflare_settings", "server_cf_state", "blocking_settings", "blocked_ips", "admin_ip_history", "server_routes", "beacon_settings", "beacon_pings", "panel_update_settings", "bans", "violation_rules", "ban_server_state"} {
 		var found int

@@ -47,7 +47,7 @@ Registration and sign-in require user verification and discoverable credentials.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/settings/blocking` | Admin only; return the master switch, optional nftables fallback, host nftables visibility, and backend counts. |
-| `PUT /api/settings/blocking` | Admin only; save `{ "enabled": true, "mode": "off", "nft_enabled": false, "allowlist": ["192.0.2.0/24"] }`. `allowlist` is a list of IP addresses or CIDR ranges Docklight refuses to block; it accepts up to 256 entries. Existing rules must be removed before their IP is added. Turning blocking off first removes Docklight-owned rules and preserves settings if safe cleanup fails. `mode` is reserved for Kvasir's future proposal/automatic workflow; this release supports manual blocks. |
+| `PUT /api/settings/blocking` | Admin only; save `{ "enabled": true, "mode": "off", "nft_enabled": false, "allowlist": ["192.0.2.0/24"] }`. `allowlist` is a list of IP addresses or CIDR ranges Docklight refuses to block; it accepts up to 256 entries. Existing rules must be removed before their IP is added. Turning blocking off first removes Docklight-owned rules and preserves settings if safe cleanup fails. `mode` is reserved for future assistant proposal/automatic workflows; this release supports manual blocks. |
 | `GET /api/blocks` | Admin only; list Docklight-managed IP blocks and reconciliation state. |
 | `POST /api/blocks` | Admin only; create one public IP rule with `{ "ip": "<public-ip>", "reason": "abuse report", "expires_in_hours": 24 }`. CIDR ranges are not accepted. Expiry may be 1–8760 hours or `0` for no expiry. |
 | `DELETE /api/blocks/{id}` | Admin only; remove a saved rule after verifying Docklight ownership at the active backend. |

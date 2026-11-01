@@ -130,7 +130,7 @@ Templates can declare Anti-Xray, BattlEye, and recommended-plugin information. T
 
 ## DayZ Economy
 
-Servers using a Rune ID of `dayz` have an **Economy** tab. `server.view` can read type counts, shortest positive lifetimes, registered files, eligible unregistered mission XML, and valid loot XML inside installed top-level `@mod` folders. Both scans are capped at 20,000 entries, 128 MiB, and 256 candidates. `server.control` can raise a minimum lifetime, update seven allowlisted cleanup globals, register validated mission files, import and register mod loot, or clear saved automation. Mod imports preserve a source-to-target mapping; successful installs and scheduled updates restore missing copies before registrations, globals, and lifetime floor. There is no built-in DayZ Rune yet. Go build/vet, Linux amd64/arm64 cross-builds, JavaScript and installer shell syntax, and whitespace checks passed. The Go command emitted a non-fatal warning when its read-only module cache could not write a stat cache; build and vet exited successfully using a temporary build cache. No tests, browser review, or live DayZ acceptance were run.
+Servers using a Rune ID of `dayz` have an **Economy** tab. `server.view` can read type counts, shortest positive lifetimes, registered files, eligible unregistered mission XML, and valid loot XML inside installed top-level `@mod` folders. Both scans are capped at 20,000 entries, 128 MiB, and 256 candidates. `server.control` can raise a minimum lifetime, update seven allowlisted cleanup globals, register validated mission files, import and register mod loot, or clear saved automation. Mod imports preserve a source-to-target mapping; successful installs and scheduled updates restore missing copies before registrations, globals, and lifetime floor. DayZ mod loot tests cover rooted and fragment XML, safe scanning, conflicts, and post-update restoration. The full `go test -count=1 ./...` suite, build, vet, Linux amd64/arm64 cross-builds, JavaScript and installer shell syntax, and whitespace checks passed. Go emitted a non-fatal warning when its read-only module cache could not write a stat cache; the commands exited successfully using a temporary build cache. No live DayZ acceptance was available.
 
 ## DayZ Mods
 
@@ -172,8 +172,8 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Built-in DayZ server template and mod loot import. The Workshop Mods tab requires a compatible DayZ Rune with a `MODS` setting.
-- Phase 4: Kvasir and MCP.
+- Built-in DayZ server template. DayZ Economy and Mods features require a compatible imported Rune; Workshop management additionally requires its `MODS` setting.
+- Phase 4: Docklight Assistant and MCP connector.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
 The remaining items have no active controls in the UI.
