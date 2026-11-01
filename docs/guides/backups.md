@@ -14,7 +14,9 @@ Local backups are stored under `<database directory>/backups/<server id>/` by de
 
 Administrators configure one remote destination from **Backup storage** in the Docklight sidebar. Only one protocol can be active at a time: S3-compatible storage, SFTP, or SMB. The connection check uploads a temporary test file and removes it again. Credentials and the host or endpoint are encrypted with `auth.secret_key`; API summaries report whether credentials are saved without returning them.
 
-SFTP uses password authentication on port `22` by default. Enter the server host, username, password, and optional path prefix. Docklight currently does not validate SSH host keys, so connect only across a trusted network or tunnel.
+SFTP uses password authentication on port `22` by default. Enter the server host, username, password, optional path prefix, and the server's SHA-256 host-key fingerprint. Docklight checks this pin during SSH negotiation before it sends the password and refuses a mismatch. Get the fingerprint from the SSH administrator or another authenticated channel; do not trust an unverified `ssh-keyscan` result. On an OpenSSH server, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` prints the Ed25519 host-key fingerprint when that is the key the server presents. For an RSA-only server, use its `ssh_host_rsa_key.pub` instead. The saved fingerprint is public metadata and is returned in the admin target summary; passwords remain encrypted and redacted.
+
+After upgrading a Docklight instance that already had an SFTP target, enter its verified fingerprint in **Backup storage** before using that target. Existing backup records and encrypted credentials are preserved; the target is unavailable until the pin is set. To rotate a server key, verify the replacement fingerprint over a trusted channel and update the pin; recorded backup objects do not need to be deleted.
 
 SMB uses NTLMv2 authentication on port `445` by default. Enter the host, share name, username, password, and optional path prefix. Create the share and grant the account access before testing the destination.
 

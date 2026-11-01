@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 50 {
-		t.Fatalf("expected 50 migrations, got %d", count)
+	if count != 51 {
+		t.Fatalf("expected 51 migrations, got %d", count)
 	}
 	var logBaselineTable int
 	if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='assistant_log_volume_baselines'`).Scan(&logBaselineTable); err != nil || logBaselineTable != 1 {
@@ -127,7 +127,7 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT auto_forward FROM servers WHERE id='legacy-public-server'`).Scan(&autoForward); err != nil || autoForward != 1 {
 		t.Fatalf("UPnP per-server default should be enabled for migrated servers: value=%d err=%v", autoForward, err)
 	}
-	for _, column := range []string{"protocol", "port"} {
+	for _, column := range []string{"protocol", "port", "host_key_sha256"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('backup_target_settings') WHERE name=?`, column).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("backup target migration is missing %q: count=%d err=%v", column, found, err)
@@ -316,5 +316,42 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	}
 	if storage != "local" || storageKey != "" {
 		t.Fatalf("legacy backup location migrated as storage=%q key=%q", storage, storageKey)
+	}
+}
+
+func TestBackupTargetHostKeyMigrationPreservesExistingSFTPSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "panel.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,access_key_enc,secret_key_enc,protocol,port) VALUES(1,1,'encrypted-host','encrypted-user','encrypted-password','sftp',22)`); err != nil {
+		d.Close()
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`ALTER TABLE backup_target_settings DROP COLUMN host_key_sha256`); err != nil {
+		d.Close()
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`DELETE FROM schema_migrations WHERE version=51`); err != nil {
+		d.Close()
+		t.Fatal(err)
+	}
+	if err = d.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var enabled int
+	var protocol, endpoint, username, password, fingerprint string
+	if err = d.QueryRow(`SELECT enabled,protocol,endpoint_enc,access_key_enc,secret_key_enc,host_key_sha256 FROM backup_target_settings WHERE id=1`).Scan(&enabled, &protocol, &endpoint, &username, &password, &fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 1 || protocol != "sftp" || endpoint != "encrypted-host" || username != "encrypted-user" || password != "encrypted-password" || fingerprint != "" {
+		t.Fatalf("SFTP host-key migration changed existing target data: enabled=%d protocol=%q endpoint=%q username=%q password=%q fingerprint=%q", enabled, protocol, endpoint, username, password, fingerprint)
 	}
 }

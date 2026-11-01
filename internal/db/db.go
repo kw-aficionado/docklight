@@ -1749,6 +1749,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 51 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "backup_target_settings", "host_key_sha256") {
+			if _, err = tx.Exec(`ALTER TABLE backup_target_settings ADD COLUMN host_key_sha256 TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(51)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

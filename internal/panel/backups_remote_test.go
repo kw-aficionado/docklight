@@ -26,25 +26,34 @@ func TestSFTPBackupTargetIsEncryptedAndUsesRemoteBackupLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configured := testRequest(h, http.MethodPut, "/api/backups/target", `{"type":"sftp","host":"backup.internal","port":2222,"username":"docklight-backups","secret_key":"secret-that-must-not-be-stored-in-plaintext","prefix":"nightly","enabled":true}`, adminSession)
+	hostFingerprint := "SHA256:" + strings.Repeat("A", 43)
+	withoutPin := testRequest(h, http.MethodPut, "/api/backups/target", `{"type":"sftp","host":"backup.internal","port":2222,"username":"docklight-backups","secret_key":"secret-that-must-not-be-stored-in-plaintext","prefix":"nightly","enabled":true}`, adminSession)
+	if withoutPin.Code != http.StatusBadRequest || !strings.Contains(withoutPin.Body.String(), "host-key fingerprint") {
+		t.Fatalf("enabled SFTP target without a host-key pin was accepted: %d %s", withoutPin.Code, withoutPin.Body.String())
+	}
+	invalidPin := testRequest(h, http.MethodPut, "/api/backups/target", `{"type":"sftp","host":"backup.internal","port":2222,"username":"docklight-backups","secret_key":"secret-that-must-not-be-stored-in-plaintext","host_key_sha256":"SHA256:invalid","enabled":true}`, adminSession)
+	if invalidPin.Code != http.StatusBadRequest {
+		t.Fatalf("invalid SFTP host-key fingerprint was accepted: %d %s", invalidPin.Code, invalidPin.Body.String())
+	}
+	configured := testRequest(h, http.MethodPut, "/api/backups/target", `{"type":"sftp","host":"backup.internal","port":2222,"username":"docklight-backups","secret_key":"secret-that-must-not-be-stored-in-plaintext","host_key_sha256":"`+hostFingerprint+`","prefix":"nightly","enabled":true}`, adminSession)
 	if configured.Code != http.StatusOK || !strings.Contains(configured.Body.String(), `"type":"sftp"`) || !strings.Contains(configured.Body.String(), `"configured":true`) || strings.Contains(configured.Body.String(), "secret-that-must-not-be-stored") {
 		t.Fatalf("configure SFTP target: %d %s", configured.Code, configured.Body.String())
 	}
 	var protocol string
 	var port int
-	var endpointEnc, usernameEnc, passwordEnc string
-	if err = d.QueryRow(`SELECT protocol,port,endpoint_enc,access_key_enc,secret_key_enc FROM backup_target_settings WHERE id=1`).Scan(&protocol, &port, &endpointEnc, &usernameEnc, &passwordEnc); err != nil {
+	var endpointEnc, usernameEnc, passwordEnc, storedFingerprint string
+	if err = d.QueryRow(`SELECT protocol,port,endpoint_enc,access_key_enc,secret_key_enc,host_key_sha256 FROM backup_target_settings WHERE id=1`).Scan(&protocol, &port, &endpointEnc, &usernameEnc, &passwordEnc, &storedFingerprint); err != nil {
 		t.Fatal(err)
 	}
-	if protocol != "sftp" || port != 2222 || strings.Contains(endpointEnc, "backup.internal") || strings.Contains(usernameEnc, "docklight-backups") || strings.Contains(passwordEnc, "secret-that-must") {
-		t.Fatalf("SFTP target fields were not saved safely: protocol=%q port=%d endpoint=%q username=%q password=%q", protocol, port, endpointEnc, usernameEnc, passwordEnc)
+	if protocol != "sftp" || port != 2222 || storedFingerprint != hostFingerprint || strings.Contains(endpointEnc, "backup.internal") || strings.Contains(usernameEnc, "docklight-backups") || strings.Contains(passwordEnc, "secret-that-must") {
+		t.Fatalf("SFTP target fields were not saved safely: protocol=%q port=%d fingerprint=%q endpoint=%q username=%q password=%q", protocol, port, storedFingerprint, endpointEnc, usernameEnc, passwordEnc)
 	}
 	target, err := a.readBackupTarget()
-	if err != nil || target.Endpoint != "backup.internal" || target.AccessKey != "docklight-backups" || target.SecretKey != "secret-that-must-not-be-stored-in-plaintext" {
+	if err != nil || target.Endpoint != "backup.internal" || target.AccessKey != "docklight-backups" || target.SecretKey != "secret-that-must-not-be-stored-in-plaintext" || target.HostKeySHA256 != hostFingerprint {
 		t.Fatalf("decrypt saved SFTP settings: %#v err=%v", target, err)
 	}
 	read := testRequest(h, http.MethodGet, "/api/backups/target", "", adminSession)
-	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"username_configured":true`) || strings.Contains(read.Body.String(), "docklight-backups") || strings.Contains(read.Body.String(), "secret-that-must") {
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"username_configured":true`) || !strings.Contains(read.Body.String(), hostFingerprint) || strings.Contains(read.Body.String(), "docklight-backups") || strings.Contains(read.Body.String(), "secret-that-must") {
 		t.Fatalf("SFTP summary leaked a credential: %d %s", read.Code, read.Body.String())
 	}
 	status := testRequest(h, http.MethodGet, "/api/backups/target/status", "", userSession)
@@ -83,6 +92,11 @@ func TestSFTPBackupTargetIsEncryptedAndUsesRemoteBackupLifecycle(t *testing.T) {
 	}
 	if err = json.Unmarshal(created.Body.Bytes(), &response); err != nil || response.Backup.ID == "" {
 		t.Fatalf("decode remote backup response: %#v err=%v", response, err)
+	}
+	rotatedFingerprint := "SHA256:" + strings.Repeat("E", 43)
+	rotated := testRequest(h, http.MethodPut, "/api/backups/target", `{"type":"sftp","host_key_sha256":"`+rotatedFingerprint+`"}`, adminSession)
+	if rotated.Code != http.StatusOK || !strings.Contains(rotated.Body.String(), rotatedFingerprint) {
+		t.Fatalf("could not rotate a verified SFTP host-key pin while preserving backup records: %d %s", rotated.Code, rotated.Body.String())
 	}
 	verify := testRequest(h, http.MethodPost, "/api/servers/remote-backup-server/backups/"+response.Backup.ID+"/verify", `{}`, userSession)
 	if verify.Code != http.StatusOK || !strings.Contains(verify.Body.String(), `"valid":true`) {

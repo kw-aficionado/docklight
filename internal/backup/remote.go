@@ -2,6 +2,9 @@ package backup
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -20,17 +23,17 @@ import (
 const remoteIOTimeout = 30 * time.Second
 
 // SFTPClient stores backup objects over an SSH password-authenticated SFTP v3
-// session. Host-key pinning is intentionally not used to match the brief's
-// SFTP target contract; operators should use a trusted network.
+// session and requires an administrator-pinned SHA-256 host-key fingerprint.
 type SFTPClient struct {
-	address  string
-	username string
-	password string
-	prefix   string
-	dial     func(context.Context, string, string) (net.Conn, error)
+	address       string
+	username      string
+	password      string
+	hostKeySHA256 string
+	prefix        string
+	dial          func(context.Context, string, string) (net.Conn, error)
 }
 
-func NewSFTPClient(host string, port int, username, password, prefix string) (*SFTPClient, error) {
+func NewSFTPClient(host string, port int, username, password, hostKeySHA256, prefix string) (*SFTPClient, error) {
 	host, port, err := normalizeRemoteHost(host, port, 22)
 	if err != nil {
 		return nil, fmt.Errorf("SFTP %w", err)
@@ -42,11 +45,28 @@ func NewSFTPClient(host string, port int, username, password, prefix string) (*S
 	if password == "" || len(password) > 4096 {
 		return nil, errors.New("SFTP password must contain 1 to 4096 characters")
 	}
+	hostKeySHA256, err = normalizeSSHHostKeySHA256(hostKeySHA256)
+	if err != nil {
+		return nil, err
+	}
 	prefix, err = normalizeRemotePrefix(prefix)
 	if err != nil {
 		return nil, fmt.Errorf("SFTP %w", err)
 	}
-	return &SFTPClient{address: net.JoinHostPort(host, strconv.Itoa(port)), username: username, password: password, prefix: prefix}, nil
+	return &SFTPClient{address: net.JoinHostPort(host, strconv.Itoa(port)), username: username, password: password, hostKeySHA256: hostKeySHA256, prefix: prefix}, nil
+}
+
+func normalizeSSHHostKeySHA256(fingerprint string) (string, error) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	const prefix = "SHA256:"
+	if !strings.HasPrefix(fingerprint, prefix) {
+		return "", errors.New("enter the SFTP server's SHA-256 host-key fingerprint (SHA256:…)")
+	}
+	digest, err := base64.RawStdEncoding.Strict().DecodeString(strings.TrimPrefix(fingerprint, prefix))
+	if err != nil || len(digest) != sha256.Size {
+		return "", errors.New("SFTP host-key fingerprint must be a valid SHA-256 value such as SHA256:…")
+	}
+	return prefix + base64.RawStdEncoding.EncodeToString(digest), nil
 }
 
 func (c *SFTPClient) Put(ctx context.Context, key string, source io.Reader) error {
@@ -142,14 +162,25 @@ func (c *SFTPClient) withClient(ctx context.Context, operation func(*sftp.Client
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
+	hostKeyMismatch := false
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, c.address, &ssh.ClientConfig{
-		User:            c.username,
-		Auth:            []ssh.AuthMethod{ssh.Password(c.password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         remoteIOTimeout,
+		User: c.username,
+		Auth: []ssh.AuthMethod{ssh.Password(c.password)},
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			actual := ssh.FingerprintSHA256(key)
+			if subtle.ConstantTimeCompare([]byte(actual), []byte(c.hostKeySHA256)) != 1 {
+				hostKeyMismatch = true
+				return errors.New("SFTP host-key fingerprint mismatch")
+			}
+			return nil
+		},
+		Timeout: remoteIOTimeout,
 	})
 	if err != nil {
 		_ = conn.Close()
+		if hostKeyMismatch {
+			return errors.New("SFTP host key does not match the configured SHA-256 fingerprint; verify it with the server administrator")
+		}
 		return errors.New("SFTP authentication or SSH negotiation failed")
 	}
 	sshClient := ssh.NewClient(sshConn, channels, requests)

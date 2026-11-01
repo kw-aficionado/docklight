@@ -75,7 +75,7 @@
 ## 2026-10-31: SFTP and SMB backup protocols
 
 - The existing single remote target now supports S3-compatible, SFTP, or SMB storage. The selected protocol and connection fields are stored in the existing target row; endpoint and credentials remain encrypted with `auth.secret_key`. Migration 20 adds protocol and port fields while defaulting existing target rows to S3.
-- SFTP uses the Go SSH/SFTP libraries with password authentication. SSH host-key verification remains disabled to match the supplied brief; use a trusted network or tunnel. SMB uses the native SMB2 client with NTLMv2 authentication.
+- At the time the first remote backup targets were added, SFTP used password authentication without host-key verification; a later decision below replaces that behavior with an administrator-pinned SHA-256 fingerprint. SMB uses the native SMB2 client with NTLMv2 authentication.
 - Remote records lock the protocol, host, port, bucket or share, region, and prefix. Credentials can rotate without changing the object key identity. One remote destination is configured at a time.
 - The SFTP integration test uses an in-process SSH/SFTP server over buffered `net.Pipe`; SMB has constructor and target-management coverage. No separate live SFTP or SMB server was available for acceptance.
 
@@ -300,3 +300,9 @@
 - Generate `serverDZ.cfg` on every start so mutable settings apply without reinstalling. Saved passwords stay encrypted in Docklight, but DayZ requires their generated config-file values in plaintext on disk.
 - Keep Workshop content staging explicit: the Mods view controls `MODS` load order, while server files and signing keys must be staged by the operator and are included in the server backup.
 - The local environment has no Docker daemon, so template parsing, lifecycle configuration and readiness are tested with fakes; live SteamCMD and DayZ acceptance remains pending on a Docker host.
+
+## 2026-11-01: SFTP backup host-key pinning
+
+- Require the administrator to enter the SFTP server's SHA-256 host-key fingerprint from an authenticated, out-of-band source. Do not learn trust from the same network connection being verified.
+- Verify the SSH host key before password authentication and fail closed on a mismatch. Expose the public fingerprint in the admin target summary while keeping the existing credential-encryption behavior.
+- Leave upgraded SFTP settings and backup records in place, but treat a legacy target without a pin as unconfigured until an administrator supplies the verified fingerprint. Do not rewrite remote backup rows during migration.

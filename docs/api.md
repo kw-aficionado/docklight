@@ -207,8 +207,8 @@ For remote or hosted MCP clients, the panel needs a publicly reachable HTTPS ori
 | `POST /api/servers/{id}/backups/{backupID}/restore` | Restore after verifying; server must be stopped. |
 | `DELETE /api/servers/{id}/backups/{backupID}` | Delete the local file or recorded S3, SFTP, or SMB object and its metadata. |
 | `GET /api/backups/target/status` | Authenticated summary with `enabled`, `configured`, and the selected remote `type`. |
-| `GET /api/backups/target` | Admin only; return the redacted remote target summary. S3 returns endpoint, bucket, and region; SFTP/SMB return host and port, and SMB also returns share. |
-| `PUT /api/backups/target` | Admin only; configure `type` as `s3`, `sftp`, or `smb`, update the matching host or endpoint and credentials, enable/disable, or clear with `{"clear_target":true}`. Secret values are never returned. |
+| `GET /api/backups/target` | Admin only; return the redacted remote target summary. S3 returns endpoint, bucket, and region; SFTP/SMB return host and port, SMB also returns share, and SFTP returns its public `host_key_sha256` pin. |
+| `PUT /api/backups/target` | Admin only; configure `type` as `s3`, `sftp`, or `smb`, update the matching host or endpoint and credentials, enable/disable, or clear with `{"clear_target":true}`. An enabled SFTP target requires `host_key_sha256` in `SHA256:…` form, verified out of band; the pin can be rotated without deleting backup records. Secret values are never returned. |
 | `POST /api/backups/target/test` | Admin only; upload and delete a temporary object or file to check the configured remote destination. |
 | `GET /api/message-templates` | List message templates; command bodies are returned only to administrators. |
 | `POST /api/message-templates` | Admin only; create a one-line console-command template. |

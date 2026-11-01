@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,23 +20,27 @@ import (
 )
 
 func TestRemoteClientsValidateHostsPathsAndSMBShares(t *testing.T) {
-	sftpClient, err := NewSFTPClient("[2001:db8::5]", 0, "backup-user", "password", "snapshots/daily")
+	fingerprint := "SHA256:" + strings.Repeat("A", 43)
+	sftpClient, err := NewSFTPClient("[2001:db8::5]", 0, "backup-user", "password", fingerprint, "snapshots/daily")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sftpClient.address != "[2001:db8::5]:22" {
 		t.Fatalf("SFTP address=%q", sftpClient.address)
 	}
-	if _, err = NewSFTPClient("host/path", 22, "backup-user", "password", ""); err == nil {
+	if _, err = NewSFTPClient("host/path", 22, "backup-user", "password", fingerprint, ""); err == nil {
 		t.Fatal("accepted an SFTP host containing a path")
 	}
 	for _, host := range []string{"[host", "host]", "host:22", "host/path"} {
-		if _, err = NewSFTPClient(host, 22, "backup-user", "password", ""); err == nil {
+		if _, err = NewSFTPClient(host, 22, "backup-user", "password", fingerprint, ""); err == nil {
 			t.Errorf("accepted invalid SFTP host %q", host)
 		}
 	}
-	if _, err = NewSFTPClient("host", 22, "backup-user", "password", "../escape"); err == nil {
+	if _, err = NewSFTPClient("host", 22, "backup-user", "password", fingerprint, "../escape"); err == nil {
 		t.Fatal("accepted a traversal prefix")
+	}
+	if _, err = NewSFTPClient("host", 22, "backup-user", "password", "SHA256:invalid", ""); err == nil {
+		t.Fatal("accepted an invalid SSH SHA-256 host-key fingerprint")
 	}
 	if _, err = remoteObjectPath("snapshots", "../escape.dlbak"); err == nil {
 		t.Fatal("accepted a traversal object key")
@@ -73,7 +78,8 @@ func TestSFTPClientUploadsDownloadsAndDeletesOverPasswordSSH(t *testing.T) {
 		return nil, nil
 	}}
 	serverConfig.AddHostKey(signer)
-	client, err := NewSFTPClient("sftp.test", 22, "backup-user", "correct horse battery staple", "")
+	fingerprint := ssh.FingerprintSHA256(signer.PublicKey())
+	client, err := NewSFTPClient("sftp.test", 22, "backup-user", "correct horse battery staple", fingerprint, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +118,26 @@ func TestSFTPClientUploadsDownloadsAndDeletesOverPasswordSSH(t *testing.T) {
 	}
 	if got := authCount.Load(); got != 3 {
 		t.Fatalf("password authentication calls=%d, want 3", got)
+	}
+
+	_, wrongPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSigner, err := ssh.NewSignerFromKey(wrongPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongClient, err := NewSFTPClient("sftp.test", 22, "backup-user", "correct horse battery staple", ssh.FingerprintSHA256(wrongSigner.PublicKey()), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongClient.dial = client.dial
+	if err = wrongClient.Put(context.Background(), key, bytes.NewReader(payload)); err == nil || !strings.Contains(err.Error(), "host key does not match") {
+		t.Fatalf("wrong SSH host key was not rejected clearly: %v", err)
+	}
+	if got := authCount.Load(); got != 3 {
+		t.Fatalf("password was sent before host-key verification: authentication calls=%d", got)
 	}
 }
 

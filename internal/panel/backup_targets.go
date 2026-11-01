@@ -24,15 +24,16 @@ type backupObjectStore interface {
 }
 
 type backupTargetConfig struct {
-	Type      string
-	Enabled   bool
-	Endpoint  string
-	Port      int
-	Bucket    string
-	Region    string
-	AccessKey string
-	SecretKey string
-	Prefix    string
+	Type          string
+	Enabled       bool
+	Endpoint      string
+	Port          int
+	Bucket        string
+	Region        string
+	AccessKey     string
+	SecretKey     string
+	HostKeySHA256 string
+	Prefix        string
 }
 
 type backupTargetSummary struct {
@@ -49,6 +50,7 @@ type backupTargetSummary struct {
 	AccessKeyConfigured bool   `json:"access_key_configured"`
 	UsernameConfigured  bool   `json:"username_configured"`
 	SecretConfigured    bool   `json:"secret_key_configured"`
+	HostKeySHA256       string `json:"host_key_sha256,omitempty"`
 }
 
 func (t backupTargetConfig) configured() bool {
@@ -56,7 +58,7 @@ func (t backupTargetConfig) configured() bool {
 	case "s3":
 		return t.Endpoint != "" && t.Bucket != "" && t.Region != "" && t.AccessKey != "" && t.SecretKey != ""
 	case "sftp":
-		return t.Endpoint != "" && t.AccessKey != "" && t.SecretKey != ""
+		return t.Endpoint != "" && t.AccessKey != "" && t.SecretKey != "" && t.HostKeySHA256 != ""
 	case "smb":
 		return t.Endpoint != "" && t.Bucket != "" && t.AccessKey != "" && t.SecretKey != ""
 	default:
@@ -75,7 +77,7 @@ func (a *App) readBackupTarget() (backupTargetConfig, error) {
 	var enabled int
 	var endpointEnc, accessKeyEnc, secretKeyEnc string
 	var target backupTargetConfig
-	err := a.db.QueryRow(`SELECT enabled,protocol,port,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix FROM backup_target_settings WHERE id=1`).Scan(&enabled, &target.Type, &target.Port, &endpointEnc, &target.Bucket, &target.Region, &accessKeyEnc, &secretKeyEnc, &target.Prefix)
+	err := a.db.QueryRow(`SELECT enabled,protocol,port,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,host_key_sha256 FROM backup_target_settings WHERE id=1`).Scan(&enabled, &target.Type, &target.Port, &endpointEnc, &target.Bucket, &target.Region, &accessKeyEnc, &secretKeyEnc, &target.Prefix, &target.HostKeySHA256)
 	if errors.Is(err, sql.ErrNoRows) {
 		return backupTargetConfig{}, nil
 	}
@@ -140,6 +142,9 @@ func summarizeBackupTarget(target backupTargetConfig) backupTargetSummary {
 		summary.Region = target.Region
 	} else {
 		summary.Host = target.Endpoint
+		if protocol == "sftp" {
+			summary.HostKeySHA256 = target.HostKeySHA256
+		}
 		if protocol == "smb" {
 			summary.Share = target.Bucket
 		}
@@ -149,20 +154,21 @@ func summarizeBackupTarget(target backupTargetConfig) backupTargetSummary {
 
 func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Enabled     *bool   `json:"enabled"`
-		Type        string  `json:"type"`
-		Protocol    string  `json:"protocol"`
-		Endpoint    string  `json:"endpoint"`
-		Host        string  `json:"host"`
-		Port        *int    `json:"port"`
-		Bucket      string  `json:"bucket"`
-		Share       string  `json:"share"`
-		Region      string  `json:"region"`
-		AccessKey   string  `json:"access_key"`
-		Username    string  `json:"username"`
-		SecretKey   string  `json:"secret_key"`
-		Prefix      *string `json:"prefix"`
-		ClearTarget bool    `json:"clear_target"`
+		Enabled       *bool   `json:"enabled"`
+		Type          string  `json:"type"`
+		Protocol      string  `json:"protocol"`
+		Endpoint      string  `json:"endpoint"`
+		Host          string  `json:"host"`
+		Port          *int    `json:"port"`
+		Bucket        string  `json:"bucket"`
+		Share         string  `json:"share"`
+		Region        string  `json:"region"`
+		AccessKey     string  `json:"access_key"`
+		Username      string  `json:"username"`
+		SecretKey     string  `json:"secret_key"`
+		HostKeySHA256 *string `json:"host_key_sha256"`
+		Prefix        *string `json:"prefix"`
+		ClearTarget   bool    `json:"clear_target"`
 	}
 	if decodeJSON(w, r, &in, 12*1024) != nil {
 		return
@@ -233,6 +239,9 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	if in.SecretKey != "" {
 		next.SecretKey = in.SecretKey
 	}
+	if in.HostKeySHA256 != nil {
+		next.HostKeySHA256 = strings.TrimSpace(*in.HostKeySHA256)
+	}
 	if in.Prefix != nil {
 		next.Prefix = strings.TrimSpace(*in.Prefix)
 	}
@@ -286,8 +295,8 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err = a.db.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,protocol,port,updated_at)
-		VALUES(1,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,endpoint_enc=excluded.endpoint_enc,bucket=excluded.bucket,region=excluded.region,access_key_enc=excluded.access_key_enc,secret_key_enc=excluded.secret_key_enc,prefix=excluded.prefix,protocol=excluded.protocol,port=excluded.port,updated_at=CURRENT_TIMESTAMP`, boolInt(next.Enabled), endpointEnc, next.Bucket, next.Region, accessKeyEnc, secretKeyEnc, next.Prefix, next.protocol(), next.Port); err != nil {
+	if _, err = a.db.Exec(`INSERT INTO backup_target_settings(id,enabled,endpoint_enc,bucket,region,access_key_enc,secret_key_enc,prefix,protocol,port,host_key_sha256,updated_at)
+		VALUES(1,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,endpoint_enc=excluded.endpoint_enc,bucket=excluded.bucket,region=excluded.region,access_key_enc=excluded.access_key_enc,secret_key_enc=excluded.secret_key_enc,prefix=excluded.prefix,protocol=excluded.protocol,port=excluded.port,host_key_sha256=excluded.host_key_sha256,updated_at=CURRENT_TIMESTAMP`, boolInt(next.Enabled), endpointEnc, next.Bucket, next.Region, accessKeyEnc, secretKeyEnc, next.Prefix, next.protocol(), next.Port, next.HostKeySHA256); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save remote backup target settings")
 		return
 	}
@@ -298,7 +307,7 @@ func (a *App) updateBackupTarget(w http.ResponseWriter, r *http.Request) {
 func incompleteTargetMessage(protocol string) string {
 	switch protocol {
 	case "sftp":
-		return "enter the SFTP host, username, and password before saving the target"
+		return "enter the SFTP host, username, password, and verified SHA-256 host-key fingerprint before enabling the target"
 	case "smb":
 		return "enter the SMB host, share, username, and password before saving the target"
 	default:
@@ -312,7 +321,7 @@ func validateBackupTarget(target backupTargetConfig) error {
 		_, err := backup.NewS3Client(target.Endpoint, target.Bucket, target.Region, target.AccessKey, target.SecretKey, nil)
 		return err
 	case "sftp":
-		_, err := backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, "")
+		_, err := backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, target.HostKeySHA256, "")
 		return err
 	case "smb":
 		_, err := backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
@@ -344,7 +353,7 @@ func normalizeBackupPrefix(value string) (string, error) {
 }
 
 func anyBackupTargetValue(target backupTargetConfig) bool {
-	return target.Endpoint != "" || target.Port != 0 || target.Bucket != "" || target.Region != "" || target.AccessKey != "" || target.SecretKey != "" || target.Prefix != ""
+	return target.Endpoint != "" || target.Port != 0 || target.Bucket != "" || target.Region != "" || target.AccessKey != "" || target.SecretKey != "" || target.HostKeySHA256 != "" || target.Prefix != ""
 }
 
 func sameBackupTargetIdentity(first, second backupTargetConfig) bool {
@@ -378,7 +387,7 @@ func (a *App) newRemoteBackupStore(target backupTargetConfig) (backupObjectStore
 	case "s3":
 		return a.newS3BackupStore(target)
 	case "sftp":
-		return backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, "")
+		return backup.NewSFTPClient(target.Endpoint, target.Port, target.AccessKey, target.SecretKey, target.HostKeySHA256, "")
 	case "smb":
 		return backup.NewSMBClient(target.Endpoint, target.Port, target.Bucket, target.AccessKey, target.SecretKey, "")
 	default:
