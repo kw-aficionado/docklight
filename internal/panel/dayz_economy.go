@@ -43,9 +43,10 @@ var (
 )
 
 type dayzEconomyState struct {
-	MinLifetimeHours int            `json:"min_lifetime_hours"`
-	Globals          map[string]int `json:"globals"`
-	RegisteredFiles  []string       `json:"registered_files"`
+	MinLifetimeHours int                  `json:"min_lifetime_hours"`
+	Globals          map[string]int       `json:"globals"`
+	RegisteredFiles  []string             `json:"registered_files"`
+	ModImports       []dayzModTypesImport `json:"mod_imports"`
 }
 
 type dayzTypeFile struct {
@@ -399,9 +400,9 @@ func (a *App) resetDayZEconomy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) loadDayZEconomyState(serverID string) (dayzEconomyState, string, error) {
-	state := dayzEconomyState{Globals: map[string]int{}, RegisteredFiles: []string{}}
-	var globalsJSON, registeredJSON, updatedAt string
-	err := a.db.QueryRow(`SELECT min_lifetime_hours,globals_json,registered_files_json,updated_at FROM dayz_economy_settings WHERE server_id=?`, serverID).Scan(&state.MinLifetimeHours, &globalsJSON, &registeredJSON, &updatedAt)
+	state := dayzEconomyState{Globals: map[string]int{}, RegisteredFiles: []string{}, ModImports: []dayzModTypesImport{}}
+	var globalsJSON, registeredJSON, modImportsJSON, updatedAt string
+	err := a.db.QueryRow(`SELECT min_lifetime_hours,globals_json,registered_files_json,mod_imports_json,updated_at FROM dayz_economy_settings WHERE server_id=?`, serverID).Scan(&state.MinLifetimeHours, &globalsJSON, &registeredJSON, &modImportsJSON, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return state, "", nil
 	}
@@ -420,6 +421,12 @@ func (a *App) loadDayZEconomyState(serverID string) (dayzEconomyState, string, e
 	if state.RegisteredFiles == nil {
 		state.RegisteredFiles = []string{}
 	}
+	if err = json.Unmarshal([]byte(modImportsJSON), &state.ModImports); err != nil {
+		return state, "", errors.New("saved DayZ mod imports are invalid; reset DayZ Economy settings")
+	}
+	if state.ModImports == nil {
+		state.ModImports = []dayzModTypesImport{}
+	}
 	return state, updatedAt, nil
 }
 
@@ -430,6 +437,9 @@ func (a *App) saveDayZEconomyState(ctx context.Context, serverID string, state d
 	if state.RegisteredFiles == nil {
 		state.RegisteredFiles = []string{}
 	}
+	if state.ModImports == nil {
+		state.ModImports = []dayzModTypesImport{}
+	}
 	globals, err := json.Marshal(state.Globals)
 	if err != nil {
 		return err
@@ -438,8 +448,16 @@ func (a *App) saveDayZEconomyState(ctx context.Context, serverID string, state d
 	if err != nil {
 		return err
 	}
-	_, err = a.db.ExecContext(ctx, `INSERT INTO dayz_economy_settings(server_id,min_lifetime_hours,globals_json,registered_files_json,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)
-		ON CONFLICT(server_id) DO UPDATE SET min_lifetime_hours=excluded.min_lifetime_hours,globals_json=excluded.globals_json,registered_files_json=excluded.registered_files_json,updated_at=CURRENT_TIMESTAMP`, serverID, state.MinLifetimeHours, string(globals), string(registered))
+	cleanImports := uniqueDayZModImports(state.ModImports)
+	if len(cleanImports) != len(state.ModImports) {
+		return errors.New("saved DayZ mod imports contain duplicate or unsafe paths")
+	}
+	imports, err := json.Marshal(cleanImports)
+	if err != nil {
+		return err
+	}
+	_, err = a.db.ExecContext(ctx, `INSERT INTO dayz_economy_settings(server_id,min_lifetime_hours,globals_json,registered_files_json,mod_imports_json,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)
+		ON CONFLICT(server_id) DO UPDATE SET min_lifetime_hours=excluded.min_lifetime_hours,globals_json=excluded.globals_json,registered_files_json=excluded.registered_files_json,mod_imports_json=excluded.mod_imports_json,updated_at=CURRENT_TIMESTAMP`, serverID, state.MinLifetimeHours, string(globals), string(registered), string(imports))
 	return err
 }
 
@@ -845,8 +863,11 @@ func (a *App) applyDayZEconomySettings(server Server) error {
 	if err != nil {
 		return fmt.Errorf("read saved DayZ Economy settings: %w", err)
 	}
-	if state.MinLifetimeHours == 0 && len(state.Globals) == 0 && len(state.RegisteredFiles) == 0 {
+	if state.MinLifetimeHours == 0 && len(state.Globals) == 0 && len(state.RegisteredFiles) == 0 && len(state.ModImports) == 0 {
 		return nil
+	}
+	if len(uniqueDayZModImports(state.ModImports)) != len(state.ModImports) {
+		return errors.New("saved DayZ mod imports contain duplicate or unsafe paths; reset DayZ Economy settings")
 	}
 	if state.MinLifetimeHours < 0 || state.MinLifetimeHours > 8760 {
 		return errors.New("saved minimum lifetime is outside 0–8760 hours; reset DayZ Economy settings")
@@ -873,6 +894,44 @@ func (a *App) applyDayZEconomySettings(server Server) error {
 	missionRoot, err := safePath(root, filepath.ToSlash(filepath.Join("mpmissions", mission)), true)
 	if err != nil {
 		return errors.New("DayZ mission directory is missing; restore it or clear saved Economy settings before reinstalling")
+	}
+	registeredSet := make(map[string]bool, len(state.RegisteredFiles))
+	for _, raw := range state.RegisteredFiles {
+		if rel, cleanErr := cleanDayZMissionPath(raw); cleanErr == nil {
+			registeredSet[rel] = true
+		}
+	}
+	for _, item := range state.ModImports {
+		source, target, validateErr := validateSavedDayZModImport(root, missionRoot, item)
+		if validateErr != nil || !registeredSet[target] {
+			return errors.New("saved DayZ mod import contains an unsafe or unregistered path; clear saved Economy settings")
+		}
+		full, pathErr := safePath(missionRoot, filepath.FromSlash(target), false)
+		if pathErr != nil {
+			return fmt.Errorf("could not resolve imported types file %s safely", target)
+		}
+		if linkErr := ensureDayZNoLinks(missionRoot, target, true); linkErr != nil && !errors.Is(linkErr, fs.ErrNotExist) {
+			return fmt.Errorf("imported types file %s contains an unsafe path", target)
+		}
+		if _, statErr := os.Lstat(full); statErr == nil {
+			continue
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("could not inspect imported types file %s: %w", target, statErr)
+		}
+		data, readErr := readDayZRegularFile(source)
+		if readErr != nil {
+			return fmt.Errorf("source mod types file %s is missing after install/update; restore the mod or clear saved Economy settings: %w", item.SourcePath, readErr)
+		}
+		normalized, _, _, normalizeErr := normalizeDayZModTypes(data)
+		if normalizeErr != nil {
+			return fmt.Errorf("source mod types file %s is no longer valid: %w", item.SourcePath, normalizeErr)
+		}
+		if err = ensureDayZSafeDirectories(missionRoot, path.Dir(target)); err != nil {
+			return fmt.Errorf("could not restore imported types directory %s: %w", path.Dir(target), err)
+		}
+		if err = writeDayZAtomic(full, normalized); err != nil {
+			return fmt.Errorf("could not restore imported types file %s: %w", target, err)
+		}
 	}
 	if len(state.RegisteredFiles) > 0 {
 		for _, raw := range state.RegisteredFiles {

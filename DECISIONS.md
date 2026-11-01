@@ -231,3 +231,10 @@
 - Restrict file discovery to top-level safe `@mod` directories and never follow symlinks. Save only a permutation for reordering; automatic cleanup removes only items Steam confirms are removed. A missing folder can be waiting for the next template update, so an operator removes that entry explicitly.
 - Use Steam's public batched detail request for status. Keep search separate behind an admin-saved encrypted Steam Web API key; unknown API results do not count as broken.
 - There is still no built-in DayZ Rune or live DayZ/Steam acceptance in this checkout.
+
+## 2026-11-01: DayZ mod loot imports
+
+- Scan only validated XML types under installed top-level `@mod` folders. Bound traversal and total reads, skip symlinks and storage directories, and accept only a complete `<types>` document or direct `<type>` fragments that pass the same integer-lifetime parser used by Economy.
+- Use the `meta.cpp` name when present, sanitize it into a mission directory, preserve the path inside the mod folder, and flag Expansion by its displayed name or folder token without preventing import.
+- Copy into the mission and register through `cfgeconomycore.xml`; persist source/target mappings with Economy settings. During successful install/update recovery, restore only missing copies before rewriting registrations, globals, and the lifetime floor. Reset removes saved automation only and does not delete imported mission files.
+- No built-in DayZ Rune or live DayZ acceptance is available. This implementation is bounded to compatible templates and the mod content already installed by their Rune.

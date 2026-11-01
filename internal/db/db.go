@@ -1402,6 +1402,25 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 41 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "dayz_economy_settings", "mod_imports_json") {
+			if _, err = tx.Exec(`ALTER TABLE dayz_economy_settings ADD COLUMN mod_imports_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(41)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

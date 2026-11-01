@@ -230,6 +230,8 @@ curl -sS http://127.0.0.1:8080/api/servers \
 | `POST /api/servers/{id}/files/upload` | Multipart form fields `path` and `file`; maximum request size 64 MiB. |
 | `GET /api/servers/{id}/files/download?path=…` | Download a file. |
 | `GET /api/servers/{id}/dayz/economy` | Requires `server.view`; summarize the mission's vanilla and registered DayZ types files, cleanup lifetimes, and eligible unregistered XML files. Candidate scanning is bounded to 20,000 entries, 128 MiB read, and 256 candidates; `candidates_truncated` reports when a limit was reached. Available only when `gameskill_id` is `dayz`. |
+| `GET /api/servers/{id}/dayz/mod-loot` | Requires `server.view`; scan valid DayZ types XML in top-level installed `@mod` folders, showing the source, derived mission target, imported state, fragment status, and Expansion marker. Scan caps are 20,000 entries, 128 MiB read, and 256 candidates. |
+| `POST /api/servers/{id}/dayz/import-mod-types` | Requires `server.control`; accept `{ "source_paths": ["@123/Addons/types.xml"] }` for up to 64 selected files. The panel copies normalized types XML into a sanitized mission folder, registers each file with `cfgeconomycore.xml`, and saves source mappings for reinstall/update recovery. |
 | `GET /api/servers/{id}/dayz/mods` | Requires `server.view`; return the compatible Rune's `MODS` list, local `@mod` folders, and one batched public Workshop status lookup. |
 | `PUT /api/servers/{id}/dayz/mods/order` | Requires `server.control`; accept `{ "mods": ["@123", "@456"] }` only when it is a permutation of the current list. |
 | `POST /api/servers/{id}/dayz/mods/add` | Requires `server.control`; accept `{ "ids": ["123"] }` to append Workshop items to `MODS`. |

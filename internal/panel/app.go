@@ -404,6 +404,8 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/files/upload", a.fileUpload)
 			priv.Get("/servers/{id}/files/download", a.fileDownload)
 			priv.Get("/servers/{id}/dayz/economy", a.getDayZEconomy)
+			priv.Get("/servers/{id}/dayz/mod-loot", a.getDayZModLoot)
+			priv.Post("/servers/{id}/dayz/import-mod-types", a.importDayZModTypes)
 			priv.Get("/servers/{id}/dayz/mods", a.getDayZMods)
 			priv.Get("/servers/{id}/dayz/mods/search", a.getDayZModsSearch)
 			priv.Put("/servers/{id}/dayz/mods/order", a.reorderDayZMods)
