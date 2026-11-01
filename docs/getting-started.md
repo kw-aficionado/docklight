@@ -26,10 +26,10 @@ On first install, the script prints `http://<host>:8080` and a generated one-tim
 2. Pick a built-in template and select **Create server**.
 3. Fill out the settings and choose CPU and memory limits. Secret fields are encrypted in SQLite and shown as masked values after save.
 4. Select **Install**. Install output streams to the Console tab and install status.
-5. Wait for the server readiness check. It remains in **Starting** until its startup pattern matches. Templates with a `web` port must also accept a local TCP connection on that port.
+5. Wait for the server readiness check. It remains in **Starting** until its startup pattern or game query responds. Templates with a `web` port must also accept a local TCP connection on that port.
 6. Use the server tabs to view metrics, query player counts, issue console commands, edit files, manage backups, and change settings.
 
-The built-in Minecraft Java and Bedrock templates require accepting the Minecraft EULA. Minecraft Java also has a generated RCON password; the host RCON mapping is loopback-only. Vaultwarden and Uptime Kuma publish a web port. WordPress + MariaDB is a single app stack: the database stays on the server's private network, and Docklight backs up both services' data. See the [app-stack guide](guides/stacks.md). Steam-enabled templates need an administrator-authorized Steam account when they do not use anonymous login; see [Steam account setup](guides/steam.md). Cloudflare Tunnel runs `cloudflared` with a required encrypted tunnel token; route and DNS reconciliation is not included in this release.
+The built-in Minecraft Java and Bedrock templates require accepting the Minecraft EULA. Minecraft Java also has a generated RCON password; the host RCON mapping is loopback-only. Vaultwarden and Uptime Kuma publish a web port. WordPress + MariaDB is a single app stack: the database stays on the server's private network, and Docklight backs up both services' data. See the [app-stack guide](guides/stacks.md). Steam-enabled templates need an administrator-authorized Steam account when they do not use anonymous login; see [Steam account setup](guides/steam.md). The built-in DayZ template uses UDP ports 2302, 2304, and 2305 by default; see the [DayZ server guide](guides/dayz-server.md). Cloudflare Tunnel runs `cloudflared` with a required encrypted tunnel token; route and DNS reconciliation is not included in this release.
 
 ## Reverse proxy
 

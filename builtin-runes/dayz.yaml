@@ -1,0 +1,117 @@
+gameskill:
+  id: dayz
+  name: DayZ
+  category: Games
+  version: 1
+  description: A Linux DayZ Dedicated Server installed with SteamCMD. Requires an amd64 host or working x86-64 emulation on ARM.
+  docker:
+    image: steamcmd/steamcmd:debian-12
+    data_path: /data
+    env:
+      DAYZ_SERVER_NAME: "{{DAYZ_SERVER_NAME}}"
+      SERVER_PASSWORD: "{{SERVER_PASSWORD}}"
+      ADMIN_PASSWORD: "{{ADMIN_PASSWORD}}"
+      MAX_PLAYERS: "{{MAX_PLAYERS}}"
+      THIRD_PERSON: "{{THIRD_PERSON}}"
+      MODS: "{{MODS}}"
+  variables:
+    - key: DAYZ_SERVER_NAME
+      name: In-game server name
+      type: string
+      default: Docklight DayZ Server
+      pattern: "^[A-Za-z0-9 _-]{1,64}$"
+      hint: Letters, numbers, spaces, underscores, and hyphens only.
+    - key: SERVER_PASSWORD
+      name: Join password
+      type: string
+      default: ""
+      secret: true
+      pattern: "^[A-Za-z0-9_-]{0,64}$"
+      hint: Optional. Leave empty to allow players to join without a password.
+    - key: ADMIN_PASSWORD
+      name: In-game admin password
+      type: string
+      required: true
+      secret: true
+      pattern: "^[A-Za-z0-9_-]{12,64}$"
+      hint: This is written to serverDZ.cfg; limit access to server files accordingly.
+    - key: MAX_PLAYERS
+      name: Player limit
+      type: int
+      default: 60
+      min: 1
+      max: 60
+    - key: THIRD_PERSON
+      name: Allow third-person view
+      type: bool
+      default: true
+    - key: MODS
+      name: Mod folders or Workshop IDs
+      type: string
+      default: ""
+      pattern: "^(?:[A-Za-z0-9_@;., -]{0,1000})(?:[A-Za-z0-9_@;., -]{0,1000})(?:[A-Za-z0-9_@;., -]{0,48})$"
+      hint: Optional comma, semicolon, or space-separated existing folder names or Workshop IDs. Mod folders and signing keys must already be in server data; this template does not download Workshop content.
+  install:
+    script: |
+      set -eu
+      : "${STEAM_USER:?Authorize a Steam account in Docklight before installing DayZ}"
+      steamcmd +force_install_dir /data +login "$STEAM_USER" +app_update 223350 validate +quit
+  startup:
+    command: |
+      set -eu
+      cd /data
+      mkdir -p profiles battleye
+      disable_third_person=0
+      if [ "$THIRD_PERSON" != "true" ]; then disable_third_person=1; fi
+      printf 'hostname = "%s";\npassword = "%s";\npasswordAdmin = "%s";\nmaxPlayers = %s;\ndisable3rdPerson = %s;\ndisableBanlist = false;\ndisablePrioritylist = false;\nverifySignatures = 2;\nforceSameBuild = 1;\nserverTime = "SystemTime";\nserverTimePersistent = 1;\ninstanceId = 1;\nstorageAutoFix = 1;\nsteamQueryPort = %s;\nclientPort = %s;\nclass Missions { class DayZ { template = "dayzOffline.chernarusplus"; }; };\n' "$DAYZ_SERVER_NAME" "$SERVER_PASSWORD" "$ADMIN_PASSWORD" "$MAX_PLAYERS" "$disable_third_person" "{{QUERY_PORT}}" "{{CLIENT_PORT}}" > serverDZ.cfg
+      mods_raw="{{MODS}}"
+      mods_argument=""
+      mods_tokens=$(printf '%s' "$mods_raw" | tr ',;' '  ')
+      for mod_token in $mods_tokens; do
+        mod_token=${mod_token#@}
+        case "$mod_token" in
+          ''|*[!A-Za-z0-9._-]*) printf '%s\n' 'MODS entries may contain only letters, numbers, dots, underscores, and hyphens.' >&2; exit 1 ;;
+        esac
+        mod_folder="@$mod_token"
+        if [ ! -d "$mod_folder" ]; then
+          printf 'MODS folder %s is missing from server data; stage the folder and its signing key before starting.\n' "$mod_folder" >&2
+          exit 1
+        fi
+        if [ -n "$mods_argument" ]; then mods_argument="$mods_argument;"; fi
+        mods_argument="${mods_argument}${mod_folder}"
+      done
+      set -- -config=serverDZ.cfg -port={{GAME_PORT}} -profiles=profiles -BEpath=battleye -dologs -adminlog -netlog -freezecheck
+      if [ -n "$mods_argument" ]; then set -- "$@" "-mod=$mods_argument"; fi
+      ./DayZServer "$@" &
+      server_pid=$!
+      stop_dayz() {
+        kill -INT "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+      }
+      trap stop_dayz TERM INT
+      if wait "$server_pid"; then server_status=0; else server_status=$?; fi
+      exit "$server_status"
+    stop_timeout: 90
+  ports:
+    - name: game
+      default: 2302
+      protocol: udp
+    - name: client
+      default: 2304
+      protocol: udp
+    - name: query
+      default: 2305
+      protocol: udp
+  query:
+    type: a2s
+  bans:
+    adapter: dayz-ban-file
+  anticheat:
+    battleye:
+      supported: true
+      config_hint: "The server starts with the bundled battleye directory. Keep verifySignatures = 2 and only add trusted, correctly signed mods."
+  config_files:
+    - serverDZ.cfg
+  steam:
+    app_id: 223350
+    anonymous: false

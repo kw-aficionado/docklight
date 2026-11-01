@@ -641,7 +641,7 @@ func TestScheduledUpdatePullsAndRecreatesContainerWithoutDeletingData(t *testing
 	var filtered []string
 	for _, line := range strings.Split(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "done_regex:") && !strings.HasPrefix(trimmed, "stop:") && !strings.HasPrefix(trimmed, "save_command:") {
+		if trimmed != "query:" && trimmed != "type: minecraft" && !strings.HasPrefix(trimmed, "done_regex:") && !strings.HasPrefix(trimmed, "stop:") && !strings.HasPrefix(trimmed, "save_command:") {
 			filtered = append(filtered, line)
 		}
 	}

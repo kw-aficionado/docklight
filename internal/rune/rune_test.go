@@ -13,8 +13,8 @@ func TestBuiltinRunesParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 6 {
-		t.Fatalf("expected 6 shipped runes, got %d", len(entries))
+	if len(entries) != 7 {
+		t.Fatalf("expected 7 shipped runes, got %d", len(entries))
 	}
 	seen := map[string]bool{}
 	for _, entry := range entries {
@@ -28,10 +28,65 @@ func TestBuiltinRunesParse(t *testing.T) {
 		}
 		seen[gs.ID] = true
 	}
-	for _, id := range []string{"minecraft-java", "minecraft-bedrock", "uptime-kuma", "vaultwarden", "cloudflared", "wordpress-mariadb"} {
+	for _, id := range []string{"minecraft-java", "minecraft-bedrock", "uptime-kuma", "vaultwarden", "cloudflared", "wordpress-mariadb", "dayz"} {
 		if !seen[id] {
 			t.Errorf("built-in rune %q was not parsed", id)
 		}
+	}
+}
+
+func TestBuiltinDayZTemplateConfiguration(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "builtin-runes", "dayz.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs, err := Parse(string(content))
+	if err != nil {
+		t.Fatalf("parse DayZ template: %v", err)
+	}
+	if gs.ID != "dayz" || gs.Steam == nil || gs.Steam.AppID != 223350 || gs.Steam.Anonymous {
+		t.Fatalf("unexpected DayZ identity or Steam configuration: %#v", gs)
+	}
+	if gs.Query == nil || gs.Query.Type != "a2s" || gs.Bans == nil || gs.Bans.Adapter != "dayz-ban-file" {
+		t.Fatalf("DayZ query or ban integration is missing: query=%#v bans=%#v", gs.Query, gs.Bans)
+	}
+	wantPorts := map[string]int{"game": 2302, "client": 2304, "query": 2305}
+	for _, port := range gs.Ports {
+		if port.Protocol != "udp" || wantPorts[port.Name] != port.Default {
+			t.Errorf("unexpected DayZ port declaration: %#v", port)
+		}
+		delete(wantPorts, port.Name)
+	}
+	if len(wantPorts) != 0 {
+		t.Errorf("DayZ ports are missing: %v", wantPorts)
+	}
+	variables := make(map[string]Variable, len(gs.Variables))
+	for _, variable := range gs.Variables {
+		variables[variable.Key] = variable
+	}
+	adminPassword := variables["ADMIN_PASSWORD"]
+	if !adminPassword.Required || !adminPassword.Secret || adminPassword.Default != nil {
+		t.Errorf("DayZ admin password must be required, secret, and have no public default: %#v", adminPassword)
+	}
+	joinPassword := variables["SERVER_PASSWORD"]
+	if !joinPassword.Secret {
+		t.Errorf("DayZ join password must be stored as a secret: %#v", joinPassword)
+	}
+	env := gs.DefaultEnv()
+	env["ADMIN_PASSWORD"] = "a-long-admin-password"
+	env["MODS"] = "@123456;@234567"
+	if err := gs.ValidateEnv(env); err != nil {
+		t.Fatalf("valid DayZ settings were rejected: %v", err)
+	}
+	env["MODS"] = "$(touch-pwned)"
+	if err := gs.ValidateEnv(env); err == nil {
+		t.Fatal("shell syntax was accepted in the DayZ MODS field")
+	}
+	if gs.Install == nil || !strings.Contains(gs.Install.Script, "+app_update 223350 validate") || strings.Contains(gs.Install.Script, "+workshop_download_item") {
+		t.Fatalf("DayZ install script has unexpected Steam commands: %q", gs.Install)
+	}
+	if !strings.Contains(gs.Startup.Command, "steamQueryPort = %s") || !strings.Contains(gs.Startup.Command, "MODS folder %s is missing") || !strings.Contains(gs.Startup.Command, "-mod=$mods_argument") {
+		t.Fatalf("DayZ startup script is missing generated config, folder validation, or load-order behavior")
 	}
 }
 
@@ -69,6 +124,11 @@ func TestParseRejectsUnknownAndDuplicateFields(t *testing.T) {
 			name:    "duplicate field in sequence item",
 			source:  strings.Replace(valid, "  startup:", "  ports:\n    - name: game\n      name: other\n      default: 25565\n      protocol: tcp\n  startup:", 1),
 			wantErr: `duplicate key "name"`,
+		},
+		{
+			name:    "shell command with retained image entrypoint",
+			source:  strings.Replace(valid, "    exec: [run]", "    command: run", 1),
+			wantErr: "startup.command cannot be combined with docker.keep_entrypoint",
 		},
 	}
 	for _, test := range tests {

@@ -130,7 +130,7 @@ func TestManualAppUpdateIsAdminOnlyAndRestartsAfterScriptFailure(t *testing.T) {
 			if stopAt < 0 || toolAt <= stopAt || waitAt <= toolAt || mainAt <= waitAt {
 				t.Fatalf("expected stop, update script, then fresh app container: %v", operations)
 			}
-			if updateConfig.Image != "busybox:1.36" || strings.Join(updateConfig.Cmd, " ") != "/bin/sh -c echo update" || strings.Join(updateConfig.HostConfig.Binds, ",") != dataDir+":/data" {
+			if updateConfig.Image != "busybox:1.36" || strings.Join(updateConfig.Entrypoint, " ") != "/bin/sh -c" || strings.Join(updateConfig.Cmd, " ") != "echo update" || strings.Join(updateConfig.HostConfig.Binds, ",") != dataDir+":/data" {
 				t.Fatalf("update container did not use the declared image, script, and data bind: %#v", updateConfig)
 			}
 			if !foundOwnershipHelper {

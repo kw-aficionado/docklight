@@ -10,6 +10,6 @@ Move entries up and down to save a permutation of the current list. **Remove bro
 
 ## Workshop status and search
 
-Workshop status checks send all numeric IDs in the list in one public Steam API request, with a six-second deadline. An unavailable response is shown as unknown (`?`). DayZ Workshop search requires an administrator-saved Steam Web API key. Docklight encrypts the key in SQLite, masks it in the UI, and sends it only to Steam from the panel backend. A search result can be added to `MODS`; update or reinstall the server to let its Rune download the item.
+Workshop status checks send all numeric IDs in the list in one public Steam API request, with a six-second deadline. An unavailable response is shown as unknown (`?`). DayZ Workshop search requires an administrator-saved Steam Web API key. Docklight encrypts the key in SQLite, masks it in the UI, and sends it only to Steam from the panel backend. A search result can be added to `MODS`, but Workshop files and signing keys must be staged in the server data directory separately before the server starts. See the [built-in DayZ setup guide](dayz-server.md).
 
 Steam's official API documents the public [published-file detail request](https://partner.steamgames.com/doc/webapi/ISteamRemoteStorage) and the authenticated [Workshop search query](https://partner.steamgames.com/doc/webapi/IPublishedFileService). DayZ's server `-mod` option accepts semicolon-separated folder paths, as described in [Bohemia's server configuration reference](https://community.bistudio.com/wiki/DayZ:Server_Configuration).

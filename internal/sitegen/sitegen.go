@@ -127,10 +127,16 @@ func GenerateApps(root string) error {
 		if description == "" {
 			description = fallbackDescription(r)
 		}
+		guidePath := "../docs/getting-started.html"
+		guideLabel := "Read the getting started guide"
+		if r.ID == "dayz" {
+			guidePath = "../docs/guides/dayz-server.html"
+			guideLabel = "Read the DayZ server guide"
+		}
 		apps = append(apps, appPage{
 			ID: r.ID, Name: r.Name, Category: r.Category, Description: description,
 			Image: r.Docker.Image, DataPath: r.Docker.DataPath, Ports: ports,
-			Variables: variables, Version: r.Version,
+			Variables: variables, Version: r.Version, GuidePath: guidePath, GuideLabel: guideLabel,
 			Steam:    r.Steam != nil,
 			Initials: initials(r.Name),
 		})
@@ -175,6 +181,7 @@ type docPage struct {
 
 type appPage struct {
 	ID, Name, Category, Description, Image, DataPath, Initials, IconPath string
+	GuidePath, GuideLabel                                                string
 	Ports                                                                []string
 	Variables                                                            []variablePage
 	Services                                                             []servicePage
@@ -329,7 +336,7 @@ func appDetailPage(app appPage) pageData {
 		}
 		b.WriteString(`</tbody></table></div></section>`)
 	}
-	b.WriteString(`<section class="next-step"><div><div class="page-kicker">READY TO RUN IT?</div><h2>Start with the Docklight handbook.</h2></div><a class="button" href="../docs/getting-started.html">Read the getting started guide <span aria-hidden="true">↗</span></a></section></main>`)
+	fmt.Fprintf(&b, `<section class="next-step"><div><div class="page-kicker">READY TO RUN IT?</div><h2>Start with the Docklight handbook.</h2></div><a class="button" href="%s">%s <span aria-hidden="true">↗</span></a></section></main>`, html.EscapeString(app.GuidePath), html.EscapeString(app.GuideLabel))
 	return pageData{Title: app.Name, Root: root, Active: "apps", Body: template.HTML(b.String())}
 }
 

@@ -618,9 +618,9 @@ func (a *App) runInstallData(ctx context.Context, s Server, gs rune.Rune, j *ins
 			return secrets, cacheErr
 		}
 		binds = append(binds, steamCache+":/steamcache")
-		script = "chmod -R a+rwX /data 2>/dev/null || true\n" + script
+		script = "trap 'chmod -R a+rwX /data 2>/dev/null || true' EXIT\nchmod -R a+rwX /data 2>/dev/null || true\n" + script
 	}
-	cfg := docker.CreateConfig{Image: image, Cmd: []string{"/bin/sh", "-c", script}, Env: runtimeEnvList(env), WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: binds}}
+	cfg := docker.CreateConfig{Image: image, Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{script}, Env: runtimeEnvList(env), WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, HostConfig: docker.HostConfig{Binds: binds}}
 	cid, err := a.engine.Create(ctx, "ygg-install-"+shortID(s.ID), cfg)
 	if err != nil {
 		return secrets, err
@@ -1162,7 +1162,8 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 			}
 			return
 		}
-		logReady := re == nil
+		logReady := false
+		queryReady := false
 		if re != nil {
 			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 			logs, e := a.engine.Logs(ctx, s.ContainerID, "2000", false)
@@ -1173,6 +1174,13 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 				logReady = re.MatchString(b.String())
 			}
 			cancel()
+		} else if gs.Query == nil {
+			logReady = true
+		} else if port, portErr := queryPort(s, gs); portErr == nil {
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			_, queryErr := queryAtPort(ctx, gs, port)
+			cancel()
+			queryReady = queryErr == nil
 		}
 		web := false
 		hasWeb := false
@@ -1188,9 +1196,9 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 				break
 			}
 		}
-		ready := logReady
+		ready := startupSignalReady(gs, logReady, queryReady)
 		if hasWeb {
-			ready = web && (re == nil || logReady)
+			ready = web && ready
 		}
 		if ready {
 			_, _ = a.db.Exec(`UPDATE servers SET status='running',error_message='' WHERE id=?`, s.ID)
@@ -1203,6 +1211,16 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 			return
 		}
 	}
+}
+
+func startupSignalReady(gs rune.Rune, logMatches, queryResponds bool) bool {
+	if gs.Startup.DoneRegex != "" {
+		return logMatches
+	}
+	if gs.Query != nil {
+		return queryResponds
+	}
+	return true
 }
 
 func (a *App) serverStats(w http.ResponseWriter, r *http.Request) {
@@ -1411,13 +1429,7 @@ func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]st
 		envList = append(envList, k+"="+v)
 	}
 	sort.Strings(envList)
-	cmd := []string{}
-	for _, c := range gs.Startup.Exec {
-		cmd = append(cmd, rune.ApplyTemplate(c, env))
-	}
-	if len(cmd) == 0 && strings.TrimSpace(gs.Startup.Command) != "" {
-		cmd = []string{"/bin/sh", "-c", rune.ApplyTemplate(gs.Startup.Command, env)}
-	}
+	entrypoint, cmd := serverStartupCommand(gs, env)
 	user := gs.Docker.User
 	if user == "" && !gs.Docker.KeepEntrypoint {
 		user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
@@ -1435,11 +1447,28 @@ func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]st
 		working = "/data"
 	}
 	labels := map[string]string{docklightServerLabel: s.ID, docklightRoleLabel: "server"}
-	config := docker.CreateConfig{Image: image, Cmd: cmd, Env: envList, WorkingDir: working, User: user, Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, ExposedPorts: exposed, Labels: labels, HostConfig: hostCfg}
+	config := docker.CreateConfig{Image: image, Entrypoint: entrypoint, Cmd: cmd, Env: envList, WorkingDir: working, User: user, Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true, ExposedPorts: exposed, Labels: labels, HostConfig: hostCfg}
 	if network != "" {
 		config.NetworkingConfig = &docker.NetworkingConfig{EndpointsConfig: map[string]docker.EndpointSettings{network: {}}}
 	}
 	return config, nil
+}
+
+func serverStartupCommand(gs rune.Rune, env map[string]string) (entrypoint, command []string) {
+	if len(gs.Startup.Exec) > 0 {
+		for _, arg := range gs.Startup.Exec {
+			command = append(command, rune.ApplyTemplate(arg, env))
+		}
+	} else if strings.TrimSpace(gs.Startup.Command) != "" {
+		if gs.Docker.KeepEntrypoint {
+			return nil, []string{"/bin/sh", "-c", rune.ApplyTemplate(gs.Startup.Command, env)}
+		}
+		return []string{"/bin/sh", "-c"}, []string{rune.ApplyTemplate(gs.Startup.Command, env)}
+	}
+	if gs.Docker.KeepEntrypoint || len(command) == 0 {
+		return nil, command
+	}
+	return command[:1], command[1:]
 }
 
 func isPanelRuntimeVariable(name string) bool {

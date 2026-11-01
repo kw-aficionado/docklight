@@ -262,7 +262,7 @@ func (a *App) stackServicesRunning(ctx context.Context, s Server, gs rune.Rune, 
 func (a *App) runAppUpdateScript(ctx context.Context, s Server, gs rune.Rune, env map[string]string, network, image, script string, job *installJob, secrets []string) error {
 	appDataDir := serverAppDataDir(s, gs)
 	cfg := docker.CreateConfig{
-		Image: image, Cmd: []string{"/bin/sh", "-c", script}, Env: runtimeEnvList(env),
+		Image: image, Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{script}, Env: runtimeEnvList(env),
 		WorkingDir: "/data", User: "0:0", Tty: false, OpenStdin: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
 		Labels:     map[string]string{docklightServerLabel: s.ID, docklightRoleLabel: "app-update"},
 		HostConfig: docker.HostConfig{Binds: []string{appDataDir + ":/data"}},

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -277,8 +278,8 @@ func TestSteamInstallerUsesPersistentCacheAndWritableData(t *testing.T) {
 	if _, err := app.runInstallData(context.Background(), server, installerRune, &installJob{}); err != nil {
 		t.Fatalf("Steam install returned error: %v", err)
 	}
-	if len(config.Cmd) != 3 || !strings.HasPrefix(config.Cmd[2], "chmod -R a+rwX /data 2>/dev/null || true\n") {
-		t.Fatalf("Steam installer script prefix is missing: %#v", config.Cmd)
+	if !reflect.DeepEqual(config.Entrypoint, []string{"/bin/sh", "-c"}) || len(config.Cmd) != 1 || !strings.Contains(config.Cmd[0], "trap 'chmod -R a+rwX /data 2>/dev/null || true' EXIT") || !strings.Contains(config.Cmd[0], "chmod -R a+rwX /data 2>/dev/null || true\nsteamcmd +login") {
+		t.Fatalf("Steam installer shell or writable-data handling is missing: entrypoint=%#v command=%#v", config.Entrypoint, config.Cmd)
 	}
 	if !steamHas(config.Env, "HOME=/steamcache") || !steamHas(config.Env, "STEAM_USER=installer-account") {
 		t.Fatalf("Steam install environment is missing cache home or account: %#v", config.Env)

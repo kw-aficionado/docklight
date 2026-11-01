@@ -177,6 +177,9 @@ func (g Rune) Validate() error {
 	if len(g.Startup.Exec) == 0 && strings.TrimSpace(g.Startup.Command) == "" && !g.Docker.KeepEntrypoint {
 		return errors.New("gameskill.startup requires command, exec or docker.keep_entrypoint")
 	}
+	if g.Docker.KeepEntrypoint && len(g.Startup.Exec) == 0 && strings.TrimSpace(g.Startup.Command) != "" {
+		return errors.New("startup.command cannot be combined with docker.keep_entrypoint; use startup.exec for image entrypoint arguments")
+	}
 	if g.Startup.StopTimeout < 0 {
 		return errors.New("startup.stop_timeout cannot be negative")
 	}

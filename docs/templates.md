@@ -83,7 +83,7 @@ gameskill:
 | `docker.image` | Image to pull for server startup. |
 | `docker.data_path` | Container path backed by the server app-data directory; defaults to `/data`. For stack templates the main app gets only `<server data directory>/_app`, leaving sidecar data outside its mount. |
 | `docker.user` | Optional container UID:GID or username. Without `keep_entrypoint`, the panel sets a UID and mounts a minimal passwd shim. |
-| `docker.keep_entrypoint` | If true, Docker keeps the image entrypoint and `startup.exec` is passed as its arguments. Otherwise the command replaces the image command. The passwd shim is skipped. |
+| `docker.keep_entrypoint` | If true, Docker keeps the image entrypoint and `startup.exec` is passed as its arguments. Otherwise Docklight replaces the image entrypoint with the declared `startup.exec` executable or `/bin/sh -c` for `startup.command`. The passwd shim is skipped when the image entrypoint is kept. |
 | `docker.env` | Additional main-app environment values with literal `{{KEY}}` substitutions. Single-container templates also receive declared variables; stack templates should map the variables the main app needs here. Panel-reserved values are injected in both cases. |
 | `docker.extra_volumes` | Extra container paths backed by subdirectories in this server's data directory. Protected system paths are rejected. |
 | `docker.capabilities` | Restricted allowlist: `NET_ADMIN`, `NET_RAW`, `NET_BIND_SERVICE`, `SYS_NICE`. |
@@ -95,7 +95,7 @@ gameskill:
 | `update.image`, `update.script`, `update.label` | Optional app-update tool container, required shell script when the block is present, and button label (defaults to **Update app**). The image defaults to `docker.image`; the script runs as root with app data mounted at `/data` and declared environment values available. Read secrets from the environment; secret placeholders in the image or script are rejected. The panel captures and redacts declared secrets from output. |
 | `update.app_writable[]` | Optional list of up to 64 clean paths relative to app data. After the update, Docklight changes file ownership to the panel user without changing group ownership, and adds group-write permission only under these paths. The data root itself is ignored. |
 | `startup.command` | Shell string run with `/bin/sh -c` when the image entrypoint is replaced. |
-| `startup.exec` | Argument list for the container command. When `keep_entrypoint` is true these are entrypoint arguments. |
+| `startup.exec` | Argument list for the container command. When `keep_entrypoint` is true these are image entrypoint arguments; otherwise the first item becomes the executable and remaining items are its arguments. |
 | `startup.done_regex` | Regular expression searched in recent container output to mark startup ready. |
 | `startup.stop`, `startup.save_command` | Commands sent to container input before Docker's graceful stop. |
 | `startup.stop_timeout` | Grace period in seconds before Docker kills the container. Defaults to 30. |
@@ -123,11 +123,13 @@ An `update` block adds an admin-only **Update app** action to installed servers 
 
 ## Validation and limits
 
-The reader supports nested mappings, sequences, scalar values, inline lists, and literal/folded block strings. It is a bounded subset parser rather than a general YAML 1.2 implementation. Unknown fields are ignored, so use only fields listed here.
+When `startup.done_regex` is empty, a template with a `query` block is marked ready only after its configured game query responds. A template without either signal is marked ready when its container is running. A declared web port must also accept a local TCP connection.
+
+The reader supports nested mappings, sequences, scalar values, inline lists, and literal/folded block strings. It is a bounded subset parser rather than a general YAML 1.2 implementation. Unknown fields in supported mappings are rejected, so use only fields listed here.
 
 Container capabilities, devices, mounts, and sysctls are allowlisted to limit host access. `config_files` accepts up to 64 clean relative paths. The Files tab shows shortcuts for paths that exist; `.properties`, `.env`, `.cfg`, and `.conf` files support a key/value form and raw editing, preserving comments and unsupported lines. Rune-defined app-data import steps and backup hooks are not supported in this release. Private image access is managed by an administrator under **Templates → Registry access**; saved logins cover runtime images, sidecars, install images, and update pulls.
 
-Six built-in templates are embedded in the binary: Minecraft Java, Minecraft Bedrock, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. Built-in IDs cannot be overwritten or deleted. Community templates can be imported from the Templates page, subject to the same validation.
+Seven built-in templates are embedded in the binary: Minecraft Java, Minecraft Bedrock, DayZ, Uptime Kuma, Vaultwarden, WordPress + MariaDB, and Cloudflare Tunnel. Built-in IDs cannot be overwritten or deleted. Community templates can be imported from the Templates page, subject to the same validation.
 
 Sidecars receive a stable DNS alias equal to their service name, share only their server's user-defined bridge with the main app, and currently do not publish host ports. The main app receives only its `_app` data bind; persistent sidecar data stays under `_stack/<service name>`, outside the main app's filesystem and Files tab. Backups archive the full server data root and include both. The panel starts enabled sidecars in declaration order before the main app, stops them after the main app in reverse order, and removes them with the server. Startup install containers do not join the stack network; app initialization that needs a database belongs in the main app's runtime startup.
 

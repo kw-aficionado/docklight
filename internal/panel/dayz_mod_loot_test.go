@@ -98,25 +98,6 @@ func TestScanDayZModLootIsBoundToInstalledModFolders(t *testing.T) {
 
 func TestDayZEconomyRecreatesMissingImportedFileAndRegistration(t *testing.T) {
 	a, d, _ := testApp(t)
-	const runeYAML = `gameskill:
-  id: dayz
-  name: DayZ Server
-  category: Games
-  version: 1
-  docker:
-    image: example/dayz:test
-    data_path: /data
-  variables:
-    - key: MISSION
-      name: Mission
-      type: string
-      default: dayzOffline.chernarusplus
-  startup:
-    command: ./DayZServer
-`
-	if _, err := d.Exec(`INSERT INTO gameskills(id,name,category,version,yaml_blob,builtin) VALUES('dayz','DayZ Server','Games',1,?,0)`, runeYAML); err != nil {
-		t.Fatal(err)
-	}
 	dataDir := t.TempDir()
 	if _, err := d.Exec(`INSERT INTO servers(id,name,gameskill_id,status,installed,env_json,ports_json,data_dir) VALUES('dayz-test','DayZ test','dayz','stopped',1,'{}','{}',?)`, dataDir); err != nil {
 		t.Fatal(err)

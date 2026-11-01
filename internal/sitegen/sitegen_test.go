@@ -107,6 +107,31 @@ func TestGenerateAppsIsDeterministicAndDoesNotExposeDefaults(t *testing.T) {
 	}
 }
 
+func TestDayZTemplateLinksItsSetupGuide(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "builtin-runes", "dayz.yaml"), `gameskill:
+  id: dayz
+  name: DayZ
+  category: Games
+  version: 1
+  docker:
+    image: example/dayz:1
+    keep_entrypoint: true
+  startup:
+    exec: [DayZServer]
+`)
+	if err := GenerateApps(root); err != nil {
+		t.Fatal(err)
+	}
+	page, err := os.ReadFile(filepath.Join(root, "website", "apps", "dayz.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), `href="../docs/guides/dayz-server.html">Read the DayZ server guide`) {
+		t.Fatal("DayZ catalogue page did not link to its setup guide")
+	}
+}
+
 func TestMarkdownSlugAndUnsafeProtocols(t *testing.T) {
 	if got := slug("Steam Guard: email code"); got != "steam-guard-email-code" {
 		t.Fatalf("slug() = %q", got)
