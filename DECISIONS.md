@@ -211,7 +211,7 @@
 - Let templates declare one-line `ban_command` and `unban_command` strings rather than assuming a shared game command. Substitute only player, player ID, and reason after removing control characters. A successful RCON/stdin send is an acknowledgement of command delivery, not proof that the game persisted its ban.
 - Watch only newly streamed log output, parse patterns with Go's linear-time RE2 implementation, and count threshold hits per rule/server/player. Keep counters in memory and reset them after restart or rule edits so stored text is not replayed as an action.
 - Record violation actions in Docklight audit history and expose them as an opt-in legacy webhook event. Keep DayZ's `ban.txt` file format in an explicit `dayz-ban-file` adapter, not a console command, and require a validated player UID.
-- The DayZ file adapter preserves other UID lines and atomically replaces the root `ban.txt`; DayZ's `disableBanlist` setting must stay false. It adds rejoin protection and cannot kick connected players. No built-in DayZ template or live game-server acceptance is available in this checkout.
+- At the time this moderation adapter was added, the checkout had no built-in DayZ template and no live game-server acceptance. The adapter preserves other UID lines and atomically replaces the root `ban.txt`; DayZ's `disableBanlist` setting must stay false. It adds rejoin protection and cannot kick connected players.
 
 ## 2026-11-01: template anti-cheat guidance
 
@@ -231,14 +231,14 @@
 - Work only through a compatible DayZ Rune's declared `MODS` value; keep folder downloads under that Rune's Update/Reinstall behavior rather than introducing a second downloader.
 - Restrict file discovery to top-level safe `@mod` directories and never follow symlinks. Save only a permutation for reordering; automatic cleanup removes only items Steam confirms are removed. A missing folder can be waiting for the next template update, so an operator removes that entry explicitly.
 - Use Steam's public batched detail request for status. Keep search separate behind an admin-saved encrypted Steam Web API key; unknown API results do not count as broken.
-- There is still no built-in DayZ Rune or live DayZ/Steam acceptance in this checkout.
+- At the time this DayZ Mods slice was added, there was no built-in DayZ Rune or live DayZ/Steam acceptance in this checkout.
 
 ## 2026-11-01: DayZ mod loot imports
 
 - Scan only validated XML types under installed top-level `@mod` folders. Bound traversal and total reads, skip symlinks and storage directories, and accept only a complete `<types>` document or direct `<type>` fragments that pass the same integer-lifetime parser used by Economy.
 - Use the `meta.cpp` name when present, sanitize it into a mission directory, preserve the path inside the mod folder, and flag Expansion by its displayed name or folder token without preventing import.
 - Copy into the mission and register through `cfgeconomycore.xml`; persist source/target mappings with Economy settings. During successful install/update recovery, restore only missing copies before rewriting registrations, globals, and the lifetime floor. Reset removes saved automation only and does not delete imported mission files.
-- No built-in DayZ Rune or live DayZ acceptance is available. This implementation is bounded to compatible templates and the mod content already installed by their Rune.
+- At the time this DayZ mod-loot slice was added, there was no built-in DayZ Rune or live DayZ acceptance. The implementation is bounded to compatible templates and the mod content already installed by their Rune.
 
 ## 2026-11-01: Docklight Assistant provider setup
 
@@ -292,3 +292,11 @@
 - Keep the password only in process memory while a Steam Guard code is pending, expire that state after five minutes, and send password/code to the ephemeral helper over its stdin instead of Docker `Cmd` or `Env`.
 - Persist only the username and authorization metadata in SQLite. Keep SteamCMD's sentry cache in the panel data directory and clear it when the account is removed.
 - Preserve Steam template port numbers as host ports so published and container ports match; keep the required writable data-directory behavior scoped to Steam templates.
+
+## 2026-11-01: Built-in DayZ server template
+
+- The built-in `dayz` Rune now provides the compatible base for the existing Economy and Mods features; older status notes describing those features as requiring an imported Rune predate this template and are historical.
+- Require an admin-authorized Steam account, publish DayZ's declared UDP ports directly on the host, and wait for the game's A2S query response before marking the server ready.
+- Generate `serverDZ.cfg` on every start so mutable settings apply without reinstalling. Saved passwords stay encrypted in Docklight, but DayZ requires their generated config-file values in plaintext on disk.
+- Keep Workshop content staging explicit: the Mods view controls `MODS` load order, while server files and signing keys must be staged by the operator and are included in the server backup.
+- The local environment has no Docker daemon, so template parsing, lifecycle configuration and readiness are tested with fakes; live SteamCMD and DayZ acceptance remains pending on a Docker host.

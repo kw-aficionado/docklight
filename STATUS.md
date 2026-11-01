@@ -201,7 +201,6 @@ Migration, sampling, seven-day pruning, returned history, and access-control tes
 
 ## Not implemented
 
-- Built-in DayZ server template. DayZ Economy and Mods features require a compatible imported Rune; Workshop management additionally requires its `MODS` setting.
 - External identity providers and multi-host management.
 
 The Assistant UI includes per-server and fleet-wide chat, data-scope controls, advisors, a daily digest, configurable proactive monitoring and event history, separately confirmed action proposals, and persistent log watcher management. Proactive observations cover confirmed crashes, slow starts, high server or host resource use, large player-count changes, and log-volume outliers. Player-count signals detect mass disconnects and sudden influxes. Log-volume checks read only Docker byte/line counts from the previous minute; an 8 MiB per-server cap, five-sample exponential baseline, 24-hour baseline expiry, 1 MiB floor, eight-times-baseline and six-standard-deviation thresholds, hourly deduplication, and server-scoped baseline cleanup bound the feature. Raw log text is not retained or sent as part of this check. Level 3 fixes are opt-in and require Actions: restart a confirmed crashed server, or raise memory after exit code 137 when fresh host metrics show sufficient headroom.
