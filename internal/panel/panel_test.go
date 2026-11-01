@@ -690,6 +690,43 @@ func TestContainerConfigAppliesAllowedDeviceCapabilityAndSysctls(t *testing.T) {
 	}
 }
 
+func TestMinecraftRCONKeepsContainerPortWithAllocatedHostPort(t *testing.T) {
+	a, _, _ := testApp(t)
+	gs, err := a.loadRune("minecraft-java")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Server{
+		ID:          "minecraft-rcon-port-test",
+		Name:        "Minecraft RCON port test",
+		GameskillID: "minecraft-java",
+		DataDir:     t.TempDir(),
+		Ports:       map[string]int{"game": 25200, "rcon": 25201},
+	}
+	env, err := a.runtimeEnv(s, gs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := a.containerConfig(s, gs, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, item := range config.Env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	if values["RCON_PORT"] != "25575" || values["PORT_rcon"] != "25201" {
+		t.Fatalf("RCON container/host ports were not kept separate: RCON_PORT=%q PORT_rcon=%q", values["RCON_PORT"], values["PORT_rcon"])
+	}
+	bindings := config.HostConfig.PortBindings["25575/tcp"]
+	if len(bindings) != 1 || bindings[0].HostIP != "127.0.0.1" || bindings[0].HostPort != "25201" {
+		t.Fatalf("RCON loopback mapping is incorrect: %#v", bindings)
+	}
+}
+
 func TestLoginRequiresEncryptedTOTPAndRejectsCodeReplay(t *testing.T) {
 	a, d, _ := testApp(t)
 	hash, err := security.HashPassword("totp test password 2026")

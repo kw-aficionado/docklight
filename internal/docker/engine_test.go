@@ -117,7 +117,7 @@ func TestStackNetworkAndContainerAPIPayloads(t *testing.T) {
 	if len(requests) != 4 {
 		t.Fatalf("expected four Docker requests, got %#v", requests)
 	}
-	if !strings.Contains(requests[0].path, "name=docklight-stack") || !strings.Contains(requests[1].body, `"docklight-stack":{"Aliases":["database"]}`) {
+	if requests[0].path != "/v1.45/networks/create" || !strings.Contains(requests[0].body, `"Name":"docklight-stack"`) || !strings.Contains(requests[1].body, `"docklight-stack":{"Aliases":["database"]}`) {
 		t.Fatalf("Docker network membership was not encoded correctly: %#v", requests)
 	}
 	query, err := url.ParseQuery(strings.TrimPrefix(requests[3].path, "/containers/json?"))

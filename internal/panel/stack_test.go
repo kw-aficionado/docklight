@@ -126,7 +126,7 @@ func (f *fakeStackDocker) roundTrip(req *http.Request) (*http.Response, error) {
 		if err := json.Unmarshal(body, &config); err != nil {
 			return respond(http.StatusBadRequest, `{"message":"bad network config"}`)
 		}
-		f.networkName = query.Get("name")
+		f.networkName = config.Name
 		f.networkID = "network-stack"
 		f.operations = append(f.operations, "network:create")
 		return respond(http.StatusCreated, `{"Id":"network-stack"}`)

@@ -1418,6 +1418,14 @@ func (a *App) containerConfigWithStack(s Server, gs rune.Rune, env map[string]st
 	}
 	for k, v := range env {
 		if gs.Stack == nil || isPanelRuntimeVariable(k) {
+			// *_PORT values in runtimeEnv describe the allocated host ports for
+			// template scripts. A template's explicit Docker env entry describes
+			// the port the process listens on inside its container, so keep it.
+			if strings.HasSuffix(strings.ToUpper(k), "_PORT") {
+				if _, declared := gs.Docker.Env[k]; declared {
+					continue
+				}
+			}
 			containerEnv[k] = v
 		}
 	}

@@ -330,3 +330,10 @@
 - Do not download or panel-verify PBS snapshots. Use PBS verification jobs and map Docklight retention to both `--keep-last` and `--keep-daily`; list snapshots after pruning before deleting stale panel rows.
 - Restore PBS data into a private staging directory, reject symlinks and special files, then use the existing rollback-capable overlay. Keep the server stopped for manual start.
 - Do not add Docklight client-side archive encryption to PBS; its chunk store and PBS datastore security remain available for their respective storage/transport controls.
+
+## 2026-11-01: Docker Desktop acceptance fixes
+
+- Docker Engine network creation takes the network name in the JSON body. A disposable probe against Docker Desktop API 1.45 and 1.52 confirmed that a query-only name is rejected, so `CreateNetwork` now sends the declared `Name` field.
+- Keep a Rune's explicitly declared in-container `*_PORT` value when constructing its app container. Docklight also injects the allocated host port under that reserved name for scripts; the RCON port must remain `25575` inside the Minecraft container while Docker maps the loopback host port to it.
+- The built-in Uptime Kuma image now uses upstream's recommended `:2` tag; upgrading existing v1 data is a major migration, so the handbook directs admins to back up first and follow upstream's migration steps.
+- Docker Desktop on macOS is useful for live Linux Engine acceptance but does not replace the fresh Debian/Ubuntu installer and re-run acceptance.

@@ -312,6 +312,7 @@ type Created struct {
 }
 
 type NetworkCreateConfig struct {
+	Name       string            `json:"Name,omitempty"`
 	Driver     string            `json:"Driver,omitempty"`
 	Internal   bool              `json:"Internal,omitempty"`
 	Attachable bool              `json:"Attachable,omitempty"`
@@ -329,8 +330,8 @@ type ContainerSummary struct {
 }
 
 func (e *Engine) CreateNetwork(ctx context.Context, name string, cfg NetworkCreateConfig) (string, error) {
-	q := url.Values{"name": {name}}
-	r, err := e.do(ctx, http.MethodPost, "/networks/create?"+q.Encode(), cfg)
+	cfg.Name = name
+	r, err := e.do(ctx, http.MethodPost, "/networks/create", cfg)
 	if err != nil {
 		return "", err
 	}
