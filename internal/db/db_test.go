@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 43 {
-		t.Fatalf("expected 43 migrations, got %d", count)
+	if count != 44 {
+		t.Fatalf("expected 44 migrations, got %d", count)
 	}
 	var assistantEnabled int
 	var assistantProvider, assistantModel, assistantURL, assistantKey string
@@ -84,6 +84,14 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	}
 	if assistantEnabled != 0 || assistantProvider != "" || assistantModel != "" || assistantURL != "" || assistantKey != "" {
 		t.Fatalf("Assistant must start disabled and unconfigured: enabled=%d provider=%q model=%q url=%q key=%q", assistantEnabled, assistantProvider, assistantModel, assistantURL, assistantKey)
+	}
+	var digestEnabled, digestHour, actionsEnabled, proactiveLevel, chatDataLevel int
+	var digestLastDay, proactiveTriggers string
+	if err = d.QueryRow(`SELECT digest_enabled,digest_hour,digest_last_day,actions_enabled,proactive_level,proactive_triggers,chat_data_level FROM assistant_config WHERE id=1`).Scan(&digestEnabled, &digestHour, &digestLastDay, &actionsEnabled, &proactiveLevel, &proactiveTriggers, &chatDataLevel); err != nil {
+		t.Fatalf("read future Assistant tier defaults: %v", err)
+	}
+	if digestEnabled != 0 || digestHour != 8 || digestLastDay != "" || actionsEnabled != 0 || proactiveLevel != 0 || proactiveTriggers != "crash,slowstart,resource,host" || chatDataLevel != 1 {
+		t.Fatalf("Assistant defaults should remain safe and predictable: digest=%d/%d/%q actions=%d proactive=%d/%q data=%d", digestEnabled, digestHour, digestLastDay, actionsEnabled, proactiveLevel, proactiveTriggers, chatDataLevel)
 	}
 	var hostMountColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='host_mounts'`).Scan(&hostMountColumn); err != nil || hostMountColumn != 1 {

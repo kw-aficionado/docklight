@@ -428,11 +428,19 @@ func (a *App) fleetMetrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
-	rows, err := a.db.Query(`SELECT s.id,s.name,s.status,COUNT(m.sampled_at),AVG(CASE WHEN m.cpu_percent>=0 THEN m.cpu_percent END),MAX(CASE WHEN m.cpu_percent>=0 THEN m.cpu_percent END),AVG(CASE WHEN m.memory_mb>=0 THEN m.memory_mb END),MAX(CASE WHEN m.memory_mb>=0 THEN m.memory_mb END),AVG(CASE WHEN m.players>=0 THEN m.players END),MAX(CASE WHEN m.players>=0 THEN m.players END) FROM servers s LEFT JOIN server_metrics m ON m.server_id=s.id AND m.sampled_at>=? GROUP BY s.id,s.name,s.status ORDER BY s.name COLLATE NOCASE,s.id`, cutoff)
+	items, err := a.fleetMetricSummaries(hours)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not read fleet metrics")
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hours": hours, "servers": items})
+}
+
+func (a *App) fleetMetricSummaries(hours int) ([]fleetMetricSummary, error) {
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
+	rows, err := a.db.Query(`SELECT s.id,s.name,s.status,COUNT(m.sampled_at),AVG(CASE WHEN m.cpu_percent>=0 THEN m.cpu_percent END),MAX(CASE WHEN m.cpu_percent>=0 THEN m.cpu_percent END),AVG(CASE WHEN m.memory_mb>=0 THEN m.memory_mb END),MAX(CASE WHEN m.memory_mb>=0 THEN m.memory_mb END),AVG(CASE WHEN m.players>=0 THEN m.players END),MAX(CASE WHEN m.players>=0 THEN m.players END) FROM servers s LEFT JOIN server_metrics m ON m.server_id=s.id AND m.sampled_at>=? GROUP BY s.id,s.name,s.status ORDER BY s.name COLLATE NOCASE,s.id`, cutoff)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	items := make([]fleetMetricSummary, 0)
@@ -440,8 +448,7 @@ func (a *App) fleetMetrics(w http.ResponseWriter, r *http.Request) {
 		var item fleetMetricSummary
 		var avgCPU, peakCPU, avgMemory, peakMemory, avgPlayers, peakPlayers sql.NullFloat64
 		if err = rows.Scan(&item.ID, &item.Name, &item.Status, &item.Samples, &avgCPU, &peakCPU, &avgMemory, &peakMemory, &avgPlayers, &peakPlayers); err != nil {
-			writeError(w, http.StatusInternalServerError, "could not read fleet metrics")
-			return
+			return nil, err
 		}
 		item.AverageCPUPercent = nullableFloat(avgCPU)
 		item.PeakCPUPercent = nullableFloat(peakCPU)
@@ -452,10 +459,9 @@ func (a *App) fleetMetrics(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item)
 	}
 	if err = rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read fleet metrics")
-		return
+		return nil, err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"hours": hours, "servers": items})
+	return items, nil
 }
 
 func nullableFloat(value sql.NullFloat64) *float64 {

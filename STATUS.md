@@ -170,11 +170,13 @@ Tests cover identical responses for unknown accounts, accounts without email, an
 
 Users can add, rename, and remove their own passkeys from Account. Passkey sign-in is discoverable and usernameless; registration and sign-in require user verification and a resident credential. Ceremony state stays server-side, is single-use, and expires after five minutes. The RP ID follows the request hostname, the origin honors `X-Forwarded-Proto`, and the browser must use HTTPS or localhost. Credential records are encrypted with the panel secret; names, added time, and last-used time are shown in the account panel. API, origin, timeout, storage, and rate-limit tests cover the server paths. A live authenticator/browser ceremony still needs device-level acceptance.
 
-## Phase 4 Assistant provider setup
+## Phase 4 Assistant setup and read-only operations digest
 
-Administrators can configure Anthropic Messages or an OpenAI-compatible provider (OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, or custom). Provider, model, and endpoint settings are saved in SQLite; an API key is encrypted with `auth.secret_key`, masked in API responses, and retained when a save leaves the key blank. Assistant stays off by default. Connection testing is available while it is off and sends a single fixed prompt without panel data; the response is discarded and the test is not audited. Requests have a 12-second timeout, do not follow redirects, and limit provider response reads to 1 MiB.
+Administrators can configure Anthropic Messages or an OpenAI-compatible provider (OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, or custom). Provider, model, and endpoint settings are saved in SQLite; an API key is encrypted with `auth.secret_key`, masked in API responses, and retained when a save leaves the key blank. Assistant starts off. Connection testing works while it is off and sends one fixed prompt without panel data; the response is discarded and the test is not audited. Requests have a 12-second timeout, do not follow redirects, and limit provider response reads to 1 MiB.
 
-Tests cover administrator-only access, disabled/unconfigured defaults, encrypted storage, key masking/preservation/removal, URL validation, Anthropic and OpenAI-compatible request formats, redirect refusal, timeout and response-size bounds, redacted provider errors, and the no-audit test path. The admin page and JavaScript syntax are implemented; live provider credentials and visual browser acceptance are not available in this environment. Setup details are in [the Assistant guide](docs/guides/assistant.md).
+An administrator can explicitly enable read-only Advisory after the provider is configured. Its manual Operations digest sends server names and states, the latest host CPU/memory/data-filesystem sample, recent scheduled failure names and times, and 24-hour per-server CPU, memory, and player averages/peaks to the configured provider. It excludes environment values, saved settings, credentials, and raw logs. Names and statuses are treated as untrusted prompt data. The digest response is returned to the browser as text and not stored; successful runs record only counts in audit history. Advisory has no server-control path.
+
+Tests cover administrator-only access, disabled/unconfigured defaults, encrypted storage, key masking/preservation/removal, URL validation, Anthropic and OpenAI-compatible request formats, redirect refusal, timeout and response-size bounds, redacted provider errors, enable prerequisites, digest snapshot scope and limits, and audit redaction. Live provider credentials and visual browser acceptance are not available in this environment. Setup details are in [the Assistant guide](docs/guides/assistant.md).
 
 ## Historical resource metrics
 
@@ -185,10 +187,10 @@ Migration, sampling, seven-day pruning, returned history, and access-control tes
 ## Not implemented
 
 - Built-in DayZ server template. DayZ Economy and Mods features require a compatible imported Rune; Workshop management additionally requires its `MODS` setting.
-- Remaining Phase 4 work: Assistant chat, digests, advisors, panel data tools, proposals, proactive monitoring/actions, and the MCP connector.
+- Remaining Phase 4 work: Assistant chat, scheduled daily digests, log/config/activity advisors, panel data tools, proposals, proactive monitoring/actions, and the MCP connector.
 - External identity providers, multi-host management, and offline PWA support.
 
-Other than Assistant provider setup and historical metrics, the remaining Phase 4 items have no active controls in the UI.
+Other than Assistant provider setup, the read-only operations digest, and historical metrics, the remaining Phase 4 items have no active controls in the UI.
 
 ## Environment limits and remaining acceptance work
 

@@ -1489,6 +1489,36 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 44 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		columns := []struct{ name, definition string }{
+			{"digest_enabled", `ALTER TABLE assistant_config ADD COLUMN digest_enabled INTEGER NOT NULL DEFAULT 0`},
+			{"digest_hour", `ALTER TABLE assistant_config ADD COLUMN digest_hour INTEGER NOT NULL DEFAULT 8`},
+			{"digest_last_day", `ALTER TABLE assistant_config ADD COLUMN digest_last_day TEXT NOT NULL DEFAULT ''`},
+			{"actions_enabled", `ALTER TABLE assistant_config ADD COLUMN actions_enabled INTEGER NOT NULL DEFAULT 0`},
+			{"proactive_level", `ALTER TABLE assistant_config ADD COLUMN proactive_level INTEGER NOT NULL DEFAULT 0`},
+			{"proactive_triggers", `ALTER TABLE assistant_config ADD COLUMN proactive_triggers TEXT NOT NULL DEFAULT 'crash,slowstart,resource,host'`},
+			{"chat_data_level", `ALTER TABLE assistant_config ADD COLUMN chat_data_level INTEGER NOT NULL DEFAULT 1`},
+		}
+		for _, column := range columns {
+			if !hasColumn(tx, "assistant_config", column.name) {
+				if _, err = tx.Exec(column.definition); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(44)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

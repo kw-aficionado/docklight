@@ -73,8 +73,10 @@ Blocking starts off. Cloudflare is selected when a configured zone is available 
 | `GET /api/ai/config` | Admin only; return whether the Assistant is enabled, provider, model, base URL, and whether an API key is configured. The key is never returned; only a fixed mask is shown. |
 | `PUT /api/ai/config` | Admin only; save `{ "provider": "openai", "model": "…", "base_url": "…", "api_key": "…", "clear_api_key": false }`. Supported providers: Anthropic, OpenAI, OpenRouter, DeepSeek, Mistral, Ollama, and custom OpenAI-compatible. Blank `api_key` or the returned fixed mask keeps the saved key; `clear_api_key` removes it. Hosted-provider keys are encrypted with `auth.secret_key`. This does not enable the Assistant. |
 | `POST /api/ai/config/test` | Admin only; send the saved model a single short connection prompt and discard its response. Does not include panel data and is not added to audit history. Redirects are not followed; provider error bodies are not returned. |
+| `PUT /api/ai/enabled` | Admin only; explicitly enable or disable read-only Advisory with `{ "enabled": true }`. Enabling requires a valid provider, model, endpoint, and key when the provider requires one. |
+| `POST /api/ai/health-digest` | Admin only and requires Advisory enabled. Sends server names/status, host metrics, recent scheduled-failure metadata, and 24-hour per-server averages/peaks to the configured provider. It excludes configuration values, environment variables, secrets, and raw logs. Only successful runs are audited; prompts and replies are not stored. |
 
-See [Assistant setup](guides/assistant.md) for provider URL and data-handling details. Chat, digests, operational tools, proposals, proactive monitoring, and MCP are not available in this provider-setup slice.
+See [Assistant setup](guides/assistant.md) for provider URL and data-handling details. Chat, scheduled daily digests, log/config advisors, panel data tools, proposals, proactive monitoring, and MCP are not yet available.
 
 ## Templates and servers
 

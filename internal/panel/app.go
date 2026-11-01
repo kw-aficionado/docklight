@@ -47,6 +47,8 @@ type App struct {
 	scheduleCommand       func(context.Context, Server, string) error
 	notificationClient    *http.Client
 	assistantHTTPClient   *http.Client
+	assistantDigestMu     sync.Mutex
+	assistantDigestActive bool
 	metricsMu             sync.Mutex
 	metricsCPUBusy        uint64
 	metricsCPUTotal       uint64
@@ -336,6 +338,8 @@ func (a *App) Router() http.Handler {
 			priv.Get("/ai/config", a.admin(a.getAssistantConfig))
 			priv.Put("/ai/config", a.admin(a.updateAssistantConfig))
 			priv.Post("/ai/config/test", a.admin(a.testAssistantConnection))
+			priv.Put("/ai/enabled", a.admin(a.setAssistantEnabled))
+			priv.Post("/ai/health-digest", a.admin(a.assistantHealthDigest))
 			priv.Get("/settings/status-page", a.admin(a.getStatusPageSettings))
 			priv.Put("/settings/status-page", a.admin(a.updateStatusPageSettings))
 			priv.Get("/settings/beacon", a.admin(a.getBeaconSettings))

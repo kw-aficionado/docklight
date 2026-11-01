@@ -1,6 +1,6 @@
 # Assistant setup
 
-Docklight Assistant is an optional provider-backed feature. It starts off and has no model, endpoint, or key configured. Provider setup and a connection check are available to administrators under **Manage → Assistant**. Saving provider details does not turn the Assistant on.
+Docklight Assistant is an optional provider-backed feature. It starts off and has no model, endpoint, or key configured. Provider setup, a connection check, and the explicit Advisory switch are available to administrators under **Manage → Assistant**. Saving provider details does not turn Advisory on.
 
 ## Configure a provider
 
@@ -26,4 +26,8 @@ HTTPS is required for public endpoints. Plain HTTP is accepted for loopback and 
 
 Save the provider settings first. **Test connection** sends only `Reply with the word connected.` and checks for a non-empty text response. Docklight discards that response and does not include server, event, log, player, or configuration data. Test calls work while Assistant is off and are not written to audit history. Failures show the HTTP status when available, without returning the provider's response body or saved key.
 
-The current slice covers provider storage and connection tests. It does not yet provide assistant chat, operations or daily digests, log/config advisors, panel data lookups, proposals, proactive actions, or the MCP connector. Those remain separate implementation work; keep Assistant off until those controls are present and reviewed.
+## Read-only operations digest
+
+An administrator can enable Advisory after saving a provider. Enabling it permits the manual **Operations digest** to send server names and states, the latest host CPU/memory/data-filesystem sample, recent scheduled failure names and times, and 24-hour per-server CPU, memory, and player averages/peaks to that provider. Review the displayed provider host before enabling it. Docklight does not include environment values, saved settings, credentials, or raw logs. Snapshot names and statuses are treated as untrusted data in the prompt. The returned summary is rendered as text and is never stored; a successful run records only aggregate counts in audit history.
+
+Advisory is read-only in this slice and cannot start, stop, or change a server. The provider setup, explicit enable switch, digest endpoint, request timeout, provider response limits, prompt-data bounds, admin access, and audit redaction have automated coverage. Daily scheduled digests, log/config advisors, panel data tools, chat, proposals, proactive actions, and MCP remain future implementation work.
