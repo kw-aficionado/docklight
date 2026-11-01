@@ -122,7 +122,7 @@ Automatic panel updates default off. Admins can opt in and select a host-local h
 
 Administrators can record central player bans for one server or the whole fleet, with an optional player ID and expiry. Docklight queues the template-declared ban/unban commands, applies them to running servers, reconciles offline servers when they start, expires bans, retries failed delivery, and records per-server sync state. The admin **Moderation** page also manages log-based rules that count matches by rule, server, and player and then kick or create a scoped/global ban. Successful automatic actions are audited and can send `player.auto_moderation` notifications.
 
-Templates opt in using `bans.ban_command` and `bans.unban_command`; commands support `{{player}}`, `{{player_id}}`, and `{{reason}}`. This checkout has no DayZ template or DayZ `ban.txt` adapter, so DayZ-specific ban-file behavior remains unsupported. Violation hit counts are in memory and reset on panel restart; old log output is not replayed. The change was formatted and the Go build, JavaScript syntax check, installer/updater shell syntax check, and whitespace check passed. No tests, UI browser review, or live Docker/game-server acceptance were run.
+Templates opt in using `bans.ban_command` and `bans.unban_command`; commands support `{{player}}`, `{{player_id}}`, and `{{reason}}`. Compatible DayZ templates can instead declare `bans.adapter: dayz-ban-file`. The adapter preserves unrelated UID entries and LF or CRLF line endings while atomically updating `<server data root>/ban.txt`, including when the server is stopped; it accepts 17-digit SteamIDs or 44-character UIDs and cannot kick connected players. DayZ also requires `disableBanlist=false`. There is no built-in DayZ server template in this checkout. Violation hit counts are in memory and reset on panel restart; old log output is not replayed. `gofmt`, the Go build and vet, linux/amd64 and linux/arm64 cross-builds, JavaScript and installer/updater shell syntax checks, and `git diff --check` passed. No tests, UI browser review, or live Docker/game-server acceptance were run.
 
 ## Phase 3 anti-cheat guidance
 
@@ -164,7 +164,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- DayZ-specific `ban.txt` moderation and its rejoin-without-kick behavior.
+- Built-in DayZ server template and DayZ Norn economy/mod tools.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

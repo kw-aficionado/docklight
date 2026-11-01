@@ -209,8 +209,8 @@
 - Keep the ban list authoritative in Docklight SQLite and track desired/applied state per ban and server. Global bans include current servers and are discovered for servers created later; revoked or expired bans queue unban commands only where delivery state indicates one may have been applied.
 - Let templates declare one-line `ban_command` and `unban_command` strings rather than assuming a shared game command. Substitute only player, player ID, and reason after removing control characters. A successful RCON/stdin send is an acknowledgement of command delivery, not proof that the game persisted its ban.
 - Watch only newly streamed log output, parse patterns with Go's linear-time RE2 implementation, and count threshold hits per rule/server/player. Keep counters in memory and reset them after restart or rule edits so stored text is not replayed as an action.
-- Record violation actions in Docklight audit history and expose them as an opt-in legacy webhook event. Keep DayZ's distinct `ban.txt` handling out of the generic command feature until a DayZ template and a verified adapter are available.
-- No Docker daemon or game server is available in this environment, so command delivery and game-specific ban behavior need host acceptance.
+- Record violation actions in Docklight audit history and expose them as an opt-in legacy webhook event. Keep DayZ's `ban.txt` file format in an explicit `dayz-ban-file` adapter, not a console command, and require a validated player UID.
+- The DayZ file adapter preserves other UID lines and atomically replaces the root `ban.txt`; DayZ's `disableBanlist` setting must stay false. It adds rejoin protection and cannot kick connected players. No built-in DayZ template or live game-server acceptance is available in this checkout.
 
 ## 2026-11-01: template anti-cheat guidance
 

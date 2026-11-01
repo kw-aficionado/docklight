@@ -182,7 +182,7 @@ Blocking starts off. Cloudflare is selected when a configured zone is available 
 | `DELETE /api/notifications/{id}` | Admin only; remove a saved channel. |
 | `GET /api/system/disk` | Read current capacity and low-space alert state for the filesystem containing Docklight data; admin only. |
 | `GET /api/bans` | Admin only; list current and revoked central bans with per-server delivery counts. |
-| `POST /api/bans` | Admin only; create `{ "player_name": "Player", "player_id": "optional", "server_id": "", "reason": "reason", "expires_at": "optional RFC3339" }`. Empty `server_id` targets all current and future servers. Delivery is queued for servers whose template declares ban and unban commands. |
+| `POST /api/bans` | Admin only; create `{ "player_name": "Player", "player_id": "optional", "server_id": "", "reason": "reason", "expires_at": "optional RFC3339" }`. Empty `server_id` targets all current and future servers. Delivery is queued for templates that declare ban/unban commands or the DayZ ban-file adapter. |
 | `DELETE /api/bans/{id}` | Admin only; revoke the central ban and queue unban commands on servers where Docklight applied it. |
 | `GET /api/violations` | Admin only; list log violation rules. |
 | `POST /api/violations` | Admin only; create a rule with `{ "name": "Spam", "pattern": "... (player) ...", "threshold": 3, "window_minutes": 10, "action": "kick", "scope_global": false, "enabled": true }`. The RE2 regular expression's first capture group must be the player name. |

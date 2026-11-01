@@ -92,7 +92,8 @@ gameskill:
 | `stack.services[].resource_weight` | Relative CPU and memory share when server limits are set. Main app weight is 3; sidecars default to 1 and may set 1–100. All containers share the one server limit. |
 | `query.type` | `minecraft`, `minecraft-java`, `minecraft-bedrock`, `a2s`, or `source`. |
 | `rcon` | Enables RCON commands using a declared `password_var`. The host mapping is loopback-only when its port is named `rcon`. |
-| `bans.ban_command`, `bans.unban_command` | Optional single console commands used by the central ban list. Both must include `{{player}}`; `{{player_id}}` and `{{reason}}` are also available. Docklight removes control characters before sending commands over RCON or server input. |
+| `bans.ban_command`, `bans.unban_command` | Optional pair of single console commands used by the central ban list. Both must include `{{player}}`; `{{player_id}}` and `{{reason}}` are also available. Docklight removes control characters before sending commands over RCON or server input. |
+| `bans.adapter` | Optional built-in adapter `dayz-ban-file`. It writes the player's 17-digit SteamID or 44-character UID as a line in the server data root's `ban.txt`; do not also declare command fields. This adapter does not kick an already-connected player. |
 | `anticheat.antixray`, `anticheat.battleye` | Optional `{ supported, config_hint }` informational cards in the server detail **Anti-cheat** tab. The tab requires `server.files`; Docklight does not apply the hint or modify server files. |
 | `anticheat.plugins_recommended` | Optional list of up to 16 plugin names displayed as template guidance only. |
 

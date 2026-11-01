@@ -83,6 +83,7 @@ type RCON struct {
 	PasswordVar string `json:"password_var,omitempty"`
 }
 type BanCommands struct {
+	Adapter      string `json:"adapter,omitempty"`
 	BanCommand   string `json:"ban_command"`
 	UnbanCommand string `json:"unban_command"`
 }
@@ -399,11 +400,20 @@ func (g Rune) Validate() error {
 		return fmt.Errorf("rcon.password_var %q is not a declared variable", g.RCON.PasswordVar)
 	}
 	if g.Bans != nil {
-		if err := validateBanCommand("bans.ban_command", g.Bans.BanCommand); err != nil {
-			return err
-		}
-		if err := validateBanCommand("bans.unban_command", g.Bans.UnbanCommand); err != nil {
-			return err
+		switch g.Bans.Adapter {
+		case "":
+			if err := validateBanCommand("bans.ban_command", g.Bans.BanCommand); err != nil {
+				return err
+			}
+			if err := validateBanCommand("bans.unban_command", g.Bans.UnbanCommand); err != nil {
+				return err
+			}
+		case "dayz-ban-file":
+			if strings.TrimSpace(g.Bans.BanCommand) != "" || strings.TrimSpace(g.Bans.UnbanCommand) != "" {
+				return errors.New("bans commands cannot be combined with the dayz-ban-file adapter")
+			}
+		default:
+			return fmt.Errorf("unsupported bans.adapter %q", g.Bans.Adapter)
 		}
 	}
 	if g.Anticheat != nil {

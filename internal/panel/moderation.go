@@ -5,10 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -27,6 +31,7 @@ const (
 var (
 	violationPlayerPattern = regexp.MustCompile(`^[\pL\pN_.@ -]{1,64}$`)
 	violationPlayerID      = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
+	dayzPlayerUIDPattern   = regexp.MustCompile(`^(?:[0-9]{17}|[A-Za-z0-9]{44})$`)
 	errBanAlreadyActive    = errors.New("an active ban already exists for this player and scope")
 )
 
@@ -86,9 +91,10 @@ type violationLogWatch struct {
 }
 
 type violationAction struct {
-	rule   violationRule
-	server Server
-	player string
+	rule     violationRule
+	server   Server
+	player   string
+	playerID string
 }
 
 // StartViolationMonitor watches only new log output from running containers and
@@ -115,7 +121,7 @@ func (a *App) scanViolationServers(ctx context.Context) {
 	if err := a.expireBans(ctx, time.Now().UTC()); err != nil {
 		log.Printf("could not expire player bans: %v", err)
 	}
-	rows, err := a.db.QueryContext(ctx, `SELECT id FROM servers WHERE installed=1 AND status='running' AND container_id<>'' ORDER BY id`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id FROM servers WHERE installed=1 ORDER BY id`)
 	if err != nil {
 		log.Printf("could not list running servers for moderation: %v", err)
 		return
@@ -133,16 +139,20 @@ func (a *App) scanViolationServers(ctx context.Context) {
 		log.Printf("could not finish listing running servers for moderation: %v", rowsErr)
 		return
 	}
-	active := make(map[string]Server, len(ids))
+	servers := make(map[string]Server, len(ids))
+	running := make(map[string]Server, len(ids))
 	for _, id := range ids {
 		server, getErr := a.getServer(id)
-		if getErr != nil || server.Status != "running" || server.ContainerID == "" {
+		if getErr != nil || !server.Installed {
 			continue
 		}
-		active[id] = server
+		servers[id] = server
+		if server.Status == "running" && server.ContainerID != "" {
+			running[id] = server
+		}
 	}
-	a.syncViolationWatches(ctx, active)
-	for _, server := range active {
+	a.syncViolationWatches(ctx, running)
+	for _, server := range servers {
 		if err := a.reconcileServerBanStates(ctx, server); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("could not reconcile player bans for server %s: %v", server.ID, err)
 		}
@@ -261,6 +271,13 @@ func (w *violationLogWriter) process(line string) {
 		if !validModerationPlayer(player) {
 			continue
 		}
+		playerID := ""
+		if len(match) > 2 {
+			candidate := cleanModerationText(match[2], 128)
+			if violationPlayerID.MatchString(candidate) {
+				playerID = candidate
+			}
+		}
 		key := rule.ID + "\x00" + w.server.ID + "\x00" + strings.ToLower(player)
 		window := time.Duration(rule.WindowMinutes) * time.Minute
 		w.app.violationMu.Lock()
@@ -289,7 +306,7 @@ func (w *violationLogWriter) process(line string) {
 		fired := len(kept) >= rule.Threshold
 		queueFull := false
 		if fired {
-			action := violationAction{rule: rule, server: w.server, player: player}
+			action := violationAction{rule: rule, server: w.server, player: player, playerID: playerID}
 			select {
 			case w.app.violationActions <- action:
 				delete(w.app.violationHits, key)
@@ -332,6 +349,10 @@ func (a *App) executeViolationAction(parent context.Context, action violationAct
 	reason := "auto: " + action.rule.Name
 	server := &webhookServer{ID: action.server.ID, Name: action.server.Name}
 	if action.rule.Action == "kick" {
+		if gs, err := a.loadRune(action.server.GameskillID); err == nil && gs.Bans != nil && gs.Bans.Adapter == "dayz-ban-file" {
+			log.Printf("automatic kick is unavailable for the DayZ ban-file adapter on server %s", action.server.ID)
+			return
+		}
 		if _, err := a.sendCommand(ctx, action.server, "kick "+action.player); err != nil {
 			log.Printf("automatic kick failed for player %q on server %s: %v", action.player, action.server.ID, err)
 			return
@@ -341,7 +362,7 @@ func (a *App) executeViolationAction(parent context.Context, action violationAct
 		a.dispatchWebhookNotification(notificationAutoModeration, server, "👢 Auto-kicked "+action.player+" on rule "+action.rule.Name+".")
 		return
 	}
-	_, err := a.createBanRecord(ctx, banInput{PlayerName: action.player, ServerID: func() string {
+	_, err := a.createBanRecord(ctx, banInput{PlayerName: action.player, PlayerID: action.playerID, ServerID: func() string {
 		if action.rule.ScopeGlobal {
 			return ""
 		}
@@ -687,7 +708,11 @@ func (a *App) reconcileServerBanStates(ctx context.Context, server Server) error
 		if loadErr != nil {
 			err = fmt.Errorf("could not load the server template")
 		} else if gs.Bans == nil {
-			err = fmt.Errorf("template does not define ban and unban commands")
+			err = fmt.Errorf("template does not declare ban commands or a supported adapter")
+		} else if gs.Bans.Adapter == "dayz-ban-file" {
+			err = a.syncDayZBanFile(server, item.playerID, wanted)
+		} else if server.Status != "running" || server.ContainerID == "" {
+			continue
 		} else {
 			command := gs.Bans.UnbanCommand
 			if wanted {
@@ -727,6 +752,114 @@ func renderModerationCommand(command, player, playerID, reason string) string {
 	command = strings.ReplaceAll(command, "{{player_id}}", cleanModerationText(playerID, 128))
 	command = strings.ReplaceAll(command, "{{reason}}", cleanModerationText(reason, 256))
 	return strings.TrimSpace(command)
+}
+
+func (a *App) syncDayZBanFile(server Server, playerID string, active bool) error {
+	if !dayzPlayerUIDPattern.MatchString(playerID) {
+		return errors.New("DayZ file bans require a 17-digit SteamID or 44-character player UID")
+	}
+	root, err := a.serverFilesRoot(server)
+	if err != nil {
+		return fmt.Errorf("could not resolve the DayZ server data directory")
+	}
+	path, err := safePath(root, "ban.txt", false)
+	if err != nil {
+		return fmt.Errorf("could not resolve ban.txt safely: %w", err)
+	}
+	mode := os.FileMode(0644)
+	if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("ban.txt cannot be a symbolic link")
+	} else if statErr == nil && !info.Mode().IsRegular() {
+		return errors.New("ban.txt must be a regular file")
+	} else if statErr == nil {
+		mode = info.Mode().Perm()
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("could not inspect ban.txt: %w", statErr)
+	}
+
+	var data []byte
+	file, readErr := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if readErr == nil {
+		info, statErr := file.Stat()
+		if statErr == nil && !info.Mode().IsRegular() {
+			statErr = errors.New("ban.txt must be a regular file")
+		}
+		if statErr == nil {
+			data, statErr = io.ReadAll(file)
+		}
+		if closeErr := file.Close(); statErr == nil {
+			statErr = closeErr
+		}
+		if statErr != nil {
+			return fmt.Errorf("could not read ban.txt: %w", statErr)
+		}
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("could not read ban.txt: %w", readErr)
+	}
+	original := string(data)
+	newline := "\n"
+	if strings.Contains(original, "\r\n") {
+		newline = "\r\n"
+		original = strings.ReplaceAll(original, "\r\n", "\n")
+	}
+	lines := []string(nil)
+	if original != "" {
+		lines = strings.Split(original, "\n")
+	}
+	hadTrailingNewline := len(lines) > 0 && lines[len(lines)-1] == ""
+	if hadTrailingNewline {
+		lines = lines[:len(lines)-1]
+	}
+	updated := make([]string, 0, len(lines)+1)
+	found, kept, changed := false, false, false
+	for _, line := range lines {
+		entry := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if entry != playerID {
+			updated = append(updated, line)
+			continue
+		}
+		found = true
+		if active && !kept {
+			updated = append(updated, line)
+			kept = true
+		} else {
+			changed = true
+		}
+	}
+	if active && !found {
+		updated = append(updated, playerID)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	content := strings.Join(updated, newline)
+	if hadTrailingNewline && len(updated) > 0 {
+		content += newline
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".docklight-ban-*.tmp")
+	if err != nil {
+		return fmt.Errorf("could not create a temporary ban file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err = tmp.Chmod(mode); err == nil {
+		_, err = tmp.WriteString(content)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return fmt.Errorf("could not write the updated ban list: %w", err)
+	}
+	if err = os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("could not install the updated ban list: %w", err)
+	}
+	return nil
 }
 
 func (a *App) listViolationRules(w http.ResponseWriter, r *http.Request) {
