@@ -230,6 +230,15 @@ curl -sS http://127.0.0.1:8080/api/servers \
 | `POST /api/servers/{id}/files/upload` | Multipart form fields `path` and `file`; maximum request size 64 MiB. |
 | `GET /api/servers/{id}/files/download?path=…` | Download a file. |
 | `GET /api/servers/{id}/dayz/economy` | Requires `server.view`; summarize the mission's vanilla and registered DayZ types files, cleanup lifetimes, and eligible unregistered XML files. Candidate scanning is bounded to 20,000 entries, 128 MiB read, and 256 candidates; `candidates_truncated` reports when a limit was reached. Available only when `gameskill_id` is `dayz`. |
+| `GET /api/servers/{id}/dayz/mods` | Requires `server.view`; return the compatible Rune's `MODS` list, local `@mod` folders, and one batched public Workshop status lookup. |
+| `PUT /api/servers/{id}/dayz/mods/order` | Requires `server.control`; accept `{ "mods": ["@123", "@456"] }` only when it is a permutation of the current list. |
+| `POST /api/servers/{id}/dayz/mods/add` | Requires `server.control`; accept `{ "ids": ["123"] }` to append Workshop items to `MODS`. |
+| `POST /api/servers/{id}/dayz/mods/remove` | Requires `server.control`; accept `{ "token": "@123" }` to remove one entry from `MODS` without deleting its folder. |
+| `POST /api/servers/{id}/dayz/mods/add-orphans` | Requires `server.control`; accept `{ "tokens": ["@123"] }` for existing unlisted folders. |
+| `POST /api/servers/{id}/dayz/mods/remove-broken` | Requires `server.control`; remove items confirmed removed from Workshop. Unknown status and missing folders are retained because they may be pending the next update. |
+| `GET /api/servers/{id}/dayz/mods/search?q=…` | Requires `server.view`; search DayZ Workshop with the saved key. Returns `{ "needs_key": true }` when no key is configured. |
+| `GET /api/settings/dayz/steam-key` | Admin only; returns whether an encrypted key is saved. |
+| `PUT /api/settings/dayz/steam-key` | Admin only; save `{ "key": "…" }` or clear with an empty key. The key is never returned. |
 | `PUT /api/servers/{id}/dayz/min-lifetime` | Requires `server.control`; accept `{"hours":24}` from 0–8760. Raises only positive type lifetimes below the floor; 0 disables future floor applications but does not undo prior edits. |
 | `PUT /api/servers/{id}/dayz/globals` | Requires `server.control`; accept `{"values":{"CleanupLifetimeDefault":86400}}` for allowlisted cleanup globals, in seconds. |
 | `POST /api/servers/{id}/dayz/register-types` | Requires `server.control`; accept `{"paths":["MyMod/types.xml"]}` for validated types files under mission subfolders. |

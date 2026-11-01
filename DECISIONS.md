@@ -224,3 +224,10 @@
 - Patch only numeric lifetime/global value spans so comments and surrounding XML remain intact. Restrict cleanup edits to the seven named lifetime globals and reject links, special files, path traversal, and oversized XML.
 - Save the minimum floor, cleanup values, and registered type paths in SQLite and reapply them after successful installs and scheduled updates. Reset clears that saved state without attempting to reverse XML edits.
 - This is a compatible-template feature, not a built-in DayZ Rune. Workshop management and importing mod loot remain separate follow-up work; no live DayZ server acceptance was available.
+
+## 2026-11-01: DayZ Mods manager
+
+- Work only through a compatible DayZ Rune's declared `MODS` value; keep folder downloads under that Rune's Update/Reinstall behavior rather than introducing a second downloader.
+- Restrict file discovery to top-level safe `@mod` directories and never follow symlinks. Save only a permutation for reordering; automatic cleanup removes only items Steam confirms are removed. A missing folder can be waiting for the next template update, so an operator removes that entry explicitly.
+- Use Steam's public batched detail request for status. Keep search separate behind an admin-saved encrypted Steam Web API key; unknown API results do not count as broken.
+- There is still no built-in DayZ Rune or live DayZ/Steam acceptance in this checkout.

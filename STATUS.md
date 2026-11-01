@@ -130,7 +130,11 @@ Templates can declare Anti-Xray, BattlEye, and recommended-plugin information. T
 
 ## DayZ Economy
 
-Servers using a Rune ID of `dayz` have an **Economy** tab. `server.view` can read type counts, shortest positive lifetimes, registered files, and eligible unregistered XML candidates; candidate scanning is capped at 20,000 entries, 128 MiB, and 256 files and reports when incomplete. `server.control` can raise a minimum lifetime, update seven allowlisted cleanup globals, register validated types files, or clear saved automation. XML edits preserve bytes outside changed numeric values. Saved settings are reapplied after a successful install or scheduled update, and a missing registered file prevents that operation from starting the server with a broken mission reference. There is no built-in DayZ Rune yet, and the Workshop mod manager and mod loot import are still outstanding. `go build`, `go vet`, JavaScript syntax, and whitespace checks passed; no tests, browser review, or live DayZ acceptance were run.
+Servers using a Rune ID of `dayz` have an **Economy** tab. `server.view` can read type counts, shortest positive lifetimes, registered files, and eligible unregistered XML candidates; candidate scanning is capped at 20,000 entries, 128 MiB, and 256 files and reports when incomplete. `server.control` can raise a minimum lifetime, update seven allowlisted cleanup globals, register validated types files, or clear saved automation. XML edits preserve bytes outside changed numeric values. Saved settings are reapplied after a successful install or scheduled update, and a missing registered file prevents that operation from starting the server with a broken mission reference. There is no built-in DayZ Rune yet, and mod loot import remains outstanding. `go build`, `go vet`, JavaScript syntax, and whitespace checks passed; no tests, browser review, or live DayZ acceptance were run.
+
+## DayZ Mods
+
+For DayZ Runes that declare a `MODS` setting, the **Mods** tab parses semicolon, comma, and whitespace separated entries; shows `@mod` folders and a one-call public Steam Workshop status check; reports orphan folders; and supports permutation-only load-order changes, adding existing folders or search results, removing individual entries, and removing items confirmed deleted from Workshop. Unknown Workshop results and missing folders are retained by automatic cleanup because they may be pending an update. Search uses an admin-saved encrypted Steam Web API key. List changes are saved to the Rune's environment and take effect on the next template update or reinstall. There is no built-in DayZ Rune, and Workshop files are not downloaded or deleted directly by this panel. Go build, vet, JavaScript syntax, Linux amd64/arm64 cross-build, and whitespace checks passed; no tests, browser review, or live Workshop acceptance were run.
 
 ## Phase 1 per-server host mounts
 
@@ -168,7 +172,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Built-in DayZ server template, Workshop mod management, and mod loot import.
+- Built-in DayZ server template and mod loot import. The Workshop Mods tab requires a compatible DayZ Rune with a `MODS` setting.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
