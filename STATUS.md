@@ -94,6 +94,14 @@ The admin-only Network page stores the Cloudflare API token encrypted, plus the 
 
 The admin Network card and per-server hostname control are implemented. The Domains page lists Cloudflare and NPM rows for servers the signed-in user can view, reports provisioning and route conflicts, and probes public HTTPS then HTTP with a guarded dialer, no redirects, self-signed certificate retry/flagging, 5xx warnings, and a 30-second cache. The page currently supports one hostname per provider per server; extra `server_routes` entries are not implemented. No live Cloudflare account or public DNS acceptance was available; the integration still needs a test account/zone run.
 
+## Phase 3 IP blocking
+
+The admin **IP blocking** page manages one public IPv4 or IPv6 address per rule. It prefers a zone-scoped Cloudflare IP Access Rule when the configured Cloudflare zone and API permission are available; optional host nftables is the fallback. Cloudflare blocks apply to proxied web traffic for that zone. Host rules drop only TCP 80 and 443 in the host's `input` chain, leaving SSH and game ports alone. Docker-published traffic normally traverses `forward`, so the host fallback does not intercept Docker-forwarded container traffic in this slice; use Cloudflare for proxied container web services. Host rules live in the Docklight-marked `inet yggdrasil` table; an existing unmarked table is never modified. Rule removal checks Docklight ownership before changing Cloudflare or nftables state. Rules can expire after a chosen interval or remain until removed.
+
+Blocking is off by default. Administrators can maintain up to 256 protected IPs or CIDR ranges. Docklight also rejects private, local, link-local, Cloudflare, CGNAT/Tailscale, documentation, benchmark, and reserved ranges, plus addresses used by administrators in the last 30 days. Admin connection addresses are retained in SQLite for that 30-day safety window. The configured Cloudflare API token needs the zone-level **Firewall Services → Edit** permission. Host nftables requires the systemd service to have `CAP_NET_ADMIN`; the installer does not grant it. Cloudflare ranges are embedded from Cloudflare's published IPv4/IPv6 lists as of 2026-11-01; IANA special-use prefixes are also embedded. Update the protected-range lists when those sources change.
+
+Startup and once-per-minute reconciliation repair managed Cloudflare and nftables rules and remove expired entries. The feature compiled and the browser script syntax checked in this checkout; no Cloudflare account, privileged host firewall, or end-to-end admin browser acceptance was available. The `off`/`propose`/`auto` setting is stored for the planned Kvasir workflow; only manual blocks are active in this slice.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -130,11 +138,11 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: IP blocking, beacon, self-update, and cross-server ban automation.
+- Phase 3: beacon, self-update, cross-server ban automation, and additional hostnames beyond the primary Cloudflare/NPM route.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
-The remaining areas have no active controls in the UI. Additional hostnames beyond each server's primary Cloudflare/NPM route, IP blocking, beacon, self-update, and cross-server ban automation remain unimplemented.
+The remaining areas have no active controls in the UI.
 
 ## Environment limits and remaining acceptance work
 

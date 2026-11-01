@@ -42,6 +42,18 @@ Passkey endpoints:
 
 Registration and sign-in require user verification and discoverable credentials. Each begin response contains WebAuthn `options` and an opaque `session_id`; the server keeps that ceremony state, accepts it once, and expires it after five minutes. Passkeys require HTTPS, with localhost allowed for local setup. The RP ID uses the request hostname and the origin scheme honors `X-Forwarded-Proto`; a reverse proxy should preserve `Host` and set that header. Credential state is encrypted at rest with the panel secret. A passkey sign-in also satisfies account recovery for users who have TOTP enabled.
 
+## IP blocking
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/settings/blocking` | Admin only; return the master switch, optional nftables fallback, host nftables visibility, and backend counts. |
+| `PUT /api/settings/blocking` | Admin only; save `{ "enabled": true, "mode": "off", "nft_enabled": false, "allowlist": ["192.0.2.0/24"] }`. `allowlist` is a list of IP addresses or CIDR ranges Docklight refuses to block; it accepts up to 256 entries. Existing rules must be removed before their IP is added. Turning blocking off first removes Docklight-owned rules and preserves settings if safe cleanup fails. `mode` is reserved for Kvasir's future proposal/automatic workflow; this release supports manual blocks. |
+| `GET /api/blocks` | Admin only; list Docklight-managed IP blocks and reconciliation state. |
+| `POST /api/blocks` | Admin only; create one public IP rule with `{ "ip": "<public-ip>", "reason": "abuse report", "expires_in_hours": 24 }`. CIDR ranges are not accepted. Expiry may be 1–8760 hours or `0` for no expiry. |
+| `DELETE /api/blocks/{id}` | Admin only; remove a saved rule after verifying Docklight ownership at the active backend. |
+
+Blocking starts off. Cloudflare is selected when a configured zone is available and the token can create IP Access Rules for that zone; the required token permission is **Zone → Firewall Services → Edit**. Host nftables is used only when its fallback switch is on. Cloudflare rules affect proxied HTTP/S traffic for the configured zone. Host nftables drops inbound TCP 80 and 443 in the host `input` chain and requires `CAP_NET_ADMIN`; it does not block SSH or game ports. Docker-published container traffic normally traverses `forward` and is not intercepted by this host-input backend. Private, local, link-local, multicast, Cloudflare, CGNAT/Tailscale, documentation, benchmark, reserved, allowlisted, and recent administrator addresses are rejected. Recent administrator source addresses are kept in SQLite for 30 days. Reconciliation and expiry cleanup run at startup and once per minute.
+
 ## Templates and servers
 
 | Method and path | Purpose |

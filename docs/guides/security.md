@@ -28,6 +28,21 @@ Notification channel configuration is encrypted with `auth.secret_key` and omitt
 
 The audit page records the user and server actions implemented in this release, including user/grant changes, token creation/revocation, server lifecycle, settings changes, and file changes. Audit records are not a substitute for host/systemd or Docker logs.
 
+## IP blocking
+
+The admin-only IP blocking page accepts one public IPv4 or IPv6 address per rule. Set **Protected addresses and ranges** to add IPs or CIDR ranges Docklight must never block, such as an office or VPN network. Existing rules for addresses newly added to this list must be removed first. Docklight also refuses private and reserved networks, published Cloudflare address ranges, CGNAT/Tailscale addresses, documentation and benchmarking ranges, and any address used by an administrator in the last 30 days. Administrator IP history is stored in the panel database and older entries are deleted during admin requests.
+
+Cloudflare rules are created in the configured zone and include a Docklight ownership marker in their note. The reconciler verifies that marker and the saved address before deleting a rule; foreign rules are left alone. These rules affect web requests proxied through Cloudflare for the configured zone. Cloudflare's current guidance recommends custom rules for IP-based blocking; Docklight uses the IP Access Rules API here to provide individually owned, removable, expiring rules. See [Cloudflare's IP Access Rules guidance](https://developers.cloudflare.com/waf/tools/ip-access-rules/).
+
+The optional host backend creates only `inet yggdrasil` and touches only the Docklight-marked input chain and sets inside it. It drops locally delivered TCP ports 80 and 443 for saved addresses. It does not block SSH, game ports, or unrelated nftables tables. Docker-published container traffic normally traverses the `forward` chain and is not blocked by this host-input backend. Enable `CAP_NET_ADMIN` for the service only if host blocking is needed. For the packaged systemd unit, create an override with `sudo systemctl edit yggdrasil` and add:
+
+```ini
+[Service]
+AmbientCapabilities=CAP_NET_ADMIN
+```
+
+The packaged unit permits `AF_NETLINK` for the nftables command but does not grant `CAP_NET_ADMIN`. Then run `sudo systemctl daemon-reload` and `sudo systemctl restart yggdrasil`. Removing Docklight's last nftables IP block removes only its marked rules; Docklight leaves the empty table in place for safe reuse.
+
 ## Host boundary
 
 The `yggdrasil` service account must access Docker's Unix socket, usually through the `docker` group. Anyone who can use that socket can effectively control the host. Keep it local; do not expose it over TCP. Restrict panel port 8080 to trusted networks and use TLS when access crosses an untrusted network.

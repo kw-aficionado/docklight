@@ -223,6 +223,8 @@ func (a *App) updateCloudflareSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	a.blockingMu.Lock()
+	defer a.blockingMu.Unlock()
 	a.cfMu.Lock()
 	defer a.cfMu.Unlock()
 	current, err := a.readCloudflareConfig()
@@ -232,6 +234,18 @@ func (a *App) updateCloudflareSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if !in.ClearToken && next.APIToken == "" {
 		next.APIToken = current.APIToken
+	}
+	zoneChanged := current.APIToken != next.APIToken || current.AccountID != next.AccountID || current.BaseDomain != next.BaseDomain || current.ZoneID != next.ZoneID
+	if zoneChanged {
+		var cloudflareBlocks int
+		if err = a.db.QueryRowContext(r.Context(), `SELECT count(*) FROM blocked_ips WHERE backend='cloudflare'`).Scan(&cloudflareBlocks); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not check saved Cloudflare IP rules")
+			return
+		}
+		if cloudflareBlocks != 0 {
+			writeError(w, http.StatusConflict, "remove Docklight-managed Cloudflare IP blocks before changing the API token, account, base domain, or zone ID")
+			return
+		}
 	}
 	if next.Enabled && !next.configured() {
 		writeError(w, http.StatusBadRequest, "Cloudflare API token, account ID, tunnel ID, and base domain are required before enabling Tunnel routes")

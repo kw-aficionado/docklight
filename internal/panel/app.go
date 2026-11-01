@@ -64,6 +64,7 @@ type App struct {
 	statusCache           []byte
 	statusCacheUntil      time.Time
 	networkMu             sync.Mutex
+	blockingMu            sync.Mutex
 	upnpMu                sync.Mutex
 	unifiMu               sync.Mutex
 	npmMu                 sync.Mutex
@@ -317,6 +318,11 @@ func (a *App) Router() http.Handler {
 			priv.Post("/npm/test", a.admin(a.testNPMConnection))
 			priv.Get("/settings/cloudflare", a.admin(a.getCloudflareSettings))
 			priv.Put("/settings/cloudflare", a.admin(a.updateCloudflareSettings))
+			priv.Get("/settings/blocking", a.admin(a.getBlockingSettings))
+			priv.Put("/settings/blocking", a.admin(a.updateBlockingSettings))
+			priv.Get("/blocks", a.admin(a.listBlockedIPs))
+			priv.Post("/blocks", a.admin(a.createBlockedIP))
+			priv.Delete("/blocks/{id}", a.admin(a.deleteBlockedIP))
 			priv.Post("/cloudflare/test", a.admin(a.testCloudflareConnection))
 			priv.Get("/domains/cloudflare", a.admin(a.listCloudflareDomains))
 			priv.Get("/servers/{id}/npm", a.getServerNPMSettings)
@@ -580,6 +586,7 @@ func (a *App) admin(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, 403, "admin required")
 			return
 		}
+		a.recordRecentAdminIP(r)
 		next(w, r)
 	}
 }

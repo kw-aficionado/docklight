@@ -139,6 +139,7 @@ func serve(args []string) error {
 	app.StartScheduleWorker(workerCtx)
 	app.StartRuntimeMonitor(workerCtx)
 	app.StartCloudflareReconciler(workerCtx)
+	app.StartIPBlockingReconciler(workerCtx)
 	app.StartDiskMonitor(workerCtx)
 	app.StartWatchdogMonitor(workerCtx)
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)

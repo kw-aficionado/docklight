@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -52,6 +53,16 @@ type DNSRecord struct {
 	Content string `json:"content"`
 	Proxied bool   `json:"proxied"`
 	TTL     int    `json:"ttl"`
+}
+
+type IPAccessRule struct {
+	ID            string `json:"id"`
+	Mode          string `json:"mode"`
+	Notes         string `json:"notes"`
+	Configuration struct {
+		Target string `json:"target"`
+		Value  string `json:"value"`
+	} `json:"configuration"`
 }
 
 func NewClient(token string, httpClient *http.Client) *Client {
@@ -196,5 +207,52 @@ func (c *Client) UpdateDNSRecord(ctx context.Context, zoneID string, record DNSR
 
 func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) error {
 	path := "/zones/" + url.PathEscape(zoneID) + "/dns_records/" + url.PathEscape(recordID)
+	return c.request(ctx, http.MethodDelete, path, nil, nil, nil)
+}
+
+func (c *Client) ListIPAccessRules(ctx context.Context, zoneID string) ([]IPAccessRule, error) {
+	var out []IPAccessRule
+	for page := 1; page <= 20; page++ {
+		query := url.Values{"page": {strconv.Itoa(page)}, "per_page": {"100"}}
+		path := "/zones/" + url.PathEscape(zoneID) + "/firewall/access_rules/rules"
+		var result []IPAccessRule
+		if err := c.request(ctx, http.MethodGet, path, query, nil, &result); err != nil {
+			return nil, err
+		}
+		out = append(out, result...)
+		if len(result) < 100 {
+			return out, nil
+		}
+	}
+	return nil, errors.New("Cloudflare returned too many IP Access Rules to reconcile safely")
+}
+
+func (c *Client) CreateIPAccessRule(ctx context.Context, zoneID, ip, reason, docklightID string) (IPAccessRule, error) {
+	address, err := netip.ParseAddr(ip)
+	if err != nil {
+		return IPAccessRule{}, errors.New("invalid IP address for Cloudflare Access Rule")
+	}
+	address = address.Unmap()
+	target := "ip"
+	if address.Is6() {
+		target = "ip6"
+	}
+	notes := "Docklight IP block " + docklightID
+	if reason != "" {
+		notes += ": " + reason
+	}
+	path := "/zones/" + url.PathEscape(zoneID) + "/firewall/access_rules/rules"
+	body := map[string]any{
+		"mode":          "block",
+		"configuration": map[string]string{"target": target, "value": address.String()},
+		"notes":         notes,
+	}
+	var result IPAccessRule
+	err = c.request(ctx, http.MethodPost, path, nil, body, &result)
+	return result, err
+}
+
+func (c *Client) DeleteIPAccessRule(ctx context.Context, zoneID, ruleID string) error {
+	path := "/zones/" + url.PathEscape(zoneID) + "/firewall/access_rules/rules/" + url.PathEscape(ruleID)
 	return c.request(ctx, http.MethodDelete, path, nil, nil, nil)
 }

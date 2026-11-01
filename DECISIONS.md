@@ -172,3 +172,11 @@
 - Run reconciliation at panel startup and every ten minutes. Server lifecycle cleanup failures keep the saved server route state for retry and block server deletion when ownership cannot be checked safely.
 - Forward to the allocated TCP web port or first TCP port. An unset internal host uses the LAN IPv4 address selected by the route to Cloudflare. A configured IP no longer assigned to a local interface falls back to that current LAN address and emits a log warning.
 - The first slice includes the admin Network settings card, per-server hostname field, lifecycle integration, encrypted settings migration 32, and an admin-only endpoint listing all configured Tunnel hostnames. The Domains page also lists primary Cloudflare/NPM routes with RBAC filtering, guarded public probes, conflict labels, and 30-second caching. Extra route rows, IP blocking, and live Cloudflare account acceptance remain outstanding.
+
+## 2026-11-01: managed IP blocking
+
+- Default the global IP-blocking switch off. Accept only one globally routable IPv4/IPv6 address per rule; refuse private, local, link-local, Cloudflare, CGNAT/Tailscale, documentation, benchmarking, reserved, administrator-allowlisted, and recently used administrator addresses. Keep the recent-admin safety history for 30 days and support up to 256 explicit IP/CIDR entries as an additional block guard.
+- Prefer a zone-scoped Cloudflare IP Access Rule and use its note as Docklight ownership proof. Never delete a rule solely because its IP matches; require the Docklight marker and verify the saved address and `block` mode. Reject pre-existing foreign IP rules instead of claiming them.
+- Make host nftables opt-in and bind it to the Docklight-marked `inet yggdrasil` table only. Drop web ingress TCP 80/443 without touching SSH or game ports; require explicit `CAP_NET_ADMIN`, and refuse an unmarked existing table.
+- Keep expiration and external state in SQLite and reconcile at startup and every minute. Persist pending Cloudflare intent before API creation so a timeout can be recovered by ownership note rather than creating duplicates.
+- The `off`/`propose`/`auto` mode is reserved for the planned Kvasir workflow; manual blocks are the only source implemented here. No Cloudflare account or privileged host-firewall acceptance was available.

@@ -35,3 +35,23 @@
 .host-mount-card{grid-column:1/-1}.host-mount-card .panel-head{margin-bottom:10px}.host-mount-list{display:flex;flex-direction:column;gap:9px}.host-mount-row{display:grid;grid-template-columns:minmax(130px,.7fr) minmax(220px,1.3fr) minmax(180px,1fr) auto auto;align-items:end;gap:12px;padding:12px;border:1px solid var(--border-soft);border-radius:8px;background:var(--panel-2)}.host-mount-row>label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:10px}.host-source-field{display:flex;gap:6px}.host-source-field input{min-width:0;flex:1}.host-source-field .button{padding:0 10px}.host-mount-row .host-write{align-self:center;white-space:nowrap}.host-mount-row .host-remove{height:34px}.host-mount-actions{display:flex;justify-content:space-between;gap:10px;margin-top:13px}.host-mount-foot{margin:12px 0 0;color:var(--faint);font-size:10px;line-height:1.55}.host-picker-path{overflow:hidden;padding:10px 12px;border:1px solid var(--border-soft);border-radius:7px;background:var(--panel-2);font-family:ui-monospace,monospace;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.host-picker-actions{display:flex;justify-content:space-between;gap:8px;margin:10px 0}.host-picker-list{display:flex;flex-direction:column;max-height:min(45vh,420px);overflow:auto;gap:5px}.host-picker-entry{display:grid;grid-template-columns:18px minmax(80px,140px) 1fr;align-items:center;gap:9px;padding:9px 10px;border:1px solid var(--border-soft);border-radius:6px;background:var(--panel-2);color:var(--text);text-align:left;cursor:pointer}.host-picker-entry:hover{border-color:#3b7165}.host-picker-entry>span{color:var(--green)}.host-picker-entry>b{overflow:hidden;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.host-picker-entry>small{overflow:hidden;color:var(--faint);font-family:ui-monospace,monospace;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.light .host-mount-row,.light .host-picker-path,.light .host-picker-entry{background:#f8faf8}.light .host-picker-entry:hover{border-color:#8ebfb1}
 @media(max-width:800px){.host-mount-row{grid-template-columns:1fr 1fr}.host-mount-row .host-write{grid-column:1}.host-mount-row .host-remove{grid-column:2;justify-self:end}.host-picker-entry{grid-template-columns:18px minmax(80px,1fr)}.host-picker-entry small{grid-column:2}}
 @media(max-width:560px){.host-mount-row{grid-template-columns:1fr}.host-mount-row .host-write,.host-mount-row .host-remove{grid-column:1;justify-self:start}.host-mount-actions{align-items:stretch;flex-direction:column}.host-mount-actions .button{width:100%}}
+.ip-blocks-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.ip-block-settings,.ip-block-create,.ip-block-list{padding:18px}
+.ip-block-list{grid-column:1/-1;padding:0;overflow:hidden}
+.ip-block-list-head{padding:18px 18px 0}
+.ip-block-list-head h2{margin:0 0 4px;font-size:14px}
+.ip-block-list-head p,.ip-block-note{margin:0;color:var(--muted);font-size:10px;line-height:1.5}
+.ip-block-settings form,.ip-block-create form{display:flex;flex-direction:column;gap:13px}
+.ip-block-settings textarea{min-height:104px;resize:vertical;font:inherit;line-height:1.5}
+.ip-block-settings label small{display:block;margin-top:5px;color:var(--muted);font-size:10px;line-height:1.5}
+.ip-block-settings .form-actions,.ip-block-create .form-actions{align-items:center;margin-top:2px}
+.ip-block-capability{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px solid var(--border-soft);border-radius:7px;background:var(--panel-2);font-size:10px}
+.ip-block-capability b{color:var(--green);font-size:10px}
+.ip-block-capability span,.ip-block-capability small{color:var(--muted);line-height:1.45;overflow-wrap:anywhere}
+.ip-block-capability.warning b{color:var(--amber)}
+.ip-block-safety{padding:10px 12px;border:1px solid var(--border-soft);border-radius:7px;color:var(--muted);font-size:10px;line-height:1.55}
+.ip-block-empty{padding:44px 20px;text-align:center}
+.ip-block-empty h2{margin:12px 0 5px;font-size:16px}
+.ip-block-empty p{max-width:430px;margin:0 auto;color:var(--muted);font-size:10px;line-height:1.5}
+.light .ip-block-capability,.light .ip-block-safety{background:#f8faf8}
+@media(max-width:900px){.ip-blocks-grid{grid-template-columns:1fr}.ip-block-list{grid-column:auto}.ip-block-settings,.ip-block-create{padding:15px}}

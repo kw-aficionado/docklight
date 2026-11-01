@@ -1103,6 +1103,81 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 33 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS blocking_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			mode TEXT NOT NULL DEFAULT 'off',
+			nft_enabled INTEGER NOT NULL DEFAULT 0,
+			allowlist TEXT NOT NULL DEFAULT '[]',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO blocking_settings(id,enabled,mode,nft_enabled) VALUES(1,0,'off',0)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS blocked_ips (
+			id TEXT PRIMARY KEY,
+			ip TEXT NOT NULL,
+			backend TEXT NOT NULL CHECK(backend IN ('cloudflare','nftables')),
+			scope TEXT NOT NULL DEFAULT '',
+			cf_rule_id TEXT NOT NULL DEFAULT '',
+			server_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('manual','kvasir')),
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			expires_at TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			UNIQUE(ip,backend,scope)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_blocked_ips_expiry ON blocked_ips(expires_at) WHERE expires_at<>''`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS admin_ip_history (
+			ip TEXT PRIMARY KEY,
+			last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(33)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if version < 34 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if !hasColumn(tx, "blocking_settings", "allowlist") {
+			if _, err = tx.Exec(`ALTER TABLE blocking_settings ADD COLUMN allowlist TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(34)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
