@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-log() { printf '[yggdrasil] %s\n' "$*"; }
-die() { printf '[yggdrasil] ERROR: %s\n' "$*" >&2; exit 1; }
+log() { printf '[Docklight] %s\n' "$*"; }
+die() { printf '[Docklight] ERROR: %s\n' "$*" >&2; exit 1; }
 
 if [[ "${EUID}" -ne 0 ]]; then
   die "run this installer as root, for example: sudo bash install.sh"
@@ -58,7 +58,7 @@ checksums_file=""
 trap 'rm -f "$tmp_binary"; [[ -z "$checksums_file" ]] || rm -f "$checksums_file"' EXIT
 if [[ -n "$source_dir" && -f "$source_dir/go.mod" ]]; then
   command -v go >/dev/null 2>&1 || die "Go 1.27 or newer is required when installing from source; provide YGG_BINARY_URL or YGG_REPO instead"
-  log "Building Yggdrasil from $source_dir for linux/$arch"
+  log "Building Docklight from $source_dir for linux/$arch"
   ldflags='-s -w'
   [[ -z "$release_repo" ]] || ldflags+=" -X main.repository=$release_repo"
   (cd "$source_dir" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="$ldflags" -o "$tmp_binary" ./cmd/yggdrasil)
@@ -80,7 +80,7 @@ elif [[ -n "${YGG_REPO:-}" ]]; then
   else
     binary_url="https://github.com/${YGG_REPO}/releases/download/${version}/yggdrasil-linux-${arch}"
   fi
-  log "Downloading Yggdrasil ${version} from ${YGG_REPO}"
+  log "Downloading Docklight ${version} from ${YGG_REPO}"
   curl -fL --retry 3 --connect-timeout 15 "$binary_url" -o "$tmp_binary"
   checksums_file="$(mktemp /tmp/yggdrasil-checksums.XXXXXX)"
   if [[ "$version" == "latest" ]]; then
@@ -145,7 +145,7 @@ fi
 
 cat > /etc/systemd/system/yggdrasil.service <<'UNIT'
 [Unit]
-Description=Yggdrasil game and app server panel
+Description=Docklight game and app server panel
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
@@ -182,7 +182,7 @@ fi
 
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [[ -n "$ip" ]] || ip="<server-ip>"
-log "Yggdrasil is installed at http://${ip}:8080"
+log "Docklight is installed at http://${ip}:8080"
 if [[ "$first_install" == 1 ]]; then
   printf '%s\n' "$bootstrap_output"
   log "Sign in with the one-time administrator password above, then change it in your password manager."

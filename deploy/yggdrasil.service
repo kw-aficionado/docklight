@@ -1,5 +1,5 @@
 [Unit]
-Description=Yggdrasil game and app server panel
+Description=Docklight game and app server panel
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
