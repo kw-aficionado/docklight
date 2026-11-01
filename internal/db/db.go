@@ -1450,6 +1450,45 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 43 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_metrics (
+			server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+			sampled_at INTEGER NOT NULL,
+			cpu_percent REAL NOT NULL DEFAULT -1,
+			memory_mb REAL NOT NULL DEFAULT -1,
+			players INTEGER NOT NULL DEFAULT -1,
+			PRIMARY KEY(server_id,sampled_at)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_server_metrics_sampled_at ON server_metrics(sampled_at)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS host_metrics (
+			sampled_at INTEGER PRIMARY KEY,
+			cpu_percent REAL NOT NULL DEFAULT -1,
+			memory_used_mb REAL NOT NULL DEFAULT -1,
+			memory_total_mb REAL NOT NULL DEFAULT -1,
+			disk_used_mb REAL NOT NULL DEFAULT -1,
+			disk_total_mb REAL NOT NULL DEFAULT -1
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(43)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

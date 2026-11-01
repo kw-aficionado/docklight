@@ -501,8 +501,7 @@ func (e *Engine) Stats(ctx context.Context, id string) (float64, uint64, error) 
 		} `json:"memory_stats"`
 		CPU struct {
 			CPU struct {
-				Total  uint64   `json:"total_usage"`
-				PerCPU []uint64 `json:"percpu_usage"`
+				Total uint64 `json:"total_usage"`
 			} `json:"cpu_usage"`
 			System uint64 `json:"system_cpu_usage"`
 		} `json:"cpu_stats"`
@@ -520,7 +519,10 @@ func (e *Engine) Stats(ctx context.Context, id string) (float64, uint64, error) 
 	sysDelta := float64(x.CPU.System) - float64(x.PreCPU.System)
 	pct := 0.0
 	if cpuDelta > 0 && sysDelta > 0 {
-		pct = cpuDelta / sysDelta * float64(len(x.CPU.CPU.PerCPU)) * 100
+		pct = cpuDelta / sysDelta * 100
+		if pct > 100 {
+			pct = 100
+		}
 	}
 	return pct, x.Memory.Usage, nil
 }

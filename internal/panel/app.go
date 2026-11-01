@@ -47,6 +47,13 @@ type App struct {
 	scheduleCommand       func(context.Context, Server, string) error
 	notificationClient    *http.Client
 	assistantHTTPClient   *http.Client
+	metricsMu             sync.Mutex
+	metricsCPUBusy        uint64
+	metricsCPUTotal       uint64
+	metricsPruneAt        time.Time
+	metricsStats          func(context.Context, Server) (float64, uint64, error)
+	metricsPlayers        func(context.Context, Server) (int, error)
+	metricsHostProbe      func(time.Time) hostMetricPoint
 	runeCatalogHTTPClient *http.Client
 	runeCatalogMu         sync.Mutex
 	runeCatalogCache      map[string]runeCatalogCacheEntry
@@ -377,6 +384,8 @@ func (a *App) Router() http.Handler {
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))
 			priv.Post("/backups/target/test", a.admin(a.testBackupTarget))
 			priv.Get("/system/disk", a.admin(a.getDiskStatus))
+			priv.Get("/system/metrics", a.admin(a.hostMetrics))
+			priv.Get("/fleet/metrics", a.admin(a.fleetMetrics))
 			priv.Get("/bans", a.admin(a.listBans))
 			priv.Post("/bans", a.admin(a.createBan))
 			priv.Delete("/bans/{id}", a.admin(a.revokeBan))
@@ -392,6 +401,7 @@ func (a *App) Router() http.Handler {
 			priv.Post("/servers/{id}/stop", a.stopServer)
 			priv.Post("/servers/{id}/restart", a.restartServer)
 			priv.Get("/servers/{id}/stats", a.serverStats)
+			priv.Get("/servers/{id}/metrics", a.serverMetrics)
 			priv.Get("/servers/{id}/query", a.serverQuery)
 			priv.Get("/servers/{id}/reachability", a.serverReachability)
 			priv.Post("/servers/{id}/rcon", a.serverRCON)

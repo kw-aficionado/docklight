@@ -152,6 +152,9 @@ See [Assistant setup](guides/assistant.md) for provider URL and data-handling de
 | `GET /api/servers/{id}/install/status` | Poll install state and recent lines. Requires `server.view`. |
 | `POST /api/servers/{id}/start`, `/stop`, `/restart` | Control lifecycle; requires `server.control`. |
 | `GET /api/servers/{id}/stats` | Current Docker CPU and memory sample; requires `server.view`. |
+| `GET /api/servers/{id}/metrics?hours=24` | Historical CPU, memory, and player samples; requires `server.view`. `hours` defaults to 24 and accepts 1–168. |
+| `GET /api/fleet/metrics?hours=24` | Admin-only per-server averages and peaks over a 1–168 hour window. |
+| `GET /api/system/metrics?hours=24` | Admin-only host CPU, memory, and Docklight data-filesystem history over a 1–168 hour window. |
 | `GET /api/servers/{id}/query` | Player count for the template's protocol; requires `server.view`. Successful queries refresh the public status page's player sample. |
 | `GET /api/servers/{id}/reachability` | Requires `server.view`; check a running or starting server's allocated game/query port at the effective public host. Results are cached for 30 seconds, and loopback targets are refused. |
 | `POST /api/servers/{id}/rcon` | Send `{"command":"list"}`; requires `server.console`. |

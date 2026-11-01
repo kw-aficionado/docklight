@@ -176,13 +176,19 @@ Administrators can configure Anthropic Messages or an OpenAI-compatible provider
 
 Tests cover administrator-only access, disabled/unconfigured defaults, encrypted storage, key masking/preservation/removal, URL validation, Anthropic and OpenAI-compatible request formats, redirect refusal, timeout and response-size bounds, redacted provider errors, and the no-audit test path. The admin page and JavaScript syntax are implemented; live provider credentials and visual browser acceptance are not available in this environment. Setup details are in [the Assistant guide](docs/guides/assistant.md).
 
+## Historical resource metrics
+
+The panel samples each running server's container CPU share, memory and supported player query every five minutes, plus host CPU, memory, and the filesystem containing Docklight data. Server and host samples are retained for seven days and pruned hourly. Unknown Docker, player-query, or host values are stored as `-1` and excluded from fleet averages. Administrators can read host and fleet history; server history follows `server.view`. Server cards show CPU, memory, and player sparklines for 24 hours, 3 days, or 7 days. Host CPU and memory use Linux `/proc` counters; unsupported or unavailable counters remain unknown.
+
+Migration, sampling, seven-day pruning, returned history, and access-control tests cover the history APIs. `go test -count=1 ./...`, `go vet ./...`, native and Linux amd64/arm64 builds, JavaScript syntax and unit checks, installer/updater shell syntax, and `git diff --check` passed. Browser visuals and the first seven days of real-world sample accumulation still need host acceptance.
+
 ## Not implemented
 
 - Built-in DayZ server template. DayZ Economy and Mods features require a compatible imported Rune; Workshop management additionally requires its `MODS` setting.
 - Remaining Phase 4 work: Assistant chat, digests, advisors, panel data tools, proposals, proactive monitoring/actions, and the MCP connector.
-- Historical metrics, external identity providers, multi-host management, and offline PWA support.
+- External identity providers, multi-host management, and offline PWA support.
 
-Other than Assistant provider setup, the remaining items have no active controls in the UI.
+Other than Assistant provider setup and historical metrics, the remaining Phase 4 items have no active controls in the UI.
 
 ## Environment limits and remaining acceptance work
 

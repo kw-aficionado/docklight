@@ -10,6 +10,12 @@ If Docker returns another error, Docklight keeps the last known server state and
 
 A confirmed incident sets the server to **Needs attention** and records the detected time, incident type, exit code when available, and a restart hint. Server files are preserved. Use the per-server **History** tab to read up to 50 recent incidents; Docklight retains up to 100 per server. Deleting a server also deletes its incident history.
 
+## Historical resource metrics
+
+Docklight samples each running server's container CPU, memory, and player count every five minutes. An unavailable player query or Docker value is stored as `-1` and omitted from averages. Samples are pruned hourly and retained for seven days. The server cards show CPU, memory, and player sparklines with 24-hour, 3-day, and 7-day windows; a new installation begins collecting history at startup, so the graphs fill over time.
+
+Host CPU and memory are read from Linux `/proc` counters. Host disk history measures the filesystem containing Docklight's data directory, the same storage volume used by the low-space alert. If a host metric cannot be read, its sample is `-1`. Administrators can read host history at `/api/system/metrics`; per-server history requires `server.view`, and fleet averages and peaks are admin-only. See the [API reference](../api.md#templates-and-servers).
+
 ## Low disk space
 
 Docklight checks the filesystem that contains its data directory every five minutes. If available space falls below 10%, it marks the alert active and sends `host.disk_low` to enabled notification channels. The legacy signed webhook sends it when that event is selected. The alert rearms when free space reaches 15%, so a continuing low-space condition does not send a message every five minutes. The Notifications page shows current capacity and alert state. The message identifies the server-data and local-backup paths to inspect. Only the Docklight data filesystem is measured; other mounted volumes are not enumerated, and Docklight never deletes files automatically.

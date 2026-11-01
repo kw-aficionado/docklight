@@ -98,6 +98,17 @@ func TestIsNotFoundOnlyAcceptsDocker404(t *testing.T) {
 	}
 }
 
+func TestStatsCPUIsShareOfWholeHost(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return dockerResponse(req, http.StatusOK, `{"memory_stats":{"usage":1048576},"cpu_stats":{"cpu_usage":{"total_usage":150,"percpu_usage":[0,0,0,0,0,0,0,0]},"system_cpu_usage":1100},"precpu_stats":{"cpu_usage":{"total_usage":100},"system_cpu_usage":1000}}`), nil
+	})}
+	e := NewWithHTTPClient("test-socket", "1.45", client)
+	cpu, memory, err := e.Stats(context.Background(), "container-123")
+	if err != nil || cpu != 50 || memory != 1048576 {
+		t.Fatalf("stats cpu/memory=%v/%d err=%v, want host CPU share 50%% and 1 MiB", cpu, memory, err)
+	}
+}
+
 func TestPullWithAuthSendsCredentialsOnlyInRegistryHeader(t *testing.T) {
 	var received RegistryAuthConfig
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

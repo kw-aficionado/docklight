@@ -3,7 +3,9 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
 (() => {
   const app = document.querySelector('#app');
   const toastRegion = document.querySelector('#toast-region');
-  let state = { user: null, servers: [], runes: [], realms: [], selected: null, route: 'servers', stats: null, socket: null, filePath: '', fileRows: [], users: [], beaconNoticeChecked: false, releaseInfo: null };
+  let state = { user: null, servers: [], runes: [], realms: [], selected: null, route: 'servers', stats: null, socket: null, filePath: '', fileRows: [], users: [], beaconNoticeChecked: false, releaseInfo: null, metricsHours: 24 };
+  const metricHistoryCache = new Map();
+  const metricHistoryPending = new Map();
   const icon = (name) => ({ grid:'▦', server:'◉', rune:'▤', storage:'▥', user:'♙', log:'⌘', notify:'◈', assistant:'✦', status:'◉', folder:'▱', plus:'+', close:'×', settings:'⚙', moon:'◐', sun:'☼', arrow:'↗', play:'▶', stop:'■', rotate:'↻', trash:'⌫', download:'↓', upload:'↑', refresh:'⟳', shield:'◇', check:'✓', warn:'!' }[name] || '•');
   const api = async (path, options = {}) => {
     const headers = new Headers(options.headers || {});
@@ -179,15 +181,17 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
     const unassigned=state.servers.filter(server=>!assigned.has(server.id));
     if(unassigned.length)groups.push({id:'',name:'Unassigned',description:'Servers without a realm',collapsed:false,can_create:false,servers:unassigned});
     const groupMarkup=groups.map(realm=>`<section class="realm-section"><div class="realm-section-head"><button class="realm-collapse" data-realm-toggle="${esc(realm.id)}" aria-expanded="${!realm.collapsed}"><span class="realm-caret">${realm.collapsed?'›':'⌄'}</span><span><b>${esc(realm.name)}</b><small>${esc(realm.description||'Server group')}</small></span><span class="count-pill">${realm.servers.length}</span></button>${realm.id&&realm.can_create&&state.runes.length?`<button class="button subtle realm-create" data-create-realm="${esc(realm.id)}">+ Add server</button>`:''}</div>${realm.collapsed?'':`<div class="server-grid">${realm.servers.map(serverCard).join('')}</div>`}</section>`).join('');
-    view.innerHTML=`<div class="page-heading"><div><div class="eyebrow">YOUR INFRASTRUCTURE</div><h1>Servers</h1><p>Manage the games and apps running on this host.</p></div><button class="button primary" data-action="new-server"><span class="plus">+</span> New server</button></div><div class="metric-row"><div class="metric-card"><span class="metric-icon pale-green">◉</span><div><div class="metric-label">TOTAL SERVERS</div><b>${state.servers.length}</b></div><span class="metric-caption">in this panel</span></div><div class="metric-card"><span class="metric-icon pale-blue">↗</span><div><div class="metric-label">RUNNING</div><b>${running}</b></div><span class="metric-caption">${starting?`${starting} starting`:'healthy services'}</span></div><div class="metric-card"><span class="metric-icon pale-gold">◷</span><div><div class="metric-label">AVAILABLE TEMPLATES</div><b>${state.runes.length}</b></div><span class="metric-caption">ready to deploy</span></div></div><div class="section-head"><div><h2>All servers <span class="count-pill">${state.servers.length}</span></h2><p>Services grouped by realm</p></div><button class="button subtle" data-action="refresh">${icon('refresh')} Refresh</button></div>${state.servers.length?`<div class="realm-groups">${groupMarkup}</div>`:`<section class="empty-state"><div class="empty-illustration"><span>▤</span><i></i><i></i><i></i></div><h2>Your server list is clear</h2><p>Choose a template to bring a game or app online.</p><button class="button primary" data-action="new-server">Create your first server <span>→</span></button></section>`}`;
+    view.innerHTML=`<div class="page-heading"><div><div class="eyebrow">YOUR INFRASTRUCTURE</div><h1>Servers</h1><p>Manage the games and apps running on this host.</p></div><button class="button primary" data-action="new-server"><span class="plus">+</span> New server</button></div><div class="metric-row"><div class="metric-card"><span class="metric-icon pale-green">◉</span><div><div class="metric-label">TOTAL SERVERS</div><b>${state.servers.length}</b></div><span class="metric-caption">in this panel</span></div><div class="metric-card"><span class="metric-icon pale-blue">↗</span><div><div class="metric-label">RUNNING</div><b>${running}</b></div><span class="metric-caption">${starting?`${starting} starting`:'healthy services'}</span></div><div class="metric-card"><span class="metric-icon pale-gold">◷</span><div><div class="metric-label">AVAILABLE TEMPLATES</div><b>${state.runes.length}</b></div><span class="metric-caption">ready to deploy</span></div></div><div class="section-head"><div><h2>All servers <span class="count-pill">${state.servers.length}</span></h2><p>Services grouped by realm · resource history sampled every five minutes</p></div><div class="section-tools"><div class="metrics-window" role="group" aria-label="Metric history window"><button type="button" data-metric-window="24" aria-pressed="${state.metricsHours===24}">24h</button><button type="button" data-metric-window="72" aria-pressed="${state.metricsHours===72}">3d</button><button type="button" data-metric-window="168" aria-pressed="${state.metricsHours===168}">7d</button></div><button class="button subtle" data-action="refresh">${icon('refresh')} Refresh</button></div></div>${state.servers.length?`<div class="realm-groups">${groupMarkup}</div>`:`<section class="empty-state"><div class="empty-illustration"><span>▤</span><i></i><i></i><i></i></div><h2>Your server list is clear</h2><p>Choose a template to bring a game or app online.</p><button class="button primary" data-action="new-server">Create your first server <span>→</span></button></section>`}`;
     if(state.user.role!=='admin'&&state.runes.length===0){view.querySelectorAll('[data-action="new-server"]').forEach(el=>el.remove());const empty=view.querySelector('.empty-state');if(empty)empty.innerHTML='<h2>No accessible servers</h2><p>Ask an administrator to grant you server access.</p>';}
     view.querySelectorAll('.server-card[data-server]').forEach(el=>el.addEventListener('click',()=>{state.selected=state.servers.find(s=>s.id===el.dataset.server);render();}));
     view.querySelectorAll('[data-server-op]').forEach(el=>{const server=state.servers.find(s=>s.id===el.dataset.server);if(!server?.permissions?.includes('server.control'))el.remove();});
     view.querySelector('[data-action="new-server"]')?.addEventListener('click',()=>newServerModal());
     view.querySelector('[data-action="refresh"]')?.addEventListener('click',async()=>{await refresh();render();});
+    view.querySelectorAll('[data-metric-window]').forEach(button=>button.addEventListener('click',()=>{state.metricsHours=Number(button.dataset.metricWindow);view.querySelectorAll('[data-metric-window]').forEach(item=>{const selected=Number(item.dataset.metricWindow)===state.metricsHours;item.setAttribute('aria-pressed',String(selected));});loadServerMetricsSparklines(state.metricsHours);}));
     view.querySelectorAll('[data-realm-toggle]').forEach(button=>button.addEventListener('click',async()=>{const id=button.dataset.realmToggle;const realm=state.realms.find(x=>x.id===id);if(!id||!realm){const section=button.closest('.realm-section'),content=section?.querySelector('.server-grid'),open=button.getAttribute('aria-expanded')==='true';button.setAttribute('aria-expanded',String(!open));button.querySelector('.realm-caret').textContent=open?'›':'⌄';if(content)content.hidden=open;return;}try{await api(`/api/realms/${id}/collapsed`,{method:'PUT',body:JSON.stringify({collapsed:!realm.collapsed})});await refresh();renderServers();}catch(e){toast(e.message,'error');}}));
     view.querySelectorAll('[data-create-realm]').forEach(button=>button.addEventListener('click',()=>newServerModal(undefined,button.dataset.createRealm)));
     view.querySelectorAll('[data-server-op]').forEach(el=>el.addEventListener('click',async e=>{e.stopPropagation();await serverAction(el.dataset.server,el.dataset.serverOp);}));
+    loadServerMetricsSparklines(state.metricsHours);
   }
   async function renderDomains(){
     const view=document.querySelector('#view');
@@ -201,7 +205,69 @@ import { escapeHTML as esc, formatNumber as fmt, parseConfigDocument, serializeC
     view.querySelector('[data-domains-refresh]').onclick=event=>refresh(event.currentTarget);
     await refresh();
   }
-  function serverCard(s){const [label,kind]=statusInfo(s.status);const rune=state.runes.find(x=>x.id===s.gameskill_id);const port=s.ports?.web||s.ports?.game;return `<article class="server-card" data-server="${esc(s.id)}"><div class="card-top"><div class="server-glyph ${s.gameskill_id.includes('minecraft')?'glyph-game':'glyph-app'}">${s.gameskill_id.includes('minecraft')?'✦':'◇'}</div><div class="card-title"><h3>${esc(s.name)}</h3><span>${esc(rune?.name||s.gameskill_id)}</span></div><span class="status-badge ${kind}"><i></i>${label}</span></div><div class="card-body"><div class="card-meta"><span>${s.installed?'Installed':'Setup required'}</span><span class="meta-sep">·</span><span>${port?`Port ${fmt(port)}`:'No public port'}</span></div><div class="card-progress"><i class="${kind}"></i></div></div><div class="card-footer"><span class="card-id">${esc(s.id.slice(0,8))}</span><div class="quick-actions">${['starting','installing','updating'].includes(s.status)?'<button disabled title="Operation in progress">◷</button>':s.status==='running'?`<button title="Stop" data-server-op="stop" data-server="${esc(s.id)}">■</button><button title="Restart" data-server-op="restart" data-server="${esc(s.id)}">↻</button>`:`<button title="${s.installed?'Start':'Install'}" data-server-op="${s.installed?'start':'install'}" data-server="${esc(s.id)}">▶</button>`}<button title="Open server" data-server="${esc(s.id)}">↗</button></div></div></article>`;}
+  function serverCard(s){
+    const [label,kind]=statusInfo(s.status);
+    const rune=state.runes.find(x=>x.id===s.gameskill_id);
+    const port=s.ports?.web||s.ports?.game;
+    return `<article class="server-card" data-server="${esc(s.id)}"><div class="card-top"><div class="server-glyph ${s.gameskill_id.includes('minecraft')?'glyph-game':'glyph-app'}">${s.gameskill_id.includes('minecraft')?'✦':'◇'}</div><div class="card-title"><h3>${esc(s.name)}</h3><span>${esc(rune?.name||s.gameskill_id)}</span></div><span class="status-badge ${kind}"><i></i>${label}</span></div><div class="card-body"><div class="card-meta"><span>${s.installed?'Installed':'Setup required'}</span><span class="meta-sep">·</span><span>${port?`Port ${fmt(port)}`:'No public port'}</span></div><div class="card-progress"><i class="${kind}"></i></div><div class="server-metrics" data-server-metrics="${esc(s.id)}"><div class="server-metrics-empty">Loading resource history…</div></div></div><div class="card-footer"><span class="card-id">${esc(s.id.slice(0,8))}</span><div class="quick-actions">${['starting','installing','updating'].includes(s.status)?'<button disabled title="Operation in progress">◷</button>':s.status==='running'?`<button title="Stop" data-server-op="stop" data-server="${esc(s.id)}">■</button><button title="Restart" data-server-op="restart" data-server="${esc(s.id)}">↻</button>`:`<button title="${s.installed?'Start':'Install'}" data-server-op="${s.installed?'start':'install'}" data-server="${esc(s.id)}">▶</button>`}<button title="Open server" data-server="${esc(s.id)}">↗</button></div></div></article>`;
+  }
+  async function loadServerMetricsSparklines(hours){
+    const cards=[...document.querySelectorAll('.server-metrics[data-server-metrics]')];
+    let next=0;
+    const worker=async()=>{
+      while(next<cards.length){
+        const card=cards[next++],id=card.dataset.serverMetrics,key=`${id}:${hours}`;
+        try{
+          let series;
+          const cached=metricHistoryCache.get(key);
+          if(cached&&cached.expiresAt>Date.now())series=cached.series;
+          else{
+            let pending=metricHistoryPending.get(key);
+            if(!pending){
+              pending=api(`/api/servers/${encodeURIComponent(id)}/metrics?hours=${hours}`).then(value=>{metricHistoryCache.set(key,{series:value,expiresAt:Date.now()+60000});return value}).finally(()=>metricHistoryPending.delete(key));
+              metricHistoryPending.set(key,pending);
+            }
+            series=await pending;
+          }
+          if(card.isConnected&&state.metricsHours===hours)drawServerMetrics(card,series,hours);
+        }catch(error){if(card.isConnected&&state.metricsHours===hours)card.innerHTML=`<div class="server-metrics-empty">${esc(error.message)}</div>`;}
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(6,cards.length)},worker));
+  }
+  function drawServerMetrics(root,series,hours){
+    const points=series.points||[];
+    const windows={24:'24 hours',72:'3 days',168:'7 days'};
+    const metrics=[['CPU','cpu_percent','%',100],['Memory','memory_mb','MB',null],['Players','players','',null]];
+    root.innerHTML=metrics.map(([label,key,unit,fixedMax])=>{
+      const valid=points.map(point=>({time:Number(point.sampled_at),value:Number(point[key])})).filter(point=>Number.isFinite(point.time)&&Number.isFinite(point.value)&&point.value>=0);
+      const latest=valid.at(-1)?.value;
+      const value=latest===undefined?'—':key==='memory_mb'?formatMetricMemory(latest):`${Math.round(latest*10)/10}${unit}`;
+      const display=valid.length?metricSparkline(valid,fixedMax,label,windows[hours]||`${hours} hours`):'<span class="server-spark-empty">No sample</span>';
+      return `<div class="server-metric"><div class="server-metric-head"><span>${label}</span><b>${value}</b></div>${display}</div>`;
+    }).join('');
+  }
+  function formatMetricMemory(value){return value>=1024?`${(value/1024).toFixed(1)} GB`:`${Math.round(value)} MB`;}
+  function metricSparkline(points,fixedMax,label,windowLabel){
+    const reduced=points.length<=180?points:downsampleMetricPoints(points,90);
+    const maximum=fixedMax||Math.max(1,...reduced.map(point=>point.value))*1.08;
+    const coordinates=reduced.map((point,index)=>[reduced.length===1?80:index/(reduced.length-1)*160,30-Math.min(maximum,point.value)/maximum*25]);
+    const line=coordinates.map(([x,y])=>`${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const description=`${label} over ${windowLabel}; ${points.length} samples`;
+    if(coordinates.length===1)return `<svg class="server-sparkline" viewBox="0 0 160 34" role="img" aria-label="${description}"><circle cx="${coordinates[0][0].toFixed(1)}" cy="${coordinates[0][1].toFixed(1)}" r="2.5"/></svg>`;
+    return `<svg class="server-sparkline" viewBox="0 0 160 34" role="img" aria-label="${description}"><polyline points="${line}"/></svg>`;
+  }
+  function downsampleMetricPoints(points,bucketCount){
+    const bucketSize=points.length/bucketCount,result=[];
+    for(let bucket=0;bucket<bucketCount;bucket++){
+      const start=Math.floor(bucket*bucketSize),end=Math.min(points.length,Math.floor((bucket+1)*bucketSize));
+      const values=points.slice(start,end);if(!values.length)continue;
+      let low=values[0],high=values[0];for(const point of values){if(point.value<low.value)low=point;if(point.value>high.value)high=point;}
+      const chosen=low===high?[low]:[low,high].sort((a,b)=>a.time-b.time);
+      for(const point of chosen)if(result.at(-1)!==point)result.push(point);
+    }
+    return result;
+  }
   async function serverAction(id,op){try{const result=await api(`/api/servers/${id}/${op}`,{method:'POST',body:'{}'});toast(op==='install'?'Installation started':`${op[0].toUpperCase()+op.slice(1)} requested`,'success');await refresh();state.selected=state.servers.find(s=>s.id===id);render();if(op==='install')watchInstall(id);}catch(e){toast(e.message,'error');}}
   function watchInstall(id){const timer=setInterval(async()=>{try{const x=await api(`/api/servers/${id}/install/status`);if(x.done||x.installed){clearInterval(timer);await refresh();if(state.selected?.id===id)render();toast(x.error||'Installation finished','success');}else if(x.status==='error'){clearInterval(timer);toast(x.error||'Installation failed','error');}}catch{clearInterval(timer);}},2500);}
 

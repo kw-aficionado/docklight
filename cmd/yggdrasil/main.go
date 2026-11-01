@@ -149,6 +149,7 @@ func serve(args []string) error {
 	app.StartNPMReconciler(workerCtx)
 	app.StartIPBlockingReconciler(workerCtx)
 	app.StartDiskMonitor(workerCtx)
+	app.StartMetricsSampler(workerCtx)
 	app.StartWatchdogMonitor(workerCtx)
 	app.StartBeaconWorker(workerCtx)
 	app.StartPanelUpdateWorker(workerCtx)
