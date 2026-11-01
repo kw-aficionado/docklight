@@ -145,3 +145,11 @@
 - Check the exact external port/protocol before adding a rule. Persist Docklight's intended target and marker before changing the router; cleanup re-reads the current rule and deletes only if the remote host, protocol, ports, LAN client, and marker still match.
 - Use permanent leases as requested. Skip RCON and names that indicate admin, management, or console ports. A router outage leaves mapping records for retry; uncertain container state never triggers rule deletion.
 - A real router and public-NAT path were not available in the sandbox, so protocol fixtures verify SOAP/SSDP handling and fake gateways verify mapping ownership and lifecycle policy.
+
+## 2026-11-01: UniFi port forwarding
+
+- Store the controller URL and site in migration 30, encrypt the local username and password with the panel secret, and keep a distinct admin master switch. Reuse each server's existing `auto_forward` preference across UPnP and UniFi.
+- Use the controller's local cookie login and classic site `rest/portforward` API with redirects disabled. The brief explicitly allows self-signed HTTPS certificates. Ubiquiti documents local APIs per installed Network version, so the classic endpoint must remain isolated and real-controller acceptance must confirm compatibility.
+- Tag generated entries with `Docklight: [docklight:<server-id>]`. Delete only rules whose parsed tag exactly equals the server ID; do not infer ownership from port numbers or targets. An admin can explicitly remove selected unmatched Docklight-prefixed rules, while other rules remain untouched.
+- Before replacing credentials, site, or controller URL, and before disabling the integration, remove exact-tagged rules using the saved configuration. If cleanup fails, preserve the old settings and report the conflict.
+- Fake-controller HTTP fixtures cover login, rule listing, creation, and deletion. No live UniFi controller is present for end-to-end acceptance.

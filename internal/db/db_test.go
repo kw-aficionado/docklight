@@ -74,8 +74,8 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	if err = d.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 29 {
-		t.Fatalf("expected 29 migrations, got %d", count)
+	if count != 30 {
+		t.Fatalf("expected 30 migrations, got %d", count)
 	}
 	var hostMountColumn int
 	if err = d.QueryRow(`SELECT count(*) FROM pragma_table_info('servers') WHERE name='host_mounts'`).Scan(&hostMountColumn); err != nil || hostMountColumn != 1 {
@@ -97,7 +97,7 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 			t.Fatalf("catalog source migration is missing %q: count=%d err=%v", column, found, err)
 		}
 	}
-	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens", "passkey_credentials", "network_settings", "upnp_settings", "server_upnp_mappings", "server_upnp_state"} {
+	for _, table := range []string{"rune_repos", "github_catalog_settings", "registry_logins", "notification_channels", "password_reset_tokens", "passkey_credentials", "network_settings", "upnp_settings", "server_upnp_mappings", "server_upnp_state", "unifi_settings", "server_unifi_mappings", "server_unifi_state"} {
 		var found int
 		if err = d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&found); err != nil || found != 1 {
 			t.Fatalf("schema migration is missing table %q: count=%d err=%v", table, found, err)
@@ -110,6 +110,9 @@ func TestOpenMigratesExistingSchemaAndRecordsVersions(t *testing.T) {
 	var enabled int
 	if err = d.QueryRow(`SELECT enabled FROM upnp_settings WHERE id=1`).Scan(&enabled); err != nil || enabled != 0 {
 		t.Fatalf("UPnP must be disabled by default: enabled=%d err=%v", enabled, err)
+	}
+	if err = d.QueryRow(`SELECT enabled FROM unifi_settings WHERE id=1`).Scan(&enabled); err != nil || enabled != 0 {
+		t.Fatalf("UniFi forwarding must be disabled by default: enabled=%d err=%v", enabled, err)
 	}
 	for _, column := range []string{"email", "webauthn_user_handle"} {
 		var found int

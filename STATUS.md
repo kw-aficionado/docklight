@@ -74,6 +74,14 @@ UPnP IGD forwarding has an administrator-controlled master switch that starts of
 
 Tests cover UPnP defaults and admin authorization, per-server control permission, TCP/UDP expansion and excluded ports, mapping idempotence, foreign-rule conflicts, exact ownership verification on cleanup, uncertain AddPortMapping responses, SSDP location restrictions, control-URL origin checks, and SOAP XML escaping. No physical router was available for discovery/NAT acceptance; the Network and per-server forwarding UI could not be visually exercised because the sandbox blocks the local panel listener.
 
+## Phase 3 UniFi port forwarding
+
+The Network page can save and test a local UniFi controller connection. Controller usernames and passwords are encrypted at rest and masked by the API. The integration uses a dedicated local-account login session and the site's classic port-forward API. Each rule receives a stable `Docklight: [docklight:<server-id>]` ownership tag. Eligible declared game ports are created after start; exact-tagged rules are removed before every start and after stop, confirmed exit, per-server opt-out, controller reconfiguration, global opt-out, or deletion. RCON and administrative ports are excluded. The same per-server forwarding preference controls UPnP and UniFi, while each integration has its own administrator master switch.
+
+Admins can inspect live controller rules, identify unmatched Docklight-tagged rules, and explicitly select strays for removal. Deletion refuses rules whose tag resolves to a local server and does not touch other providers' rules. Controller cleanup failures block server deletion so Docklight does not release a host port while an owned rule may remain.
+
+Tests cover disabled-by-default migration, admin-only settings, encrypted/masked credentials, cookie and CSRF login state, redirect refusal, controller rule listing, one combined TCP/UDP rule, rule creation and saved ownership, exact-tag cleanup, host-scoped explicit stray removal, and foreign-rule preservation. No physical UniFi controller was available. Ubiquiti's current local API is documented per installed Network version, so actual controller/API-version acceptance remains pending.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -110,7 +118,7 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: UniFi forwarding, Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
+- Phase 3: Cloudflare route/DNS reconciliation, Nginx Proxy Manager integration, IP blocking, beacon, self-update, and cross-server ban automation.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 

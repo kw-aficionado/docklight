@@ -374,6 +374,13 @@ func (a *App) deleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upnpCancel()
+	uniFiCtx, uniFiCancel := context.WithTimeout(r.Context(), uniFiRequestTimeout)
+	if err := a.removeServerUniFiMappings(uniFiCtx, s.ID); err != nil {
+		uniFiCancel()
+		writeError(w, 503, "Docker resources are stopped and the server data is retained, but its UniFi port forwards could not be cleared: "+err.Error())
+		return
+	}
+	uniFiCancel()
 	if err := a.removeServerBackups(s.ID); err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -833,6 +840,12 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		return fmt.Errorf("clear previous router mappings before starting: %w", err)
 	}
 	cleanupUPnPCancel()
+	cleanupUniFiCtx, cleanupUniFiCancel := context.WithTimeout(parent, uniFiRequestTimeout)
+	if err = a.removeServerUniFiMappings(cleanupUniFiCtx, s.ID); err != nil {
+		cleanupUniFiCancel()
+		return fmt.Errorf("clear previous UniFi port forwards before starting: %w", err)
+	}
+	cleanupUniFiCancel()
 	stackNetwork := ""
 	if gs.Stack != nil {
 		stackNetwork, err = a.ensureStackNetwork(ctx, s.ID)
@@ -875,6 +888,11 @@ func (a *App) startWithContext(s Server, parent context.Context) error {
 		a.audit(User{Username: "system"}, "server.upnp_error", "server", s.ID, mappingErr.Error())
 	}
 	upnpCancel()
+	uniFiCtx, uniFiCancel := context.WithTimeout(parent, uniFiRequestTimeout)
+	if mappingErr := a.openServerUniFiMappings(uniFiCtx, s); mappingErr != nil {
+		a.audit(User{Username: "system"}, "server.unifi_error", "server", s.ID, mappingErr.Error())
+	}
+	uniFiCancel()
 	go a.watchReady(s, gs)
 	return nil
 }
@@ -927,6 +945,11 @@ func (a *App) stop(s Server) error {
 		a.audit(User{Username: "system"}, "server.upnp_cleanup_error", "server", s.ID, mappingErr.Error())
 	}
 	upnpCancel()
+	uniFiCtx, uniFiCancel := context.WithTimeout(context.Background(), uniFiRequestTimeout)
+	if mappingErr := a.removeServerUniFiMappings(uniFiCtx, s.ID); mappingErr != nil {
+		a.audit(User{Username: "system"}, "server.unifi_cleanup_error", "server", s.ID, mappingErr.Error())
+	}
+	uniFiCancel()
 	var stack *rune.Rune
 	if loadErr == nil {
 		stack = &gs
@@ -968,6 +991,11 @@ func (a *App) watchReady(s Server, gs rune.Rune) {
 				a.audit(User{Username: "system"}, "server.upnp_cleanup_error", "server", s.ID, mappingErr.Error())
 			}
 			upnpCancel()
+			uniFiCtx, uniFiCancel := context.WithTimeout(context.Background(), uniFiRequestTimeout)
+			if mappingErr := a.removeServerUniFiMappings(uniFiCtx, s.ID); mappingErr != nil {
+				a.audit(User{Username: "system"}, "server.unifi_cleanup_error", "server", s.ID, mappingErr.Error())
+			}
+			uniFiCancel()
 			message := fmt.Sprintf("Container exited before readiness with code %d; review its logs and template startup settings.", ins.State.ExitCode)
 			if err = a.recordServerCrash(s, "container_exited", ins.State.ExitCode, message); err != nil {
 				log.Printf("could not record startup exit for server %s", s.ID)

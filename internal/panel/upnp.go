@@ -162,10 +162,16 @@ func (a *App) updateServerUPnPSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.AutoForward {
 		_ = a.removeServerUPnPMappings(ctx, s.ID, nil)
-	} else if globalEnabled && (s.Status == "running" || s.Status == "starting") {
-		_ = a.openServerUPnPMappings(ctx, s)
+		_ = a.removeServerUniFiMappings(ctx, s.ID)
 	} else {
-		_ = a.setServerUPnPError(s.ID, nil)
+		if globalEnabled && (s.Status == "running" || s.Status == "starting") {
+			_ = a.openServerUPnPMappings(ctx, s)
+		} else if !globalEnabled {
+			_ = a.setServerUPnPError(s.ID, nil)
+		}
+		if s.Status == "running" || s.Status == "starting" {
+			_ = a.openServerUniFiMappings(ctx, s)
+		}
 	}
 	a.audit(u, "server.upnp_settings", "server", s.ID, fmt.Sprintf("auto_forward=%t", *in.AutoForward))
 	response, err := a.serverUPnPStatus(s)
@@ -202,6 +208,14 @@ func (a *App) getServerUPnPSettings(s Server) (serverUPnPResponse, error) {
 	}
 	response := serverUPnPResponse{AutoForward: s.AutoForward, GlobalEnabled: enabled, Mappings: []serverUPnPMapping{}}
 	_ = a.db.QueryRow(`SELECT last_error FROM server_upnp_state WHERE server_id=?`, s.ID).Scan(&response.LastError)
+	var uniFiError string
+	_ = a.db.QueryRow(`SELECT last_error FROM server_unifi_state WHERE server_id=?`, s.ID).Scan(&uniFiError)
+	if uniFiError != "" {
+		if response.LastError != "" {
+			response.LastError += "; "
+		}
+		response.LastError += "UniFi: " + uniFiError
+	}
 	rows, err := a.db.Query(`SELECT server_id,port_name,external_port,protocol,internal_port,internal_client,description FROM server_upnp_mappings WHERE server_id=? ORDER BY external_port,protocol`, s.ID)
 	if err != nil {
 		return response, err

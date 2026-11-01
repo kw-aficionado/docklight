@@ -954,6 +954,58 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 30 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS unifi_settings (
+			id INTEGER PRIMARY KEY CHECK(id=1),
+			enabled INTEGER NOT NULL DEFAULT 0,
+			controller_url TEXT NOT NULL DEFAULT '',
+			username_enc TEXT NOT NULL DEFAULT '',
+			password_enc TEXT NOT NULL DEFAULT '',
+			site TEXT NOT NULL DEFAULT 'default',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT OR IGNORE INTO unifi_settings(id,enabled) VALUES(1,0)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_unifi_mappings (
+			server_id TEXT NOT NULL,
+			rule_id TEXT NOT NULL,
+			controller_url TEXT NOT NULL,
+			rule_name TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			external_port INTEGER NOT NULL,
+			internal_port INTEGER NOT NULL,
+			internal_client TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY(server_id,rule_id)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS server_unifi_state (
+			server_id TEXT PRIMARY KEY,
+			last_error TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(30)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
