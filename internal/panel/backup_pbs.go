@@ -43,7 +43,11 @@ func validatePBSTarget(target backupTargetConfig) error {
 	if _, err := pbsRepository(target); err != nil {
 		return err
 	}
-	if target.Port < 1 || target.Port > 65535 {
+	port := target.Port
+	if port == 0 {
+		port = 8007
+	}
+	if port < 1 || port > 65535 {
 		return errors.New("Proxmox Backup Server port must be from 1 to 65535; the default is 8007")
 	}
 	if !pbsNamePattern.MatchString(target.Bucket) {
