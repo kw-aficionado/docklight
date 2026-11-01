@@ -61,6 +61,9 @@ gameskill:
     enabled: true
     type: minecraft
     password_var: RCON_PASSWORD
+  bans:
+    ban_command: "ban {{player}} {{reason}}"
+    unban_command: "pardon {{player}}"
   restart:
     warnings:
       - at: 15m

@@ -118,6 +118,12 @@ The admin Panel updates screen checks the configured GitHub repository for the l
 
 Automatic panel updates default off. Admins can opt in and select a host-local hour; the panel checks every 20 minutes and queues at most one release per day. Game containers continue running. Version and admin update APIs are documented in [the API reference](docs/api.md), and installation behavior is in [the updates guide](docs/guides/updates.md). Go build, JavaScript syntax, installer/updater shell syntax, and whitespace checks passed; no tests or live GitHub/systemd host acceptance were run. A release owner is still unconfigured in this source checkout, so a normal source install does not enable self-update unless `YGG_REPO` or a GitHub origin is supplied.
 
+## Phase 3 cross-server moderation
+
+Administrators can record central player bans for one server or the whole fleet, with an optional player ID and expiry. Docklight queues the template-declared ban/unban commands, applies them to running servers, reconciles offline servers when they start, expires bans, retries failed delivery, and records per-server sync state. The admin **Moderation** page also manages log-based rules that count matches by rule, server, and player and then kick or create a scoped/global ban. Successful automatic actions are audited and can send `player.auto_moderation` notifications.
+
+Templates opt in using `bans.ban_command` and `bans.unban_command`; commands support `{{player}}`, `{{player_id}}`, and `{{reason}}`. This checkout has no DayZ template or DayZ `ban.txt` adapter, so DayZ-specific ban-file behavior remains unsupported. Violation hit counts are in memory and reset on panel restart; old log output is not replayed. The change was formatted and the Go build, JavaScript syntax check, installer/updater shell syntax check, and whitespace check passed. No tests, UI browser review, or live Docker/game-server acceptance were run.
+
 ## Phase 1 per-server host mounts
 
 Administrators can browse safe host directories and configure up to 32 mounts per server. Each mount targets the primary container or one named stack sidecar; read-only is the default, and changes apply on the next start. Symlinks are resolved before the host source denylist is checked. Docklight data and backup storage, system folders, `/data`, template data paths, duplicate targets, and overlapping targets are rejected. Host paths are returned only by the admin-only mount endpoints, never in ordinary server views. Docker must be able to resolve each saved source path on its own host.
@@ -154,11 +160,11 @@ Users can add, rename, and remove their own passkeys from Account. Passkey sign-
 
 ## Not implemented
 
-- Phase 3: cross-server ban automation.
+- DayZ-specific `ban.txt` moderation and its rejoin-without-kick behavior.
 - Phase 4: Kvasir and MCP.
 - Historical metrics, external identity providers, multi-host management, and offline PWA support.
 
-The remaining areas have no active controls in the UI.
+The remaining items have no active controls in the UI.
 
 ## Environment limits and remaining acceptance work
 

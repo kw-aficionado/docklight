@@ -50,6 +50,9 @@ gameskill:
     type: a2s
   rcon:
     enabled: false
+  bans:
+    ban_command: "ban {{player}} {{reason}}"
+    unban_command: "pardon {{player}}"
   restart:
     warnings:
       - at: 5m
@@ -89,6 +92,7 @@ gameskill:
 | `stack.services[].resource_weight` | Relative CPU and memory share when server limits are set. Main app weight is 3; sidecars default to 1 and may set 1–100. All containers share the one server limit. |
 | `query.type` | `minecraft`, `minecraft-java`, `minecraft-bedrock`, `a2s`, or `source`. |
 | `rcon` | Enables RCON commands using a declared `password_var`. The host mapping is loopback-only when its port is named `rcon`. |
+| `bans.ban_command`, `bans.unban_command` | Optional single console commands used by the central ban list. Both must include `{{player}}`; `{{player_id}}` and `{{reason}}` are also available. Docklight removes control characters before sending commands over RCON or server input. |
 
 Variable keys that conflict with panel-injected names (including `SERVER_NAME`, `HOME`, `PUID`, `PGID`, `UID`, `GID`, `PUBLIC_URL`, `PORT_*`, and `*_PORT`) are rejected. Secret variables are encrypted at rest and masked in API responses. Password/token/secret/private-key-like variable names are treated as secret even without `secret: true`.
 

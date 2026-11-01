@@ -69,6 +69,14 @@ type App struct {
 	releaseMu             sync.Mutex
 	releaseCache          releaseCacheEntry
 	updateRequestMu       sync.Mutex
+	banSyncMu             sync.Mutex
+	violationMu           sync.Mutex
+	violationRules        []violationRule
+	violationRulesAt      time.Time
+	violationHits         map[string][]time.Time
+	violationDroppedAt    time.Time
+	violationWatches      map[string]violationLogWatch
+	violationActions      chan violationAction
 	beaconSendMu          sync.Mutex
 	beaconMu              sync.Mutex
 	beaconCountCache      *beaconCountResponse
@@ -137,7 +145,7 @@ func New(c config.Config, configPath string, d *sql.DB) *App {
 	if resolved, err := resolvedPath(backupRoot); err == nil {
 		backupRoot = resolved
 	}
-	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}}
+	return &App{cfg: c, configPath: configPath, db: d, engine: docker.New(c.Docker.Socket, c.Docker.APIVersion), dataRoot: filepath.Join(root, "servers"), updateDir: root, backupRoot: backupRoot, booted: time.Now(), version: "dev", loginIPs: map[string][]time.Time{}, loginUsers: map[string][]time.Time{}, forgotAttempts: map[string][]time.Time{}, passkeyCeremonies: map[string]passkeyCeremony{}, passkeyIPs: map[string][]time.Time{}, jobs: map[string]*installJob{}, runtimePending: map[string]pendingRuntimeIncident{}, watchdogStates: map[string]*watchdogRuntimeState{}, reachabilityCache: map[string]reachabilityCacheEntry{}, violationHits: map[string][]time.Time{}, violationWatches: map[string]violationLogWatch{}, violationActions: make(chan violationAction, 128)}
 }
 
 func (a *App) SetBuildVersion(version string) {
@@ -365,6 +373,13 @@ func (a *App) Router() http.Handler {
 			priv.Put("/backups/target", a.admin(a.updateBackupTarget))
 			priv.Post("/backups/target/test", a.admin(a.testBackupTarget))
 			priv.Get("/system/disk", a.admin(a.getDiskStatus))
+			priv.Get("/bans", a.admin(a.listBans))
+			priv.Post("/bans", a.admin(a.createBan))
+			priv.Delete("/bans/{id}", a.admin(a.revokeBan))
+			priv.Get("/violations", a.admin(a.listViolationRules))
+			priv.Post("/violations", a.admin(a.createViolationRule))
+			priv.Put("/violations/{id}", a.admin(a.updateViolationRule))
+			priv.Delete("/violations/{id}", a.admin(a.deleteViolationRule))
 			priv.Get("/host/mounts", a.admin(a.listHostMountDirectories))
 			priv.Get("/host/browse", a.admin(a.browseHostMountDirectories))
 			priv.Post("/servers/{id}/install", a.installServer)
@@ -757,6 +772,9 @@ func (a *App) listRunes(w http.ResponseWriter, r *http.Request) {
 		rr, _ := rune.Parse(x.yaml)
 		rr = publicRune(rr)
 		item := map[string]any{"id": x.id, "name": x.name, "category": x.category, "version": x.version, "builtin": x.builtin != 0, "can_create_default": a.allowedRuneScope(u, "server.create", x.id), "description": rr.Description, "author": rr.Author, "icon": rr.Icon, "variables": rr.Variables, "ports": rr.Ports, "query": rr.Query, "config_files": rr.ConfigFiles}
+		if rr.Bans != nil {
+			item["bans"] = rr.Bans
+		}
 		if u.Role == "admin" {
 			item["source_host"], item["source_repo"] = x.sourceHost, x.sourceRepo
 		}

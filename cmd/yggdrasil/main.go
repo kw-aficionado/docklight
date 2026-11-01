@@ -152,6 +152,7 @@ func serve(args []string) error {
 	app.StartWatchdogMonitor(workerCtx)
 	app.StartBeaconWorker(workerCtx)
 	app.StartPanelUpdateWorker(workerCtx)
+	app.StartViolationMonitor(workerCtx)
 	addr := fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	errs := make(chan error, 1)

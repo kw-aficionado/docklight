@@ -12,24 +12,25 @@ import (
 )
 
 type Rune struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Category    string     `json:"category"`
-	Description string     `json:"description,omitempty"`
-	Author      string     `json:"author,omitempty"`
-	Icon        string     `json:"icon,omitempty"`
-	Version     int        `json:"version"`
-	Docker      Docker     `json:"docker"`
-	Variables   []Variable `json:"variables,omitempty"`
-	Install     *Install   `json:"install,omitempty"`
-	Startup     Startup    `json:"startup"`
-	Ports       []Port     `json:"ports,omitempty"`
-	Query       *Query     `json:"query,omitempty"`
-	RCON        *RCON      `json:"rcon,omitempty"`
-	Restart     *Restart   `json:"restart,omitempty"`
-	Stack       *Stack     `json:"stack,omitempty"`
-	Steam       *Steam     `json:"steam,omitempty"`
-	ConfigFiles []string   `json:"config_files,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Category    string       `json:"category"`
+	Description string       `json:"description,omitempty"`
+	Author      string       `json:"author,omitempty"`
+	Icon        string       `json:"icon,omitempty"`
+	Version     int          `json:"version"`
+	Docker      Docker       `json:"docker"`
+	Variables   []Variable   `json:"variables,omitempty"`
+	Install     *Install     `json:"install,omitempty"`
+	Startup     Startup      `json:"startup"`
+	Ports       []Port       `json:"ports,omitempty"`
+	Query       *Query       `json:"query,omitempty"`
+	RCON        *RCON        `json:"rcon,omitempty"`
+	Bans        *BanCommands `json:"bans,omitempty"`
+	Restart     *Restart     `json:"restart,omitempty"`
+	Stack       *Stack       `json:"stack,omitempty"`
+	Steam       *Steam       `json:"steam,omitempty"`
+	ConfigFiles []string     `json:"config_files,omitempty"`
 }
 type Docker struct {
 	Image          string            `json:"image"`
@@ -80,6 +81,10 @@ type RCON struct {
 	Type        string `json:"type,omitempty"`
 	PasswordVar string `json:"password_var,omitempty"`
 }
+type BanCommands struct {
+	BanCommand   string `json:"ban_command"`
+	UnbanCommand string `json:"unban_command"`
+}
 type Restart struct {
 	Warnings []RestartWarning `json:"warnings,omitempty"`
 }
@@ -109,6 +114,7 @@ type Steam struct {
 var runeID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 var stackServiceName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 var restartPlaceholder = regexp.MustCompile(`{{([^{}]*)}}`)
+var banPlaceholder = regexp.MustCompile(`{{([^{}]*)}}`)
 var unresolvedBooleanPlaceholder = regexp.MustCompile(`^{{[A-Za-z0-9_]+}}$`)
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -382,8 +388,37 @@ func (g Rune) Validate() error {
 	if g.RCON != nil && g.RCON.PasswordVar != "" && !declared[g.RCON.PasswordVar] {
 		return fmt.Errorf("rcon.password_var %q is not a declared variable", g.RCON.PasswordVar)
 	}
+	if g.Bans != nil {
+		if err := validateBanCommand("bans.ban_command", g.Bans.BanCommand); err != nil {
+			return err
+		}
+		if err := validateBanCommand("bans.unban_command", g.Bans.UnbanCommand); err != nil {
+			return err
+		}
+	}
 	if g.Steam != nil {
 		return errors.New("gameskill.steam installation metadata is not supported in this release")
+	}
+	return nil
+}
+
+func validateBanCommand(field, command string) error {
+	if strings.TrimSpace(command) == "" || len(command) > 1024 || strings.ContainsAny(command, "\r\n\x00") {
+		return fmt.Errorf("%s must be a single command from 1 to 1024 characters", field)
+	}
+	if !strings.Contains(command, "{{player}}") {
+		return fmt.Errorf("%s must include {{player}}", field)
+	}
+	for _, match := range banPlaceholder.FindAllStringSubmatch(command, -1) {
+		switch match[1] {
+		case "player", "player_id", "reason":
+		default:
+			return fmt.Errorf("%s contains unsupported placeholder %q", field, match[0])
+		}
+	}
+	withoutPlaceholders := banPlaceholder.ReplaceAllString(command, "")
+	if strings.Contains(withoutPlaceholders, "{{") || strings.Contains(withoutPlaceholders, "}}") {
+		return fmt.Errorf("%s contains an incomplete placeholder", field)
 	}
 	return nil
 }

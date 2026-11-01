@@ -1291,6 +1291,73 @@ func migrate(d *sql.DB) error {
 			return err
 		}
 	}
+	if version < 38 {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS bans (
+			id TEXT PRIMARY KEY,
+			player_name TEXT NOT NULL,
+			player_id TEXT NOT NULL DEFAULT '',
+			server_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL,
+			banned_by TEXT NOT NULL,
+			expires_at TEXT NOT NULL DEFAULT '',
+			active INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			revoked_at TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_bans_active_player ON bans(active,server_id,player_name COLLATE NOCASE)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_bans_expiry ON bans(expires_at) WHERE active=1 AND expires_at<>''`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS violation_rules (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			pattern TEXT NOT NULL,
+			threshold INTEGER NOT NULL CHECK(threshold BETWEEN 1 AND 100),
+			window_minutes INTEGER NOT NULL CHECK(window_minutes BETWEEN 1 AND 1440),
+			action TEXT NOT NULL CHECK(action IN ('ban','kick')),
+			scope_global INTEGER NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS ban_server_state (
+			ban_id TEXT NOT NULL REFERENCES bans(id) ON DELETE CASCADE,
+			server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+			desired_active INTEGER NOT NULL DEFAULT 1,
+			state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','applied','removed','error')),
+			last_error TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY(ban_id,server_id)
+		)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_ban_server_state_due ON ban_server_state(server_id,state,updated_at)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err = tx.Exec(`INSERT INTO schema_migrations(version) VALUES(38)`); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
